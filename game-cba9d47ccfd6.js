@@ -3572,7 +3572,7 @@ const VEG_BAKED = {"at":"2026-11-04T17:54:22.841Z","vt":{"veg_palm":{"leafWeight
    Story world's bd_sw_ ones too. Asked before leaving: 50-zzzz-scene-ask.js. ---- */
 const SCENE = { get key() { return VEH_MODE ? 'bd_vehed_j' : VEG_MODE ? 'bd_veg_j' : 'bd_scene_j'; }, raw: null };   // (the Vehicle Editor's too - Nov 17)   // (each editor its own journal - the Biome Editor goes in and out in place now)
 // the Biome Editor's own saved keys - what its SAVE CHANGES keeps and DISCARD puts back (not its bookkeeping: bd_biome_snapsig, bd_vgbot_h)
-const VEH_JKEYS = ['bd_vmarks', 'bd_vtune'];   // (the Vehicle Editor's: the vehicles' marks and numbers - 50-zzzzz-vehicle-editor-marks.js, 01-z-vehicle-tune.js)
+const VEH_JKEYS = ['bd_vmarks', 'bd_vtune', 'bd_vehnew'];   // (the Vehicle Editor's: the vehicles' marks and numbers - 50-zzzzz-vehicle-editor-marks.js, 01-z-vehicle-tune.js)
 const VEG_JKEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_grounds', 'bd_biome_ground', 'bd_biome_ground_sea', 'bd_plants', 'bd_seashapes'];
 function sceneJ() { try { return JSON.parse(SCENE.raw.g(SCENE.key) || 'null') || null; } catch (e) { return null; } }
 // what the editor writes that isn't the world's: this browser's bookkeeping (LOCAL_KEYS, either world's name) and the journal itself
@@ -3703,7 +3703,7 @@ function tabSaveBack() {                                          // (this tab's
    guest's world, the host's as its screen keeps it (netWorldOut, sent with the round's start), held in memory for the round
    (netWorldIn): every world key and every key the play depends on (NET_GAME_KEYS) read from it and written to it - never this
    browser's own save, which is just as it was when the guest leaves (netWorldOut of the round: worldReload). */
-const NET_GAME_KEYS = ['bd_prefabs', 'bd_vtune', 'bd_vmarks'];   // (bd_vmarks: the vehicles' marks - 50-zzzzz-vehicle-editor-marks.js)
+const NET_GAME_KEYS = ['bd_prefabs', 'bd_vtune', 'bd_vmarks', 'bd_vehnew'];   // (bd_vmarks: the vehicles' marks - 50-zzzzz-vehicle-editor-marks.js)
 const netKey = k => typeof k === 'string' && (WORLD_KEYS.includes(k) || NET_GAME_KEYS.includes(k));
 const NET_WORLD = { on: false, map: new Map(), pass: null };
 // (Nov 4, the VEGETATION EDITOR - 00-a-veg-mode.js) its world held in memory as an online guest's is: the open world's conversions marked done, one flat
@@ -3739,7 +3739,7 @@ function vegWorld() {
 // (user Nov 8 09:15: the Biome Editor in and out in place) its test world in: held in memory as an online host's is (NET_WORLD - the plants' numbers,
 // bd_vtune, passed through to this browser's own) and this browser's saved world under THE WORLD GUARD (below) till vegOut. On a load in it: before
 // the world shim, so nothing is ever read from this browser's world first (the guard's lock taken just after the shim - guardOn needs it)
-function vegIn(lock = true) { NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks']); if (lock) guardOn('the Biome Editor\'s test world'); NET_WORLD.map = vegWorld(); NET_WORLD.on = true; }
+function vegIn(lock = true) { NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks', 'bd_vehnew']); if (lock) guardOn('the Biome Editor\'s test world'); NET_WORLD.map = vegWorld(); NET_WORLD.on = true; }
 function vegOut() { NET_WORLD.on = false; NET_WORLD.map = new Map(); NET_WORLD.pass = null; return guardOff(); }
 if (VEG_MODE) { vegIn(false); SWB.holds.add('biome'); }                // (the game stays on this page while in it: the simulation worker held - swHold, 00-sw-boot.js)
 /* ---- THE WORLD GUARD (user Nov 8 09:12, of the Biome Editor and this browser's saved world: "This is SUPER important"). While another world
@@ -8738,8 +8738,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1084;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 00:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1085;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 00:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -63181,7 +63181,7 @@ function drawStoryCars(x0, x1, pass) {
 // the cars' pictures into the atlas as soon as they exist (artFamily - 04-zz-art-atlas.js): every car's body, the wheel set
 artFamily(() => {
   if (!img.tropical || !img.tropical.width || !img.wheels || !img.wheels.width) return false;
-  for (const art in CAR_WHEELS) { const P = tropPic(art); if (!P) return false; artPut(P); }
+  for (const art in CAR_WHEELS) { const P = tropPic(art); if (!P) { if (STR_VEHS[art] && STR_VEHS[art].made) continue; return false; } artPut(P); }   // (a car made in the Vehicle Editor whose picture isn't in yet: it goes in when it's drawn)
   for (let k = 0; k < WHEEL_SET.length; k++) artPut(wheelPicK(k));
   return true;
 });
@@ -69139,6 +69139,7 @@ const UNDO_KEPT = {
   bd_story_zoom: () => { STORY_ZW = lsJ('bd_story_zoom', {}); pfSync(); },
   bd_vtune: () => { vtuneApply(lsJ('bd_vtune', {})); vtunePush(); },
   bd_vmarks: () => { vmApply(lsJ('bd_vmarks', null)); vmPush(); },
+  bd_vehnew: () => { vnewLoad(); vmApply(lsJ('bd_vmarks', null)); vnewPush(); vmPush(); },
   bd_launch_zoom: () => { const o = lsJ('bd_launch_zoom', {}); for (const k in LAUNCH_ZOOM) LAUNCH_ZOOM[k] = Number.isInteger(o[k]) ? o[k] : LAUNCH_ZOOM_DEF[k]; },
   bd_sky_p: () => {
     const o = lsJ('bd_sky_p', {}), P = NSKY.P, D = NSKY.P_DEF, scene = ['time', 'cover', 'sky', 'fog', 'rain', 'wind', 'sea'];   // (the scene's: the weather's, not settings - sky/00-base.js SCENE_KEYS)
@@ -72200,7 +72201,7 @@ function tvtWorld(seed, W) {
 // screen shows at its zoom (TVT_FIELD at least). The page keeps the game while it's in (the worker held)
 function tvtWorldIn() {
   const z = tvtZoom(); TV.w = Math.round(VIEW_W / z);
-  if (!TV.in) { if (!SWB.holds.has('tvt')) swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
+  if (!TV.in) { if (!SWB.holds.has('tvt')) swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks', 'bd_vehnew']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
   NET_WORLD.map = tvtWorld(TV.seed, TV.w).map; NET_WORLD.on = true;
   worldReload();
 }
@@ -72911,12 +72912,66 @@ VM_FAMS.yacht = {
   },
 };
 
+/* ---- NEW VEHICLES FROM A PICTURE (user Nov 17 22:51: "I could start using it to import the vehicles, choose the wheel size ... where the center of
+   weight is, so I could even build new vehicles"). A vehicle made in the VEHICLE EDITOR is a record - its family, its name, its picture (a PNG, its
+   side view facing left), its length in metres - kept with the game's own keys (bd_vehnew: every world's, online, the SNAPSHOT, the simulation
+   worker - its table and its action 'vehnew'). In, it is a row of its family like any other: its picture the family's (tropPic), its type listed
+   everywhere (STR_VEHS - spawned from OBJECTS, stood at a spot, PLAYed), its marks a row of the marks' table (built in: by its picture's size), its
+   numbers the vehicles' table's. Cars for now (the one drive - driveStep): the other families' rows need more than a side view. ---- */
+const VNEW = { list: [] };
+const vnewOk = r => r && typeof r.id === 'string' && /^vn\d+$/.test(r.id) && r.fam === 'car' && typeof r.png === 'string' && r.png.startsWith('data:image/png') && r.w > 0 && r.h > 0 && r.len > 0;
+// a new car's row before any mark is moved: a wheel a fifth of its length in from each end, standing on the picture's foot
+function vnewCarRow(r) {
+  const R = Math.max(2, Math.round(r.h * 0.2)), y = r.h - R;
+  return { wheels: [[Math.round(r.w * 0.2), y, R], [Math.round(r.w * 0.8), y, R]], spec: [1500, 0, 0.4], lamps: CAR_LAMP_DEF.map(q => q.slice()), exh: CAR_EXH_DEF.slice(), dp: {} };
+}
+const vnewTune = r => [[r.id + 'Drive', 0], [r.id + 'Kw', 150]];
+function vnewIn(r) {
+  const d = vnewCarRow(r);
+  VM_FAMS.car.put(r.id, vmClone(d)); VM.def['car:' + r.id] = d;
+  STR_VEHS[r.id] = { lab: String(r.lab || 'NEW CAR').toUpperCase().slice(0, 24), fam: 'car', art: r.id, price: 40, made: true };
+  for (const [k, v] of vnewTune(r)) if (!(k in VTUNE_DEF.car)) { VTUNE_DEF.car[k] = v; VTUNE.car[k] = v; }
+  if (tropArt[r.id] && tropArt[r.id]._png === r.png) { tropArt[r.id]._m = r.len / r.w; return; }
+  delete tropArt[r.id];
+  // (its picture, a canvas as every picture is - the page's and the worker's; till it's in, the family's own stand-in size)
+  loadImage(r.png).then(im => {
+    const now = VNEW.list.find(q => q.id === r.id); if (!now || now.png !== r.png) return;
+    const c = makeCanvas(r.w, r.h); c.getContext('2d').drawImage(im, 0, 0, r.w, r.h);
+    c._m = now.len / r.w; c._name = r.id; c._png = r.png; c._chim = null; c._under = null; c._door = null; c._flag = null; c._gate = null; c._cuts = null;
+    tropArt[r.id] = c;
+  }).catch(() => { });
+}
+function vnewOut(r) {
+  for (const T of [CAR_WHEELS, CAR_SPEC, CAR_LAMPS, CAR_EXH, CAR_DP, STR_VEHS, tropArt]) delete T[r.id];
+  delete VM.def['car:' + r.id];
+  for (const [k] of vnewTune(r)) { delete VTUNE_DEF.car[k]; delete VTUNE.car[k]; }
+}
+// the records as kept: those gone taken out, the rest in (again: each one's built-in row, the marks' loader lays what's kept over it next)
+function vnewLoad() {
+  let L = []; try { L = JSON.parse(localStorage.getItem('bd_vehnew') || '[]') || []; } catch (e) { }
+  L = (Array.isArray(L) ? L : []).filter(vnewOk);
+  vmDefaults();
+  for (const r of VNEW.list) if (!L.some(q => q.id === r.id)) vnewOut(r);
+  VNEW.list = L; for (const r of L) vnewIn(r);
+  // (their numbers of the vehicles' table: read here - the table's own loader ran before they were in it)
+  try { const o = JSON.parse(localStorage.getItem('bd_vtune') || 'null'); if (o && o.car) for (const r of L) for (const [k] of vnewTune(r)) if (typeof o.car[k] === 'number' && isFinite(o.car[k])) VTUNE.car[k] = o.car[k]; } catch (e) { }
+}
+function vnewPush() { if (typeof SW !== 'undefined' && SW.live && typeof act === 'function') act(0, 'vehnew', VNEW.list); }
+function vnewSave(L) { try { if (L.length) localStorage.setItem('bd_vehnew', JSON.stringify(L)); else localStorage.removeItem('bd_vehnew'); } catch (e) { } vnewLoad(); vmApply(vmStored()); vnewPush(); vmPush(); }
+const vmStored = () => { try { return JSON.parse(localStorage.getItem('bd_vmarks') || 'null'); } catch (e) { return null; } };
+const vnewSet = L => { try { if (L && L.length) localStorage.setItem('bd_vehnew', JSON.stringify(L)); else localStorage.removeItem('bd_vehnew'); } catch (e) { } vnewLoad(); };
+
 // ---- every family in: the built-in rows taken, what's kept laid over them (read again with the world - worldLoad), the table and the action
-worldLoad(() => { let o = null; try { o = JSON.parse(localStorage.getItem('bd_vmarks') || 'null'); } catch (e) { } vmApply(o); });
+worldLoad(vnewLoad);                                         // (the vehicles made here first: their rows are there for what's kept of their marks)
+worldLoad(() => vmApply(vmStored()));
+// (the vehicles made here: the worker's and a save's - declared before the marks' table: a hand-over and a save put the vehicles in first, then their marks)
+const VN_ROW = worldRow({ list: [() => wjson(VNEW.list), v => { const cur = vmDiff(); vnewSet(wunjson(v) || []); vmApply(cur); }] });
+defTable('vehnew', () => [VN_ROW], { make: () => VN_ROW });
 // (the game handed to the simulation worker, a save and online carry them - as the vehicles' numbers: 36-zz-world.js VT_ROW)
 const VM_ROW = worldRow({ ch: [() => wjson(vmDiff()), v => vmApply(wunjson(v))] });
 defTable('vmarks', () => [VM_ROW], { make: () => VM_ROW });
 ACTS.vmarks = (p, ch) => vmApply(ch);
+ACTS.vehnew = (p, L) => { const cur = vmDiff(); vnewSet(Array.isArray(L) ? L : []); vmApply(cur); };
 
 //@src 51-audio-kraken.js:1
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
@@ -76569,6 +76624,8 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 <button data-a="save" title="Save the vehicles as edited">SAVE CHANGES</button>
 <span class="gap"></span>
 <label title="Turn the vehicle toward you to check its marks">TURN <input type="range" data-a="turn" min="0" max="1" step="0.01" value="0" style="vertical-align:middle;width:10em"></label>
+<button data-a="new" title="Make a new vehicle from a picture of its side">NEW vehicle</button>
+<button data-a="del" title="Remove this vehicle (only one made here)">DELETE vehicle</button>
 <button data-a="reset" title="Put this vehicle back as the game was built with it">RESET vehicle</button>
 <button data-a="close" title="Close the vehicle editor">CLOSE</button></div>
 <div class="main"><div class="view"><canvas></canvas></div><div class="side"></div></div>
@@ -76576,10 +76633,10 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     document.body.appendChild(root);
     VED.cv = root.querySelector('canvas'); VED.side = root.querySelector('.side'); VED.foot = root.querySelector('.foot');
     VED.sel_ = root.querySelector('[data-a=veh]'); VED.turnEl = root.querySelector('[data-a=turn]');
-    for (const f in VM_FAMS) { const g = $('optgroup'); g.label = VM_FAMS[f].lab; for (const k of VM_FAMS[f].keys()) { const o = $('option'); o.value = f + ':' + k; o.textContent = VM_FAMS[f].name(k); g.appendChild(o); } VED.sel_.appendChild(g); }
+    list();
     VED.sel_.addEventListener('change', () => load(VED.sel_.value));
     VED.turnEl.addEventListener('input', () => { VED.turn = +VED.turnEl.value; draw(); });
-    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); });
+    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); else if (a === 'new') newAsk(); else if (a === 'del') delAsk(); });
     // the help line: what's under the pointer, as the other editors' (a tooltip's text, one short line)
     const help = e => { const t = e.target && e.target.closest ? e.target.closest('[title],[data-help]') : null; if (t && root.contains(t)) say(t.dataset.name || (t.tagName === 'BUTTON' ? t.textContent : ''), t.dataset.help || t.title); };
     root.addEventListener('pointerover', help); root.addEventListener('pointerdown', help);
@@ -76599,12 +76656,71 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     window.addEventListener('keydown', key, true);
     setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag) draw(); sync(); } }, 400);
   }
+  // the vehicles' list, by family (made again when one is made or removed)
+  function list() {
+    VED.sel_.textContent = '';
+    for (const f in VM_FAMS) { const g = $('optgroup'); g.label = VM_FAMS[f].lab; for (const k of VM_FAMS[f].keys()) { const o = $('option'); o.value = f + ':' + k; o.textContent = VM_FAMS[f].name(k); g.appendChild(o); } VED.sel_.appendChild(g); }
+    if (VED.key) VED.sel_.value = VED.key;
+  }
+  const made = () => VED.key && VNEW.list.find(r => 'car:' + r.id === VED.key);
+  // ---- NEW vehicle: its family, its name, its length, its picture (a PNG of its side, facing left). In: a row of its family, its marks where a
+  // car's usually are - to be dragged into place
+  function newAsk() {
+    const d = VED.askEl = $('div'); d.className = 'ask';
+    d.innerHTML = `<div style="text-align:left;min-width:22em"><div style="margin-bottom:10px;text-align:center">NEW VEHICLE</div>
+<div class="row" style="grid-template-columns:8em 1fr"><label>FAMILY</label><select data-n="fam" title="What kind of vehicle it is: how it moves"><option value="car">CAR (wheels, drives on land)</option></select></div>
+<div class="row" style="grid-template-columns:8em 1fr"><label>NAME</label><input data-n="lab" type="text" maxlength="24" value="NEW CAR" style="font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:4px 8px" title="Its name in the lists"></div>
+<div class="row" style="grid-template-columns:8em 1fr"><label>LENGTH (M)</label><input data-n="len" type="number" min="0.5" max="40" step="0.1" value="4.5" title="Its real length, nose to tail, in metres"></div>
+<div class="row" style="grid-template-columns:8em 1fr"><label>PICTURE</label><input data-n="file" type="file" accept="image/png" title="A PNG of its side, facing left, on a clear background"></div>
+<div style="color:#7a8294;margin:8px 0 12px">A PNG OF ITS SIDE, FACING LEFT, CLEAR BACKGROUND</div>
+<div data-n="err" style="color:#ff7a6e;margin-bottom:8px"></div>
+<div style="display:flex;gap:6px;justify-content:center"><button data-q="make" class="on">CREATE</button><button data-q="cancel">CANCEL</button></div></div>`;
+    VED.root.appendChild(d);
+    const q = n => d.querySelector('[data-n=' + n + ']'), end = () => { d.remove(); VED.askEl = null; };
+    d.onclick = async e => {
+      const a = e.target && e.target.dataset ? e.target.dataset.q : null; if (!a) return;
+      if (a === 'cancel') { end(); return; }
+      const f = q('file').files[0], len = +q('len').value, lab = q('lab').value.trim();
+      if (!f) { q('err').textContent = 'PICK A PICTURE FIRST'; return; }
+      if (!(len >= 0.5 && len <= 40)) { q('err').textContent = 'LENGTH: 0.5 TO 40 METRES'; return; }
+      try { const r = await newFrom(f, lab || 'NEW CAR', len); end(); list(); VED.undo.length = 0; VED.redo.length = 0; load('car:' + r.id); say(r.lab, 'Made. Drag its wheels, lamps and exhaust into place, then SAVE CHANGES. Spawn it from the GAME EDITOR to drive it.'); }
+      catch (err) { q('err').textContent = String(err && err.message || err).toUpperCase().slice(0, 80); }
+    };
+  }
+  // a picture file in as a record: trimmed to what's painted, no wider than NEW_MAX pixels (whole pixels kept: never smoothed)
+  const NEW_MAX = 640;
+  async function newFrom(file, lab, len) {
+    if (file.size > 4e6) throw new Error('That picture is too big (4 MB at most)');
+    const url = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(new Error('Could not read the file')); fr.readAsDataURL(file); });
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Not a picture this browser can read')); i.src = url; });
+    const c0 = document.createElement('canvas'); c0.width = im.naturalWidth; c0.height = im.naturalHeight; const g0 = c0.getContext('2d', { willReadFrequently: true }); g0.drawImage(im, 0, 0);
+    const D = g0.getImageData(0, 0, c0.width, c0.height).data; let x0 = c0.width, x1 = -1, y0 = c0.height, y1 = -1;
+    for (let y = 0; y < c0.height; y++) for (let x = 0; x < c0.width; x++) if (D[(y * c0.width + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < x0) throw new Error('Nothing is painted in that picture');
+    if (x0 === 0 && y0 === 0 && x1 === c0.width - 1 && y1 === c0.height - 1 && D[3] > 24) throw new Error('The picture needs a clear background');
+    const tw = x1 - x0 + 1, th = y1 - y0 + 1, k = Math.min(1, NEW_MAX / tw), w = Math.max(8, Math.round(tw * k)), h = Math.max(4, Math.round(th * k));
+    const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(c0, x0, y0, tw, th, 0, 0, w, h);
+    let n = 1; while (VNEW.list.some(r => r.id === 'vn' + n) || STR_VEHS['vn' + n]) n++;
+    const r = { id: 'vn' + n, fam: 'car', lab: lab.toUpperCase().slice(0, 24), png: c.toDataURL('image/png'), w, h, len: Math.round(len * 100) / 100 };
+    vnewSave([...VNEW.list, r]);
+    if (!VNEW.list.some(q => q.id === r.id)) throw new Error('It could not be kept (the browser\'s storage is full?)');
+    return r;
+  }
+  function delAsk() {
+    const r = made(); if (!r) return;
+    const d = VED.askEl = $('div'); d.className = 'ask';
+    d.innerHTML = `<div><div style="margin-bottom:4px">DELETE ${r.lab}?</div><div style="color:#7a8294;margin-bottom:12px">ANY PLACED IN A WORLD GO WITH IT</div><div style="display:flex;gap:6px;justify-content:center"><button data-q="yes" class="on">DELETE</button><button data-q="cancel">CANCEL</button></div></div>`;
+    VED.root.appendChild(d);
+    d.onclick = e => { const a = e.target && e.target.dataset ? e.target.dataset.q : null; if (!a) return; d.remove(); VED.askEl = null; if (a !== 'yes') return;
+      vnewSave(VNEW.list.filter(q => q.id !== r.id)); vmSave(); VED.undo.length = 0; VED.redo.length = 0; VED.key = null; list(); load(vmKeys()[0]); };
+  }
   const say = (name, text) => { VED.foot.innerHTML = (name ? '<b>' + name + '</b>' : '') + (text || ''); };
   function sync() {
     const R = VED.root; if (!R) return;
     R.querySelector('[data-a=save]').classList.toggle('on', dirty());
     R.querySelector('[data-a=undo]').disabled = !VED.undo.length; R.querySelector('[data-a=redo]').disabled = !VED.redo.length;
     const n = VED.key ? fam().views(art()) : 1; VED.turnEl.disabled = n < 2; VED.turnEl.parentNode.title = n < 2 ? 'This vehicle has no views turned toward you yet' : 'Turn the vehicle toward you to check its marks';
+    R.querySelector('[data-a=del]').disabled = !made();
     R.querySelector('[data-a=reset]').disabled = !VED.key || JSON.stringify(vmGet(VED.key)) === JSON.stringify(VM.def[VED.key]);
   }
 
@@ -76807,7 +76923,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     { const g = document.getElementById('skyEdBtn'), f = g && getComputedStyle(g); if (f && parseFloat(f.fontSize) > 0) { VED.root.style.fontSize = f.fontSize; VED.root.style.fontFamily = f.fontFamily; } }
     vmDefaults(); VED.from = from || 'title'; VEH_MODE = true; VED.root.hidden = false; VED.undo.length = 0; VED.redo.length = 0;
     try { held.clear(); } catch (e) { }
-    load(VED.key || vmKeys()[0]); say('', 'Press a mark to pick it, drag to move it; the arrow keys nudge it. The wheel zooms, a drag on empty space moves the picture.');
+    list(); load(VED.key && vmFamOf(VED.key) && vmFamOf(VED.key).keys().includes(vmArt(VED.key)) ? VED.key : vmKeys()[0]); say('', 'Press a mark to pick it, drag to move it; the arrow keys nudge it. The wheel zooms, a drag on empty space moves the picture.');
   }
   function shut() { VED.root.hidden = true; VEH_MODE = false; }
   function close() {
@@ -76819,7 +76935,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
       const a = e.target && e.target.dataset ? e.target.dataset.q : null; if (!a) return;
       d.remove(); VED.askEl = null; if (a === 'cancel') return;
       if (a === 'save') sceneSave();
-      else { sceneRestore(); vmApply(lsJ('bd_vmarks', null)); vmPush(); vtuneApply(lsJ('bd_vtune', {})); vtunePush(); }   // (as last saved: the game's tables and the worker's)
+      else { sceneRestore(); vnewLoad(); vmApply(lsJ('bd_vmarks', null)); vnewPush(); vmPush(); vtuneApply(lsJ('bd_vtune', {})); vtunePush(); VED.key = null; list(); }   // (as last saved: the game's tables and the worker's; the vehicles made and not saved gone)
       shut();
     };
   }
@@ -76829,6 +76945,6 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   const place = () => { const g = document.getElementById('vegEdBtn'); if (!g) return; const r = g.getBoundingClientRect(); b.hidden = VEH_MODE || g.hidden || !r.width; if (!b.hidden) { b.style.left = (r.right + 8) + 'px'; b.style.font = getComputedStyle(g).font; } };
   const go = () => { if (!document.body) return setTimeout(go, 200); const st = $('style'); st.textContent = '#vehEdBtn[hidden] { display: none !important; }'; document.head.appendChild(st); document.body.appendChild(b); setInterval(place, 300); };
   go();
-  window.__vehEd = { open: f => open(f), close: () => close(), get on() { return VEH_MODE; }, state: () => ({ key: VED.key, marks: VED.M.map(m => Object.assign({}, m)), nums: Object.assign({}, VED.nums), dirty: dirty(), row: VED.row }), load: k => load(k), draw: () => draw(), get: k => vmGet(k), diff: () => vmDiff(), keys: () => vmKeys(), V: VED };   // (tools)
+  window.__vehEd = { open: f => open(f), close: () => close(), get on() { return VEH_MODE; }, state: () => ({ key: VED.key, marks: VED.M.map(m => Object.assign({}, m)), nums: Object.assign({}, VED.nums), dirty: dirty(), row: VED.row }), load: k => load(k), draw: () => draw(), get: k => vmGet(k), diff: () => vmDiff(), keys: () => vmKeys(), made: () => VNEW.list.map(r => [r.id, r.lab, r.w, r.h, r.len]), newFrom: (f, lab, len) => newFrom(f, lab, len).then(r => { list(); load('car:' + r.id); return r.id; }), V: VED };   // (tools)
 })();
 })(typeof document !== 'undefined' ? document.currentScript : null);
