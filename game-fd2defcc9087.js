@@ -8741,8 +8741,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1087;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 11:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1088;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 11:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32625,7 +32625,10 @@ function edBuild(host) {
   // dragged up or down - mouse or finger - sets it. A drag that starts on a button doesn't press it.
   { let d = null, eat = false;
     const H = () => Math.max(pageBox().h, 1), fit = h => Math.round(clamp(h, 90, H() - 24));
-    const down = e => { if (e.pointerType === 'mouse' && e.button !== 0) return; d = { id: e.pointerId, y: e.clientY, h: root.getBoundingClientRect().height, on: false }; };
+    // (user Nov 18 10:21: the bar "sometimes gets stuck with the mouse click ... I have to click a couple of times to kind of release the bar" - a press
+    // let go, or moved, off the panel before the drag had taken the pointer was never seen, so the panel went on following the mouse: the moves and the
+    // let-go are watched on the whole page now, and the grip takes the pointer at once - a press on the top bar's tabs still clicks them)
+    const down = e => { if (e.pointerType === 'mouse' && e.button !== 0) return; d = { id: e.pointerId, y: e.clientY, h: root.getBoundingClientRect().height, on: false }; if (e.currentTarget === grip) try { grip.setPointerCapture(e.pointerId); } catch (x) { } };
     const move = e => {
       if (!d || e.pointerId !== d.id) return;
       if (!d.on && Math.abs(e.clientY - d.y) < 6) return;
@@ -32634,7 +32637,7 @@ function edBuild(host) {
     };
     const up = e => { if (!d || e.pointerId !== d.id) return; if (d.on) { eat = true; setTimeout(() => { eat = false; }, 0); } d = null; };
     for (const el of [grip, tabs]) el.addEventListener('pointerdown', down);
-    root.addEventListener('pointermove', move); root.addEventListener('pointerup', up); root.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', up, true); window.addEventListener('pointercancel', up, true);
     tabs.addEventListener('click', e => { if (eat) { e.stopPropagation(); e.preventDefault(); eat = false; } }, true);
     window.addEventListener('resize', () => { if (TUNE.h) { TUNE.h = fit(TUNE.h); root.style.height = TUNE.h + 'px'; } });
     // (the game stops every touchmove on the page; the panel's own scroll needs them - touch drag scrolls on the iPad)
