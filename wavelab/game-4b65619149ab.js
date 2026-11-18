@@ -9106,7 +9106,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 10:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 11:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72162,7 +72162,7 @@ function subSteps(steps) {
   }
 }
 // the panel shown (over everything), the snapshot it would submit kept for COPY SNAPSHOT
-function subOpen(text) { SUB.text = text || ''; SUB.done = null; const m = subPanel(); if (!m.isConnected) document.body.appendChild(m); for (const k of ['[data-r]', '[data-tk]', '[data-ldb]', '[data-ok]']) m.querySelector(k).hidden = true; m.querySelector('[data-n]').textContent = ''; return m; }
+function subOpen(text, file) { SUB.text = text || ''; SUB.done = null; const m = subPanel(); if (!m.isConnected) document.body.appendChild(m); for (const k of ['[data-r]', '[data-tk]', '[data-ldb]', '[data-ok]']) m.querySelector(k).hidden = true; for (const k of ['[data-c]', '[data-lo]']) m.querySelector(k).hidden = !!file; m.querySelector('[data-n]').textContent = ''; return m; }
 // SUBMIT CHANGES: text - the snapshot (gameSnapshot); done() - called once GitHub has it
 async function worldSubmit(text, done, again) {
   if (!again) { subOpen(text); subSteps(null); }
@@ -72180,6 +72180,21 @@ async function worldSubmit(text, done, again) {
     SUB.done = null; subLs('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
     if (done) done();
     subFollow();
+  } catch (e) { subTell(e, 'Couldn\'t send: '); }
+}
+// (user Nov 18 10:03, the Wave Lab: "We need a distinction between pushing a save and just saving as you work (as we do on the biome and game
+// editor)") ONE FILE SUBMITTED - a lab's own work kept on its own branch of the game's code (the Wave Lab: lab/wavelab/waves.json on wave-lab),
+// never main and never a release; the same panel and token as SUBMIT CHANGES. done(): once GitHub has it
+async function repoFileSubmit(path, branch, text, msg, done, again) {
+  if (!again) { subOpen('', true); subSteps(null); }
+  SUB.done = () => repoFileSubmit(path, branch, text, msg, done, true);
+  if (!subLs('wp_token')) { subTokenAsk('This browser has no GitHub token yet: paste it below once.'); return; }
+  subSay('Sending...');
+  try {
+    let sha; try { sha = (await subGh('/contents/' + path + '?ref=' + branch)).sha; } catch (e) { if (e.status !== 404) throw e; }
+    if (sha && sha === await subBlobSha(text)) { SUB.done = null; subSay('Already submitted: nothing new.', 'ok'); if (done) done(); return; }
+    await subGh('/contents/' + path, { method: 'PUT', body: JSON.stringify({ branch, sha, message: msg, content: subB64(text) }) });
+    SUB.done = null; subSay('Submitted: kept on GitHub. You can close this window.', 'ok'); if (done) done();
   } catch (e) { subTell(e, 'Couldn\'t send: '); }
 }
 function subTell(e, pre) {
@@ -74001,6 +74016,7 @@ async function start(data) {
       // (the smoke there is let go - the lab's start, the world's own ships taken out of its test world: what they'd puffed goes with them)
     // (a vehicle's length and height in metres, as the game sizes it - vehBox; the frame preview's boat for scale, user Nov 18 09:36)
     size: v => { const e = vehAll().find(q => q.v === v); if (!e) return null; const B = vehBox(e); return [(B[1] - B[0]) / UPM, (B[3] - B[2]) / UPM]; },
+    submit: (text, done) => repoFileSubmit('lab/wavelab/waves.json', 'wave-lab', text, 'Wave Lab: the prefabs (SUBMIT CHANGES in the lab)', done),   // (the lab's prefabs kept on its branch - 50-zzzz-submit.js)
     noSmoke: () => { for (let i = 0; i < smoke.n; i++) smoke.drop(i); },
     waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); for (const w of DW.live) if (w.K && DW.kinds[n] && w.kn === n) w.K = DW.kinds[n]; }, send: (n, x, dir, k) => { const w = dwSend(n, x, dir, k); if (w) w.kn = n; return !!w; }, live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, ph: +w.ph.toFixed(2), stage: w.K.N[Math.min(w.K.N.length - 1, Math.floor(w.ph))], top: DW.max, fold: !!w.lip })), // (user Nov 18 07:19: "Are we able to see the spline of the wave in the editor? Can we have a toggle to see it live?") each live wave's outline
         // as the game has it this moment - its curve (C) and its points (P) in the world (x, y), its kind, the frame it's in, whether it's folded
