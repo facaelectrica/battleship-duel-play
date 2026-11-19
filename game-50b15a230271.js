@@ -13012,8 +13012,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1119;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 14:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1120;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 14:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72471,12 +72471,18 @@ function placedBuild() {
   // (one held off its rest - r.off: the structures' rule - is left out of play; the editor shows it where it was let go, red)
   spotsLooseBuild();                                      // (a spot's vehicle no family builder of its own makes there - 50-zzzz-spots.js)
   for (const r of PLACED) { if (r.off && !(typeof EDMODE !== 'undefined' && EDMODE.on)) continue; const rows = placedNew(r) || []; if (r.off && rows[0] && Number.isFinite(r.y)) { rows[0][1].y = r.y; rows[0][1]._off = true; } tablePutRows(rows); }
-  if (STORY) for (const v of placedRows()) placedPutAway(v);
+  if (STORY) for (const v of placedRows()) {
+    placedPutAway(v);
+    // (user Nov 19 13:54: "It should not appear when the game starts. You can only use it if you press play while in the editor, just to test
+    // it") one put away nowhere is in a story only when it's played from the editor (no slot - edPlay; a story from its slots has one)
+    if (v.story && v.berth == null && storySlot != null) { const t = tableOf(v); if (t) TABLES[t].take(v); }
+  }
 }
 /* (user Nov 19 13:30: "in story mode, all vehicles must always either be in a hangar or a 'parking' ... Just like a boat must be at a
    dock to start") a placed Story vehicle (a boat, a car, a helicopter, a sub) starts put away at the structure it stands by - tied
    up at its nearest free spot, where it stands (as a vehicle left there - storyLeave): its structure's as one that started there
-   (refuel, repairs, a hangar's showroom). One standing by none is red in the editor's Story world (placedNotParked - vehPlaceBad). */
+   (refuel, repairs, a hangar's showroom). One standing by none is red in the editor's Story world (placedNotParked - vehPlaceBad) and left
+   out of a story started from its slots - there only for a test from the editor's PLAY. */
 function placedPutAway(v) {
   if (!v.story || v.berth != null) return;
   const o = storyParksAt(v).sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0]; if (!o) return;
