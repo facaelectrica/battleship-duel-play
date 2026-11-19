@@ -7271,7 +7271,7 @@ const FLOOR_MIN_D = -10500, FLOOR_MAX_D = 72000, FLOOR_STEP = 8;
 // had there (the GAME EDITOR's TERRAIN tab marks them - 50-land-unified.js)
 const SKINS = ['F', 'D', 'S', 'T', 'M', 'I', 'W', 'V'];   // (I ICE, W SWAMP, V VOLCANIC - the Biome Editor's new biomes, user Nov 7; stand-in looks, 50-land-zz-biomes.js)
    // (M: MOUNTAIN - user Nov 7, his picture gen/biome_ref/ref-mountain.png: bare grey boulders packed tight, darker down)   // (T: TROPICAL - the Story spec section 8, 50-land-plants.js)
-const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2])) || (p.length >= 4 && p.length <= 9 && (p.length < 7 || p[6] === 0 || p[6] === 1 || p[6] === 2) && (p.length < 8 || p[7] === null || (isFinite(p[7]) && p[7] >= 0 && p[7] <= 1)) && (p.length < 9 || (isFinite(p[8]) && p[8] >= 0 && p[8] <= 1)) && (p[2] === null || SKINS.includes(p[2])) && isFinite(p[3]) && p[3] >= 0 && p[3] <= 2 && [4, 5].every(i => p.length <= i || (isFinite(p[i]) && p[i] >= -1 && p[i] <= 1)))) && isFinite(p[0]) && isFinite(p[1]);
+const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2])) || (p.length >= 4 && p.length <= 10 && (p.length < 10 || p[9] === 1) && (p.length < 7 || p[6] === 0 || p[6] === 1 || p[6] === 2) && (p.length < 8 || p[7] === null || (isFinite(p[7]) && p[7] >= 0 && p[7] <= 1)) && (p.length < 9 || (isFinite(p[8]) && p[8] >= 0 && p[8] <= 1)) && (p[2] === null || SKINS.includes(p[2])) && isFinite(p[3]) && p[3] >= 0 && p[3] <= 2 && [4, 5].every(i => p.length <= i || (isFinite(p[i]) && p[i] >= -1 && p[i] <= 1)))) && isFinite(p[0]) && isFinite(p[1]);
 // (user Oct 31, 09:38: "a couple more sliders to make it more spiky up or down (so it feels like a ramp) and another to make
 // it more of a round hole or more of a mound ... all these three sliders and future ones ... can all be mixed") a point's
 // fifth and sixth items: SPIKY and ROUND for the piece of line from it to the next (-1..1; none: 0). Its items in order
@@ -7285,9 +7285,14 @@ function ptSetCurve(p, v) { while (p.length < 7) p.push(p.length === 2 ? null : 
 // (user Nov 7, the TODO list's FADE CONCEPT: "We can decide for each segment of a terrain how 'strong' the landscape is. It fades from 100% to 0%. 0%
 // means it has no vegetation") a point's ninth item: how much of its vegetation the piece from it to the next keeps (0..1; none: all of it)
 const ptVeg = p => p.length > 8 && p[8] != null ? p[8] : 1;
-function ptSetVeg(p, v) { while (p.length < 8) p.push(p.length === 2 ? null : p.length === 3 ? 1 : p.length === 7 ? null : 0); p[8] = v; ptTrim(p); }
+function ptSetVeg(p, v) { while (p.length < 8) p.push(p.length === 2 ? null : p.length === 3 ? 1 : p.length === 7 ? null : 0); p[8] = v == null ? 1 : v; ptTrim(p); }
+// (user Nov 19 09:13, his drawing of two layers on a hill: "some edges we mark them as seam and the terrain blends perfectly between those two") a point's tenth
+// item: 1 - the piece from it to the next is a SEAM: a terrain layer's outline there is where it carries on into the ground behind it (no edge, no rim, its
+// dark across, its ground blended into that ground - layBehind); none: a real edge, its outline. ADD LAYER marks a new layer's sides and bottom (islAddLayer)
+const ptSeam = p => p.length > 9 && p[9] === 1;
+function ptSetSeam(p, on) { if (!on) { if (p.length > 9) { p.length = 9; ptTrim(p); } return; } while (p.length < 9) p.push(p.length === 2 ? null : p.length === 3 ? 1 : p.length === 7 ? null : p.length === 8 ? 1 : 0); p[9] = 1; }
 function ptFill(p) { if (p.length < 3) p[2] = null; if (p.length < 4) p[3] = 1; if (p.length < 5) p[4] = 0; if (p.length < 6) p[5] = 0; return p; }
-function ptTrim(p) { if (p.length === 9 && (p[8] == null || p[8] >= 0.999)) p.length = 8; if (p.length === 8 && p[7] == null) p.length = 7; if (p.length === 7 && !p[6]) p.length = 6; if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
+function ptTrim(p) { if (p.length === 10 && p[9] !== 1) p.length = 9; if (p.length === 10) return p; if (p.length === 9 && (p[8] == null || p[8] >= 0.999)) p.length = 8; if (p.length === 8 && p[7] == null) p.length = 7; if (p.length === 7 && !p[6]) p.length = 6; if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
 // (user Oct 29: "For each segment we would control the smoothness") a point's fourth item: how much of the ground's own small
 // hills - the land's waves, the floor's zigzag - the piece of line from it to the next keeps (1, or none: as it always was;
 // 0: smooth). Where two pieces meet their amounts blend over a quarter of each, so the ground never steps.
@@ -12962,8 +12967,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1105;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 10:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1106;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 10:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49248,7 +49253,7 @@ let ISLANDS = [];
 // a segment from before (its points left to right) is the same loop, its foot the piece from its last point back to its first
 function islandsValid(L) { return Array.isArray(L) && L.every(I => I && Array.isArray(I.p) && I.p.length >= (I.t ? 2 : 3) && I.p.every(q => ptOk(q)) && (I.k === undefined || I.k === 'S' || I.k === 'I' || I.k === 'H')
   && (I.id === undefined || Number.isInteger(I.id)) && (I.lay === undefined || (Number.isInteger(I.lay) && I.lay >= 1)) && (I.on === undefined || (!!I.on && Number.isInteger(I.on.id) && Number.isInteger(I.on.k)))
-  && (I.also === undefined || (Array.isArray(I.also) && I.also.every(J => J && Number.isInteger(J.id) && Number.isInteger(J.k) && Number.isInteger(J.j))))); }
+  && (I.sm === undefined || I.sm === 1) && (I.also === undefined || (Array.isArray(I.also) && I.also.every(J => J && Number.isInteger(J.id) && Number.isInteger(J.k) && Number.isInteger(J.j))))); }
 const islandsUsed = () => ISLANDS;
 /* ---- TERRAIN LAYERS (user Nov 18 20:59-21:06, ref-terrain-layers-nov18.jpeg: a lighthouse on a hill, a road down it to a fork - straight on to the
    city, or a lower road in front of the hill down to a dock: "you select a shape and you would add a secondary layer to that terrain"; "the front
@@ -49368,9 +49373,9 @@ function islLineTop(x, y = -Infinity) {
 // side, left unmarked, showed the coast's earth near the floor instead of its tropical rock) an unmarked piece is the island's
 // own look: its nearest marked piece's (the one before on a tie); an island with nothing marked: AUTO, the nearer coast's look
 // (Nov 2, loops: the piece whose line is the shape's top over x; an unmarked one the nearest marked piece round the loop)
-function islVegAt(x) {   // (a segment's or island's piece at x: its VEGETATION - ptVeg; none there: null)
+function islVegAt(x) {   // (a segment's or island's piece at x: its VEGETATION - ptVeg; none there: null. The back ground's shapes only - a terrain layer's top has its own: vegFadeAt's lay)
   for (const I of islandsUsed()) {
-    if (shpK(I) === 'H' || I.gnd) continue;
+    if (shpK(I) === 'H' || I.gnd || shpLay(I) > 0) continue;
     const Q = shpPoly(I); if (x < Q.x0 || x >= Q.x1) continue;
     const q = shpSpansAt(Q, x); if (!q.s.length) continue;
     return ptVeg(I.p[q.e[0]]);
@@ -49723,7 +49728,8 @@ function islAddLayer() {
   const k = selLo(s); if (joinAt(I, k)) { note('That point already holds a join - pick another piece.'); return; }   // (a point holds one join at most)
   const [ax, ad, sk] = I.p[k], d = v => Math.round(clamp(v, ISL_MIN_D, ISL_MAX_D)), mark = sk ? [sk] : [];
   const p = [[ax, ad, ...mark], [ax - 300, d(ad + 150), ...mark], [ax - 600, d(ad + 300)], [ax - 600, d(ad + 600)], [ax, d(ad + 600)]];
-  const L = Object.assign({ id: shpNewId(), lay: shpLay(I) + 1, on: { id: I.id, k }, p }, I.k === 'S' ? { k: 'S' } : {}, I.ug != null ? { ug: I.ug } : {});
+  for (let j = 2; j < p.length; j++) ptSetSeam(p[j], true);   // (user Nov 19 09:14: its sides and bottom SEAMS - it carries on into the ground behind there; its top, the road, a real edge)
+  const L = Object.assign({ id: shpNewId(), lay: shpLay(I) + 1, on: { id: I.id, k }, p, sm: 1 }, I.k === 'S' ? { k: 'S' } : {}, I.ug != null ? { ug: I.ug } : {});
   ISLANDS.push(L); islChanged();
   TERRAIN_ED.sel = { I: ISLANDS.length - 1, k: 0, k1: p.length - 1 }; terrainSyncSkin(); note('Layer added in front - drag its points to shape the road.');
 }
@@ -53559,7 +53565,7 @@ function tropPalms() {
       const pick = W.p[i];
       const at = ok(x, P.w) ? {} : okIsl(x, P.w) ? { isl: true } : null;
       if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn }, D0 === VEG_DECKS ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
-      for (const L of SHP.layList) if (layHas(x, L) && okLay(x, P.w, L) && vegFadeKeep(x, d * 13 + n, false)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, lay: L }, D0 === VEG_DECKS ? {} : { ve: e }, P.make));
+      for (const L of SHP.layList) if (layHas(x, L) && okLay(x, P.w, L) && vegFadeKeep(x, d * 13 + n, false, L)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, lay: L }, D0 === VEG_DECKS ? {} : { ve: e }, P.make));
       if (okLow(x, P.w) && vegFadeKeep(x, d * 13 + n, false)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, low: true }, D0 === VEG_DECKS ? {} : { ve: e }, P.make); if (plantH(it) + deckRaise(it) < gapUnder(x) - 4) land.props.push(it); }   // (and on the ground under an overhang: one that fits under it)
     }
   })); }
@@ -59640,6 +59646,7 @@ function terrainSyncSkin() {
   { const L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [], ks = new Set(L.filter(n => ISLANDS[n]).map(n => shpK(ISLANDS[n])));   // (the picked shapes' kind; was: the ground's own line: a SOLID)
     for (const [b, k] of TERRAIN_ED.kindBtns || []) b.classList.toggle('on', ks.size === 1 && ks.has(k));
     { const H = L.filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H'), sv = new Set(H.map(n => !!ISLANDS[n].see)); for (const [b, see] of TERRAIN_ED.seeBtns || []) b.classList.toggle('on', sv.size === 1 && sv.has(see)); }
+    if (TERRAIN_ED.seamBtn) { const q = seamPick(), G = q && !q.I.sm ? laySeamGuess(q.I) : null; TERRAIN_ED.seamBtn.classList.toggle('on', !!q && q.ks.length > 0 && q.ks.every(k => laySeamOf(q.I, k, G))); }   // (SEAM: lit when every picked segment of the layer is one)
     if (TERRAIN_ED.ugBtn) TERRAIN_ED.ugBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H' && shpUGOn(ISLANDS[n]))); }   // (HIDE INTERIOR - 50-land-islands islToggleUG)
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
@@ -59766,6 +59773,17 @@ terrainDelSeg.init = b => { (TERRAIN_ED.delSegBtns || (TERRAIN_ED.delSegBtns = [
 const caveTypeBtn = (lab, see, desc) => { const f = () => islSetSee(see); f.init = b => (TERRAIN_ED.seeBtns || (TERRAIN_ED.seeBtns = [])).push([b, see]); return [lab, desc, f]; };
 // (user Nov 5 20:22) a terrain shape dark inside as the ground (on) or its rock seen all the way in (off): lit when the picked shapes are
 const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Makes the inside of the picked shape dark. Off: you see its rock', f]; };
+// (user Nov 19 09:13: "some edges we mark them as seam and the terrain blends perfectly between those two") SEAM: the picked segments of a layer carry on into the
+// ground behind it (no edge, its ground blended into that ground) - or, pressed again, are its real edge (ptSeam, layBehind - 50-land-zz-layers.js)
+const seamPick = () => { const s = TERRAIN_ED.sel, I = s && s.I != null ? ISLANDS[s.I] : null; if (!I || !shpLay(I)) return null; const ks = []; for (let k = selLo(s); k <= Math.min(selHi(s), I.p.length - 1); k++) ks.push(k); return { I, ks }; };
+function islToggleSeam() {
+  const q = seamPick(), note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+  if (!q) { note('Click a segment of a layer first.'); return; }
+  laySeamsKeep(q.I);                                             // (a layer from before the seams: its pieces as they were drawn written down first)
+  const on = !q.ks.every(k => ptSeam(q.I.p[k])); for (const k of q.ks) ptSetSeam(q.I.p[k], on);
+  islChanged(); terrainSyncSkin(); note(on ? 'Seam: blends into the ground behind.' : 'Edge: drawn as the layer\'s outline.');
+}
+const seamBtn = () => { const f = () => islToggleSeam(); f.init = b => { TERRAIN_ED.seamBtn = b; }; return ['SEAM', 'Picked layer segments blend into the ground behind', f]; };
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
 
 // (Nov 7, user: "TERRAIN EDITOR Changes ... 2 CLEAR SECTIONS: TERRAIN SHAPES - only these options, to create terrain ... SELECTED
@@ -59793,6 +59811,8 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
   ['SPLIT SHAPE', 'Cuts the shape into two shapes at the picked segment', islSplitShape],
   ['ADD LAYER', 'Adds a shape in front, joined at the picked segment', islAddLayer],   // (terrain layers - 50-land-islands)
   ['DETACH', 'Undoes the picked point\'s extra join', islDetach],
+  seamBtn(),
+  ['FLIP', 'Mirrors the picked shape, its layers and what stands on them', () => islFlip()],   // (50-zzz-objects-tab.js)
 ]);
 const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
 { const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
@@ -62270,10 +62290,11 @@ function cellsLaySlice(k, Q, c0, c1, rT, rB) {
     // an island out of the water is never under the line, so neither is its layer)
     let ru = 1 << 30; const r0 = isleSeaCol(c) ? Math.max(rT, isleSeaRow()) : rT;
     let top = -Infinity; for (const L of Ls) { const t = layTopRow(c, L); if (t > -Infinity && (top === -Infinity || t < top)) top = t; }   // (the layers' first row here; none: -Infinity)
+    const ES = Ls.map(L => layEdgeAt(c, L)), edgeOpen = y => ES.some(([E, S]) => shpIn(E, y) && !shpIn(S, y));   // (user Nov 19: the ground behind near a real edge of a layer, no seam as near, is open air to its light - layBehind's rule)
     for (let r = rT; r < rB; r++) {
       // (the ground behind them as the ground's own light has it - the grid's cells, never an island's body under the water: the water lights and tints that,
       // so a layer's dark ends where the ground's does - no band of the layer's dark under the water over its body, the lead Nov 18 23:40)
-      let on = r >= top && ltCell(c, r) !== M_AIR; if (!on) for (const L of Ls) if (layCell(c, r, L) !== M_AIR) { on = true; break; }
+      let on = r >= top && ltCell(c, r) !== M_AIR && !edgeOpen(LT_Y0 + (r + 0.5) * LT_CELL); if (!on) for (const L of Ls) if (layCell(c, r, L) !== M_AIR) { on = true; break; }
       if (!on) continue; if (r >= r0 && r < ru) ru = r; const i = ltIdx(c, r); W[B + (i >> 5)] |= 1 << (i & 31);
     }
     Q.ci[Q.ruO + c] = ru;
@@ -63692,14 +63713,14 @@ function ggLvJob(e, pre) {
   const slotOf = c => SS[(c - c0) >> 6];
   for (let x = 0; x < BW; x++) {
     const c = c0 + (x - H) * F + h, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = !fr && inC && land.ugBody ? land.ugBody[c] : null, inner = x >= H && x < H + 64;
-    const lt = fr && inC ? layTopRow(c, ggSetLay(wh)) : 0;   // (a layer's: where it meets the ground behind it - layBehind)
+    const lt = fr && inC ? layTopRow(c, ggSetLay(wh)) : 0, own = fr && inC ? laySpans(c, ggSetLay(wh)) : null, ES = fr && inC ? layEdgeAt(c, ggSetLay(wh)) : null;   // (a layer's: where it meets the ground behind it - layBehind: its own body under the water, its edges and seams)
     const bt = inC ? layBgRow(c, fr ? ggSetLay(wh) : 0) : -Infinity, bw = bt > -Infinity ? layBgW(c, fr ? ggSetLay(wh) : 0) : 0;   // (a layer in front of this set here: this set over its top is background - its dark BACKGROUND DARK of its own, bits 24-31: layBgW)
     ggColCells(c, rA, rA + n, colM, colL, 0, wh);
     const Sl = inner ? slotOf(c) : null, sTop = Sl && Sl.top ? Sl.top[wh][c & 63] : -1e9, sb = inner && inC && seam ? seam[c] : -1;
     for (let y = 0; y < BW; y++) {
       const r = rA + y * F + h, m = colM[y * F + h], l = colL[y * F + h]; mat[y * BW + x] = m; lay[y * BW + x] = l; let w = m;
       if (G && shpInGap(G, LT_Y0 + r * LT_CELL)) w |= 1 << 20;
-      if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; if (fr && inC && layBehind(c, r, lt)) w |= 1 << 17; }
+      if (m === M_AIR) { if ((U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) || (own && layOwnBody(own, LT_Y0 + (r + 0.5) * LT_CELL))) w |= 1 << 18; else if (fr && inC && layBehind(c, r, lt, own, ES)) w |= 1 << 17; if (inner && r < sTop) w |= 1 << 19; }   // (18: a body under the water - an island's, a layer's own: layOwnBody)
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (l & 15) << 11;
         const yc = LT_Y0 + (r + 0.5) * LT_CELL, ug = fr ? layUG(c, yc, ggSetLay(wh)) : ugCell(c, yc); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15; if (r < bt) w |= Math.round(bw * 255) << 24;   // (a layer's: its own shape's - layUG; behind a front layer: seen in)
@@ -63795,12 +63816,12 @@ function ggPageHaloWords(S, B, u, hpos) {
   const { which, fr, Lf, c0, r0, H, BW, mat, lay } = B, gapC = fr ? null : land.gapC, seam = land.seam;
   for (let x = 0; x < BW; x++) {
     const c = c0 - H + x, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = !fr && inC && land.ugBody ? land.ugBody[c] : null, q = x - H, inner = q >= 0 && q < 64;
-    const sTop = inner && S.top ? S.top[which][q] : -1e9, sb = inner && inC && seam ? seam[c] : -1, lt = fr && inC ? layTopRow(c, Lf) : 0;   // (lt: a layer's - layBehind)
+    const sTop = inner && S.top ? S.top[which][q] : -1e9, sb = inner && inC && seam ? seam[c] : -1, lt = fr && inC ? layTopRow(c, Lf) : 0, own = fr && inC ? laySpans(c, Lf) : null, ES = fr && inC ? layEdgeAt(c, Lf) : null;   // (lt, own, ES: a layer's - layBehind)
     const bt = inC ? layBgRow(c, fr ? Lf : 0) : -Infinity, bw = bt > -Infinity ? layBgW(c, fr ? Lf : 0) : 0;   // (user Nov 18 22:44 / 23:00: a layer in front of this set here - this set over its top is background there: its inside's dark BACKGROUND DARK of its own - bits 24-31, layBgW)
     for (let y = 0; y < BW; y++) {
       const r = r0 - H + y, m = mat[y * BW + x]; let w = m;
       if (G && shpInGap(G, LT_Y0 + r * LT_CELL)) w |= 1 << 20;   // (in an overhang's open air as its shapes have it - the cells there dug or filled: overhangShade)
-      if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; if (fr && inC && layBehind(c, r, lt)) w |= 1 << 17; }   // (17: the ground behind a layer - layBehind)
+      if (m === M_AIR) { if ((U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) || (own && layOwnBody(own, LT_Y0 + (r + 0.5) * LT_CELL))) w |= 1 << 18; else if (fr && inC && layBehind(c, r, lt, own, ES)) w |= 1 << 17; if (inner && r < sTop) w |= 1 << 19; }   // (17: the ground behind a layer it carries on into - layBehind; 18: a body under the water - an island's, a layer's own)
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (lay[y * BW + x] & 15) << 11;
         const yc = LT_Y0 + (r + 0.5) * LT_CELL, ug = fr ? layUG(c, yc, Lf) : ugCell(c, yc); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15; if (r < bt) w |= Math.round(bw * 255) << 24;   // (a layer's: its own shape's - layUG; behind a front layer: seen in)
@@ -64246,13 +64267,15 @@ function gndBuild(C) {
   const part = !!C && !!GND.top && GND.n === n0, a = part ? Math.max(0, C[0]) : 0, b = part ? Math.min(n0 - 1, C[1]) : n0 - 1;
   if (!part) { GND.n = n0; GND.top = new Float32Array(n0).fill(Infinity); GND.skin = new Uint8Array(n0); GND.hills = new Uint16Array(n0).fill(100); GND.veg = new Float32Array(n0).fill(1); }
   else { GND.top.fill(Infinity, a, b + 1); GND.skin.fill(0, a, b + 1); GND.hills.fill(100, a, b + 1); GND.veg.fill(1, a, b + 1); }
-  const n = GND.n, T = GND.top, K = GND.skin, H = GND.hills, VG = GND.veg;
+  const n = GND.n, T = GND.top, K = GND.skin, H = GND.hills, VG = GND.veg, TV = new Float32Array(b - a + 1).fill(Infinity);   // (TV: the back ground's own top - VG its pieces' VEGETATION; a terrain layer's are its own, layVegCols)
   for (const I of gndList()) {
     const P = shpPoly(I), c0 = Math.max(a, Math.ceil(P.x0 / LT_CELL)), c1 = Math.min(b, Math.floor(P.x1 / LT_CELL)), QS = shpColSpans(P, c0, c1);
     for (let c = c0; c <= c1; c++) {
       const q = QS[c - c0]; if (!q.s.length) continue;
-      const t = q.s[0]; if (t >= T[c]) continue;
-      T[c] = t; const pc = I.p[q.e[0]]; K[c] = Math.max(0, GND_SK.indexOf(pc && pc.length > 2 ? pc[2] : null)); H[c] = Math.round((pc && pc.length > 3 ? pc[3] : 1) * 100); VG[c] = pc ? ptVeg(pc) : 1;
+      const t = q.s[0], pc = I.p[q.e[0]];
+      if (!shpLay(I) && t < TV[c - a]) { TV[c - a] = t; VG[c] = pc ? ptVeg(pc) : 1; }
+      if (t >= T[c]) continue;
+      T[c] = t; K[c] = Math.max(0, GND_SK.indexOf(pc && pc.length > 2 ? pc[2] : null)); H[c] = Math.round((pc && pc.length > 3 ? pc[3] : 1) * 100);
     }
   }
   // (the marks as a line of points for what reads the line's pieces - the seas, the floor's skins: a point where the mark changes)
@@ -64288,16 +64311,37 @@ function lineShape(P, u, x, xOf) {
   return dy * ends;
 }
 
+// (user Nov 19, layer-veg chat: a layer's segment's VEGETATION changed nothing - its plants asked the ground's pieces, the hill's behind it) each terrain
+// layer's own pieces' VEGETATION by column: its shapes' top piece there (the one its plants stand on), NaN where it has no shape; made again when the
+// shapes change (ISL_VER) - a pass over the layer's own shapes' columns only
+const LAYVEG = { ver: -1, A: new Map() };
+function layVegCols(L) {
+  if (LAYVEG.ver !== ISL_VER) { LAYVEG.ver = ISL_VER; LAYVEG.A.clear(); }
+  let V = LAYVEG.A.get(L); if (V) return V;
+  const n0 = Math.ceil(WORLD_W / LT_CELL) + 1, T = new Float32Array(n0).fill(Infinity), U = islandsUsed();
+  V = new Float32Array(n0).fill(NaN); LAYVEG.A.set(L, V);
+  for (const n of SHP.lays.get(L) || []) {
+    const I = U[n]; if (!I || shpK(I) === 'H') continue;
+    const P = shpPoly(I), c0 = Math.max(0, Math.ceil(P.x0 / LT_CELL)), c1 = Math.min(n0 - 1, Math.floor(P.x1 / LT_CELL)), QS = shpColSpans(P, c0, c1);
+    for (let c = c0; c <= c1; c++) { const q = QS[c - c0]; if (!q.s.length || q.s[0] >= T[c]) continue; T[c] = q.s[0]; const pc = I.p[q.e[0]]; V[c] = pc ? ptVeg(pc) : 1; }
+  }
+  return V;
+}
 // (the FADE CONCEPT, user Nov 7) how much vegetation the ground keeps at x (0..1): its piece's VEGETATION, blended over ~60 units where two meet;
-// isl: a segment's or island's top - its own piece's
-function vegFadeAt(x, isl) {
+// isl: a segment's or island's top - its own piece's; lay: a terrain layer's own top - its own pieces', blended as the ground's are
+function vegFadeAt(x, isl, lay) {
+  if (lay) {
+    const V = layVegCols(lay), c = clamp(Math.round(x / LT_CELL), 0, V.length - 1); let s = 0, n = 0;
+    for (let d = -24; d <= 24; d += 3) { const k = c + d; if (k < 0 || k >= V.length || V[k] !== V[k]) continue; s += V[k]; n++; }
+    return n ? s / n : 1;
+  }
   if (isl) { const v = islVegAt(x); if (v != null) return v; }
   gndBuild(); if (!GND.veg) return 1;
   const c = clamp(Math.round(x / LT_CELL), 0, GND.n - 1); let s = 0, n = 0;
   for (let d = -24; d <= 24; d += 3) { const k = c + d; if (k < 0 || k >= GND.n || GND.top[k] === Infinity) continue; s += GND.veg[k]; n++; }
   return n ? s / n : 1;
 }
-const vegFadeKeep = (x, salt, isl) => { const f = vegFadeAt(x, isl); return f >= 0.999 || hash(x * 0.913 + salt * 7.7) < f; };   // (a plant there kept, as its piece fades)
+const vegFadeKeep = (x, salt, isl, lay) => { const f = vegFadeAt(x, isl, lay); return f >= 0.999 || hash(x * 0.913 + salt * 7.7) < f; };   // (a plant there kept, as its piece fades)
 
 //@src 50-land-zz-layers.js:1
 /* ================================================================
@@ -64335,9 +64379,75 @@ function laySpans(c, L) { let A = null; for (const n of SHP.lays.get(L) || []) {
 // shapes' spans, the column at a layer's vertical end got a sliver span at its foot and no cells - its ground behind counted as open air above that foot: the
 // lit strip down a layer's join)
 function layTopRow(c, L) { if (c < 0 || c >= land.cols) return -Infinity; const r = layOwnTopRow(c, L); return r >= 0 ? r : -Infinity; }
+/* (user Nov 19 09:13-09:14, his drawing of two layers on a hill: "some edges we mark them as seam and the terrain blends perfectly between those two"; ADD LAYER marks
+   a new layer's sides and bottom - "I think so") WHERE A LAYER CARRIES ON INTO THE GROUND BEHIND IT IS ITS SEAMS, never a guess: each piece of its outline is a
+   SEAM (ptSeam) or a real edge. The ground behind it within reach of a real edge of it (its blend's reach and two cells) is open air to it - its edge, its rim,
+   its light there - unless a seam of it is as near (a join's corner is the seam's); all the rest of the ground behind it is what it carries on into (bit 17).
+   Each layer's cells near its edges and near its seams, by column ([top, bottom) pairs, world y: E, S), made again when the shapes or LAYER BLEND change */
+const LAYSEAM = { ver: -1, R: 0, A: new Map() };
+const laySeamR = () => bgP('bglb', 3) * UPM + 2 * LT_CELL;
+// the y span at x within R of the piece of line a-b (its capsule - a convex shape: one span), or null
+function capsuleAt(x, ax, ay, bx, by, R) {
+  let lo = Infinity, hi = -Infinity;
+  for (const [px, py] of [[ax, ay], [bx, by]]) { const d = Math.abs(x - px); if (d <= R) { const h = Math.sqrt(R * R - d * d); lo = Math.min(lo, py - h); hi = Math.max(hi, py + h); } }
+  const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
+  if (L > 1e-6) {   // (the band either side of it: the quad a ± nR, b ± nR - where x crosses its sides)
+    const nx = -dy / L * R, ny = dx / L * R, Q = [[ax + nx, ay + ny], [bx + nx, by + ny], [bx - nx, by - ny], [ax - nx, ay - ny]];
+    for (let i = 0; i < 4; i++) { const [x1, y1] = Q[i], [x2, y2] = Q[(i + 1) & 3]; if ((x1 <= x) === (x2 <= x)) continue; const y = y1 + (y2 - y1) * (x - x1) / (x2 - x1); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+  }
+  return lo <= hi ? [lo, hi] : null;
+}
+/* (a layer from before the seams - no I.sm: its pieces not yet decided) each piece of its outline as the ground behind it had it: a SEAM where most of its line
+   has ground behind it (a shape of a layer behind, its body under the water too) just outside it - what the layer blended into until now; the first SEAM set on
+   it in the editor writes these down (laySeamsKeep) */
+const LSG = { ver: -1, m: new WeakMap() };
+function laySeamGuess(I) {
+  if (LSG.ver !== ISL_VER) { LSG.ver = ISL_VER; LSG.m = new WeakMap(); }
+  let G = LSG.m.get(I); if (G) return G;
+  const P = shpPoly(I), m = P.X.length, n = I.p.length, yes = new Float32Array(n), all = new Float32Array(n), d = 2 * LT_CELL, me = islandsUsed().indexOf(I), L = shpLay(I);
+  const mine = (x, y) => { const c = ltCol(x); return c >= 0 && c < land.cols && me >= 0 && shpIn(shpIv(me, c), y); };
+  const back = (x, y) => { const c = ltCol(x); if (c < 0 || c >= land.cols || ltRow(y) < layTopRow(c, L)) return false; return ltCell(c, ltRow(y)) !== M_AIR || ugInBody(c, y); };   // (the ground there not over the layer's top - the union's cells, an island's body under the water: layBehind's)
+  if (!P.tube) for (let i = 0; i < m; i++) {
+    const j = (i + 1) % m, ax = P.X[i], ay = P.Y[i], bx = P.X[j], by = P.Y[j], len = Math.hypot(bx - ax, by - ay); if (len < 1e-6 || P.E[i] >= n) continue;
+    const mx = (ax + bx) / 2, my = (ay + by) / 2, nx = -(by - ay) / len * d, ny = (bx - ax) / len * d;
+    const out = mine(mx + nx, my + ny) ? [mx - nx, my - ny] : [mx + nx, my + ny];   // (the side of it away from the layer's own body)
+    all[P.E[i]] += len; if (back(out[0], out[1])) yes[P.E[i]] += len;
+  }
+  G = Array.from(yes, (v, k) => all[k] > 0 && v > all[k] * 0.5); LSG.m.set(I, G); return G;
+}
+// a layer's piece k: a SEAM? (its own mark - once decided, I.sm; before that the guess)
+const laySeamOf = (I, k, G) => I.sm ? ptSeam(I.p[k] || []) : !!(G && G[k]);
+// (the editor, before a layer's first SEAM change) its pieces' guess written down as marks - from then on only the marks count
+function laySeamsKeep(I) { if (I.sm || !shpLay(I)) return; const G = laySeamGuess(I); I.p.forEach((p, k) => ptSetSeam(p, G[k])); I.sm = 1; }
+function layEdgeCols(L) {
+  const R = laySeamR();
+  if (LAYSEAM.ver !== ISL_VER || LAYSEAM.R !== R) { LAYSEAM.ver = ISL_VER; LAYSEAM.R = R; LAYSEAM.A.clear(); }
+  let o = LAYSEAM.A.get(L); if (o) return o;
+  const n0 = land.cols, E = new Array(n0).fill(null), S = new Array(n0).fill(null), U = islandsUsed();
+  for (const n of SHP.lays.get(L) || []) {
+    const I = U[n]; if (!I || shpK(I) === 'H') continue;
+    const P = shpPoly(I), m = P.X.length, G = I.sm ? null : laySeamGuess(I); if (P.tube) continue;
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m, ax = P.X[i], ay = P.Y[i], bx = P.X[j], by = P.Y[j], to = laySeamOf(I, P.E[i], G) ? S : E;
+      const c0 = Math.max(0, Math.floor((Math.min(ax, bx) - R) / LT_CELL)), c1 = Math.min(n0 - 1, Math.floor((Math.max(ax, bx) + R) / LT_CELL));
+      for (let c = c0; c <= c1; c++) { const v = capsuleAt((c + 0.5) * LT_CELL, ax, ay, bx, by, R); if (v) (to[c] || (to[c] = [])).push(v[0], v[1]); }
+    }
+  }
+  for (const A of [E, S]) for (let c = 0; c < n0; c++) if (A[c]) A[c] = Float32Array.from(ivMerge(A[c]));
+  o = { E, S }; LAYSEAM.A.set(L, o); return o;
+}
+// column c's spans for layer L: [its edges', its seams'] (each null where none)
+const layEdgeAt = (c, L) => { const o = layEdgeCols(L); return c >= 0 && c < o.E.length ? [o.E[c], o.S[c]] : [null, null]; };
+// layer L's own body under the water's line at y in column c (its own spans there - own: laySpans(c, L)): the island's cut ground is its own body, never ground
+// behind it (user Nov 19, A: a speckled band along the road's ground over the water - its cut body counted as ground behind, blended into)
+const layOwnBody = (own, y) => y > WATER_Y && shpIn(own, y);
 // (the ground behind: every shape's - the grid's and the islands' bodies under the water's line, ggMat's set 1 - and the open air inside an island's body
-// under the water (ugInBody): the lead's debug look, Nov 18 22:58 - a road's fade 0 along its join and its foot, the island beside and under it open air)
-const layBehind = (c, r, top) => r >= top && (ggMat(c, r, 1) !== M_AIR || ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL));
+// under the water (ugInBody) that isn't the layer's own (own: laySpans), where no real edge of the layer is nearer than a seam of it (ES: layEdgeAt))
+const layBehind = (c, r, top, own, ES) => {
+  if (r < top) return false; const y = LT_Y0 + (r + 0.5) * LT_CELL;
+  if (ggMat(c, r, 1) === M_AIR && !(ugInBody(c, y) && !layOwnBody(own, y))) return false;
+  return !shpIn(ES[0], y) || shpIn(ES[1], y);
+};
 // the rows of set L (0: the ground's) that are background in column c - their dark BACKGROUND DARK of their own (layBgW): those over its front layer's top
 // there, when that layer is in front of L (-Infinity: none). (User Nov 18 22:46: the hill over the road seen in; under the road's top it stays as it is - dark as the hill beside
 // the road's end, so what the road blends into at its end matches the ground past it)
@@ -75480,6 +75590,39 @@ function grpDragEnd(S) {
     if (placedRec(v)) { const o = placedRemake(v), e = o && vehAll().find(w => w.v === o); if (e) { if (VE.sel && VE.sel.v === v) vehSelect(e); VE.more = VE.more.map(m => m.v === v ? e : m); } }   // (and made again there by its maker: an aircraft in the air flies - placedRemake)
   }
   setTimeout(undoCommit, 0);
+}
+/* (user Nov 19 09:17: "we should be able to 'flip' a terrain. If we select the 'parent' shape. Everything on it would keep its place relative to the terrain they
+   are in") FLIP (TERRAIN > SEGMENT ACTIONS): the picked shapes mirrored left to right - with their layers (withLayers) and the caves inside them, and everything
+   riding on them as a drag carries it (grpDragStart's riders: structures, placed vehicles, hand-placed plants, markers, the kraken and wrecks on them), each
+   at the mirrored place on its own ground, turned the other way (a structure's and a plant's flip, a placed vehicle's dir). About the picked shapes' middle; a
+   layer picked alone about its join (its first point, kept on its parent's). The joins keep their points; the segments keep their marks */
+function islFlip() {
+  const s = TERRAIN_ED.sel, note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+  const Ns = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H');
+  if (!Ns.length) { note('Click a shape first.'); return; }
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of Ns) { const P = shpPoly(ISLANDS[n]); x0 = Math.min(x0, P.x0); x1 = Math.max(x1, P.x1); for (const y of P.Y) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); } }
+  const one = Ns.length === 1 ? ISLANDS[Ns[0]] : null, cx = one && shpLay(one) && one.on ? one.p[0][0] : (x0 + x1) / 2, fx = x => Math.round(2 * cx - x);
+  const N = withLayers(Ns);
+  ISLANDS.forEach((I, n) => { if (shpK(I) !== 'H' || N.includes(n)) return; const P = shpPoly(I); if (P.x0 >= x0 && P.x1 <= x1 && Math.min(...P.Y) >= y0 && Math.max(...P.Y) <= y1) N.push(n); });   // (a cave inside them: with them)
+  const G = grpDragStart(N.map(n => grpM.i(ISLANDS[n])));
+  const B0 = new Map(G.s.map(([o]) => { const B = strBox0(o); return [o, (B.x0 + B.x1) / 2]; })), tw = (G.h || []).map(([v]) => v.x);
+  for (const [I, P0] of G.i) P0.forEach(([x], k) => { if (I.p[k]) I.p[k][0] = fx(x); });
+  for (const [o] of G.s) { o.x = Math.round(o.x + 2 * (cx - B0.get(o))); if (o.flip) delete o.flip; else o.flip = true; }   // (its box mirrored about the line: its middle to the mirrored middle)
+  for (const [q, x, y, o, f] of G.m || []) { q.x = fx(x); if (o) q.y = Math.round(y + strBox(o).foot - f); }
+  for (const [q, x] of G.p || []) { q.x = fx(x); if (q.flip) delete q.flip; else q.flip = true; }
+  for (const [q, x] of G.k || []) { const X = fx(x); krakenMoveTo(q.id, X, seaRest(X), 1); }
+  for (const [q, x] of G.w || []) { const X = fx(x); wreckMoveTo(q.id, X, seaRest(X), 1); }
+  liveEdit();                                                    // (the ground built where it now is - what stands on it set on it there)
+  (G.h || []).forEach(([v, , o], i) => { v.x = fx(tw[i]); v.base = strFree(o) ? o.fy : strGround(o.x, TW.FW * TW.K * 0.6, o.lay); });
+  for (const [q] of G.p || []) hplRelay(q);
+  for (const q of G.v) {
+    q.lx = fx(q.x); q.ly = q.hold ? q.hold(q.lx) + q.ho : q.y; q.lifted = false;
+    const r = placedRec(q.e.v); if (r) r.dir = (r.dir < 0 ? -1 : 1) * -1;
+    vehMoveTo(q.e, q.lx, q.ly, q.t, true);
+  }
+  if (!G.i.length) islChanged();
+  grpDragEnd(G); note('Flipped, with everything on it.');
 }
 // ---- drawn over the world on GROUPING (from vehEdDraw, each view): each grouped island and vehicle framed in its group's colour
 // (the structures' frames are in their group's colour on every tab - strEdDraw)
