@@ -12697,8 +12697,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1090;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 19:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1091;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 22:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13175,10 +13175,10 @@ function hudKit(p) {
   if (m === 'sub') return { drive: true, home, dive: true, aim: true, noPower: true, weapons: ['torp', 'light', 'mine'] };   // (the mine: user Oct 24 night; the light in the vertical torpedo's place, with the ANGLE tape for it - user Oct 29)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
   if (m === 'plane') return { drive: true, stop: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
-  if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: TVT ? ['shell'] : ['mg', 'shell', 'smoke'] };       // (LAND TEST)   // (TANK VS TANK: its missile alone - user Nov 16 21:07 - its one button the first, A and the right trigger: user Nov 17 14:49)
+  if (m === 'tank') return { drive: true, home: false, dive: !!layForkOf(p), aim: true, weapons: TVT ? ['shell'] : ['mg', 'shell', 'smoke'] };       // (LAND TEST)   // (TANK VS TANK: its missile alone - user Nov 16 21:07 - its one button the first, A and the right trigger: user Nov 17 14:49)
   if (m === 'heli') return { drive: true, home: false, dive: true, aim: true, weapons: ['mg', 'rocket', 'magnet', 'light'] };   // (its magnet green, after its guns - user Oct 27; its light, user Oct 31)
   // (user Oct 27, 13:49: every vehicle's own buttons green, on the right, in its weapon row - no red button: civWeapons)
-  if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, stop: civPlane(v), home: false, noPower: k === 'sub' || (k === 'heli' && !isFireHeli(v)), dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', diveRight: k === 'boat' && v.kind === 'fish', aim: k === 'sub' || k === 'heli', weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
+  if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, stop: civPlane(v), home: false, noPower: k === 'sub' || (k === 'heli' && !isFireHeli(v)), dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'car' && !!layForkOf(p)) || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', diveRight: k === 'boat' && v.kind === 'fish', aim: k === 'sub' || k === 'heli', weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
   { const K = stKit(p); if (K) return K; }   // (STORY at a structure: its own green buttons - 50-zzzz-struct-act.js)
   return null;
 }
@@ -13362,6 +13362,7 @@ function drawHud(p) {
   if (STORY && !storyHudIn()) return;                    // (STORY: a swap - its controls there the moment the arrow lands: 50-zz-story-swap.js)
   ug.save();
   if (!ONEVIEW()) { ug.beginPath(); ug.rect(Math.round((HUD_HALF != null ? HUD_HALF : p) * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }
+  drawLayFork(p);                                         // (at a junction of terrain layers: the arrow over the other road - 50-story-cars.js)
   for (const it of Lh.items) {
     if (HUD_ONLY && !HUD_ONLY.has(it.id)) continue;
     const down = (pr[it.id] || 0) > 0 || (it.id === 'magnet' && ((heliOf(p) && heliOf(p).rope && heliOf(p).rope.mode === 'out') || (crew[p].mode === 'civ' && crew[p].civ && crew[p].civ.mag && crew[p].civ.mag.out))) || (it.id === 'sails' && yachtFor(p) && yachtFor(p).sailsUp === false) || (it.id === 'light' && crew[p].mode === 'sub' && subOf(p) && subOf(p).light) || (it.id === 'up' && diveHold[p] < 0) || (msOf(p) && ((it.id === 'left' && msLever(p) < 0) || (it.id === 'right' && msLever(p) > 0))) || (it.id === 'down' && diveHold[p] > 0);
@@ -48625,14 +48626,105 @@ const ISL_MIN_D = -10500, ISL_MAX_D = 8000;
 let ISLANDS = [];
 // (user Nov 2 13:00-13:20: every line a closed loop - SOLID, ISLAND or HOLE, 50-land-shapes) a loop's points go any way round;
 // a segment from before (its points left to right) is the same loop, its foot the piece from its last point back to its first
-function islandsValid(L) { return Array.isArray(L) && L.every(I => I && Array.isArray(I.p) && I.p.length >= (I.t ? 2 : 3) && I.p.every(q => ptOk(q)) && (I.k === undefined || I.k === 'S' || I.k === 'I' || I.k === 'H')); }
-worldLoad(() => { ISLANDS = []; try { const o = JSON.parse(localStorage.getItem('bd_islands') || 'null'); if (islandsValid(o)) ISLANDS = o; } catch (e) { } });
+function islandsValid(L) { return Array.isArray(L) && L.every(I => I && Array.isArray(I.p) && I.p.length >= (I.t ? 2 : 3) && I.p.every(q => ptOk(q)) && (I.k === undefined || I.k === 'S' || I.k === 'I' || I.k === 'H')
+  && (I.id === undefined || Number.isInteger(I.id)) && (I.lay === undefined || (Number.isInteger(I.lay) && I.lay >= 1)) && (I.on === undefined || (!!I.on && Number.isInteger(I.on.id) && Number.isInteger(I.on.k)))
+  && (I.also === undefined || (Array.isArray(I.also) && I.also.every(J => J && Number.isInteger(J.id) && Number.isInteger(J.k) && Number.isInteger(J.j))))); }
 const islandsUsed = () => ISLANDS;
+/* ---- TERRAIN LAYERS (user Nov 18 20:59-21:06, ref-terrain-layers-nov18.jpeg: a lighthouse on a hill, a road down it to a fork - straight on to the
+   city, or a lower road in front of the hill down to a dock: "you select a shape and you would add a secondary layer to that terrain"; "the front
+   layer ... always needs to start from a point of the layer behind it"). Every shape has its own id (`id`, kept with it). A LAYER is an ISLAND or
+   SOLID shape in front of its parent (`lay` 1), joined to it at one of the parent's points (`on`: { id, k } - the parent's id and that point):
+   its first point p[0] is that point, always (layerSync). Its parent is a shape of the back (lay 0), never a cave. The joins are where a vehicle
+   picks its road (layerJoins). Plan: terrain-layers-plan-nov18.md ---- */
+const shpLay = I => I && I.lay > 0 ? I.lay : 0;   // (0 the back; a layer one more than its parent's - layers on layers, no cap - user 21:15)
+function shpById(id) { for (const I of ISLANDS) if (I.id === id) return I; return null; }
+// every shape an id of its own: those without one (an old save, a new shape) or sharing one with a shape before them (a copy) get the next free
+function shpIds() {
+  let m = 0; for (const I of ISLANDS) if (Number.isInteger(I.id) && I.id > m) m = I.id;
+  const seen = new Set(); for (const I of ISLANDS) { if (!Number.isInteger(I.id) || seen.has(I.id)) I.id = ++m; seen.add(I.id); }
+}
+const shpNewId = () => { let m = 0; for (const I of ISLANDS) if (Number.isInteger(I.id) && I.id > m) m = I.id; return m + 1; };
+/* (user 21:15: a layer on a layer, and a layer rising again to join a shape further behind) A layer's FIRST join is `on` (its p[0] on its parent's point
+   on.k - losing it, the layer goes); its EXTRA joins `also`: [{ id, k, j }] - its point j on shape id's point k, a shape behind it (lower lay). A point of a
+   shape holds one join at most, from any layer. layerSync keeps every joined point on its partner's, the back first */
+// a layer's depth: its parent's + 1 - 0 where it can't stand (its parent missing, a cave, or the chain coming round to itself); itself never a cave or a tunnel
+function layDepth(I, seen) {
+  if (!I.on) return 0; if (I.k === 'H' || I.t) return -1;   // (a cave: k 'H' - shpK, read here before 50-land-shapes is in)
+  const P = shpById(I.on.id); if (!P || P === I || P.k === 'H' || !P.p[I.on.k] || seen.has(I)) return -1;
+  seen.add(I); const d = layDepth(P, seen); return d < 0 ? -1 : d + 1;
+}
+let LAYER_J = null;   // (layerJoins' list, until the shapes move: ISL_VER, or a point dragged - layerSync)
+// a join's partner point ("id:k") -> taken
+const joinKey = (id, k) => id + ':' + k;
+function layerSync() {
+  LAYER_J = null;
+  for (const I of ISLANDS) if (I.lay || I.on || I.also) { const d = layDepth(I, new Set()); if (d > 0) I.lay = d; else { delete I.lay; delete I.on; delete I.also; } }
+  const L = ISLANDS.filter(I => I.lay > 0).sort((a, b) => a.lay - b.lay), held = new Set();
+  for (const I of L) { held.add(joinKey(I.on.id, I.on.k)); }
+  for (const I of L) {
+    const q = shpById(I.on.id).p[I.on.k]; I.p[0][0] = q[0]; I.p[0][1] = q[1];
+    if (!I.also) continue;
+    // (an extra join: its partner there and behind, its point and the partner's point there, the partner's point not holding another join)
+    I.also = I.also.filter(J => { const P = shpById(J.id), key = joinKey(J.id, J.k); if (!P || shpLay(P) >= I.lay || !P.p[J.k] || !I.p[J.j] || J.j === 0 || held.has(key)) return false; held.add(key); return true; });
+    for (const J of I.also) { const q2 = shpById(J.id).p[J.k]; I.p[J.j][0] = q2[0]; I.p[J.j][1] = q2[1]; }
+    if (!I.also.length) delete I.also;
+  }
+}
+// every join, in world x / y - { x, y, id: the layer's, par: the partner's, lay: the layer's depth, play: the partner's }
+function layerJoins() {
+  if (LAYER_J && LAYER_J.v === ISL_VER) return LAYER_J.L;
+  const L = [];
+  for (const I of ISLANDS) if (I.lay > 0 && I.on) {
+    L.push({ x: I.p[0][0], y: WATER_Y + I.p[0][1], id: I.id, par: I.on.id, lay: I.lay, play: shpLay(shpById(I.on.id)) });
+    for (const J of I.also || []) L.push({ x: I.p[J.j][0], y: WATER_Y + I.p[J.j][1], id: I.id, par: J.id, lay: I.lay, play: shpLay(shpById(J.id)) });
+  }
+  LAYER_J = { v: ISL_VER, L }; return L;
+}
+// the layers first-joined to shape I (at its point k, or any); the joins on I's point k (first or extra: [layer, its point]) - a point holds one at most
+const layersOf = (I, k) => ISLANDS.filter(L => L.lay > 0 && L.on && L.on.id === I.id && (k == null || L.on.k === k));
+function joinAt(I, k) { for (const L of ISLANDS) { if (!(L.lay > 0) || !L.on) continue; if (L.on.id === I.id && L.on.k === k) return [L, 0]; for (const J of L.also || []) if (J.id === I.id && J.k === k) return [L, J.j]; } return null; }
+// shape indices ns and every layer standing on one of them, through every depth - what moves and goes together
+function withLayers(ns) {
+  const out = ns.slice(), ids = new Set(ns.map(n => ISLANDS[n] && ISLANDS[n].id));
+  for (let more = true; more;) { more = false; ISLANDS.forEach((I, n) => { if (I.lay > 0 && I.on && ids.has(I.on.id) && !out.includes(n)) { out.push(n); ids.add(I.id); more = true; } }); }
+  return out;
+}
+// shape I's extra joins on shape id's points: dropped (those at its point k, or all); how many
+function joinsDrop(id, k) { let n = 0; for (const L of ISLANDS) if (L.also) { const was = L.also.length; L.also = L.also.filter(J => !(J.id === id && (k == null || J.k === k))); n += was - L.also.length; if (!L.also.length) delete L.also; } return n; }
+// a point dragged on a joined point drags its partner, and on back through its partners' joins (layerSync brings the layers in front after)
+function joinMove(I, k) {
+  const go = (P, kk) => { if (!P || !P.p[kk]) return; P.p[kk][0] = I.p[k][0]; P.p[kk][1] = I.p[k][1]; joinMove(P, kk); };
+  if (!(I.lay > 0) || !I.on) return;
+  if (k === 0) go(shpById(I.on.id), I.on.k);
+  for (const J of I.also || []) if (J.j === k) go(shpById(J.id), J.k);
+}
+// (user 21:15) a layer's point j being dragged within r of a point of a shape behind it: the join it would make dropped there - { n, j, id, k, px, pd, bad:
+// the reason it can't, shown red }; null where none (not a layer, its first join, a point already joined, nothing near)
+function joinCand(n, j, r) {
+  const I = ISLANDS[n]; if (!I || !(I.lay > 0) || !I.on || j === 0 || (I.also || []).some(J => J.j === j)) return null;
+  const x = I.p[j][0], y = I.p[j][1]; let best = null, bd = r * r;
+  for (const P of ISLANDS) { if (P === I || shpLay(P) >= I.lay || P.k === 'H') continue; P.p.forEach((q, k) => { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= bd) { bd = d; best = { P, k }; } }); }
+  if (!best) return null;
+  const q = best.P.p[best.k];
+  return { n, j, id: best.P.id, k: best.k, px: q[0], pd: q[1], bad: joinAt(best.P, best.k) ? 'POINT ALREADY JOINED' : null };
+}
+// DETACH: the picked point's extra join undone (on the layer's point or its partner's); a first join holds its layer - that one stays
+function islDetach() {
+  const q = ISL_ED.pt, I = q && ISLANDS[q.n], note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+  if (!I) { note('Click a joined point first.'); return; }
+  let L = null, j = -1;
+  if (I.lay > 0 && I.on && q.k === 0) j = 0; else if ((I.also || []).some(J => J.j === q.k)) { L = I; j = q.k; } else { const w = joinAt(I, q.k); if (w) { L = w[0]; j = w[1]; } }
+  if (j === 0) { note('That join holds the layer - delete the layer instead.'); return; }
+  if (!L) { note('That point has no join.'); return; }
+  L.also = L.also.filter(J => J.j !== j); if (!L.also.length) delete L.also;
+  islChanged(); note('Join undone.');
+}
+worldLoad(() => { ISLANDS = []; try { const o = JSON.parse(localStorage.getItem('bd_islands') || 'null'); if (islandsValid(o)) ISLANDS = o; } catch (e) { } shpIds(); layerSync(); });
 let ISL_VER = 0;
 // (worldReload, 00-world.js: the whole world read again - an online guest's round in the host's) what's worked out from the shapes and the structures made again
 function worldReloaded() { ISL_VER++; STR_GEN++; }
                                                 // (the shapes' version: what's worked out from them is made again when it moves - gndBuild)
-function islSave() { skinFillAll(); ISL_VER++; try { if (!ISLANDS.length) localStorage.removeItem('bd_islands'); else localStorage.setItem('bd_islands', JSON.stringify(ISLANDS)); } catch (e) { } }
+function islSave() { shpIds(); layerSync(); skinFillAll(); ISL_VER++; try { if (!ISLANDS.length) localStorage.removeItem('bd_islands'); else localStorage.setItem('bd_islands', JSON.stringify(ISLANDS)); } catch (e) { } }
 // its line (world y) at x, and the straight line along its foot
 // (user Nov 2: HILLS, SPIKY and ROUND on a segment's pieces too - the ground's one rule, lineShape in 50-land-zz-ground)
 // (Nov 2: a loop's top at x - the first of its spans there, 50-land-shapes; m unused, kept for the callers)
@@ -48723,6 +48815,7 @@ function islMarkCols(I_, any, R, P) {
       // (a SOLID in front at sea and the island rising over it: the island behind it, its top over the solid's - one column, two
       // grounds, as an island over dry land: the solid stays the coast in front - coastAhead reads isolid)
       if (I_[c] === 1) { if (SO[c] && seaAtX(x) && v[0] < ST[c] - 1 && v[0] < v[1] - 1) { I_[c] = 2; T[c] = v[0]; DR[c] = 1; any = true; } continue; }
+      if (I_[c] === 2) { if (v[0] < T[c] - 1 && v[0] < v[1] - 1) T[c] = v[0]; continue; }   // (islands overlapping: the highest top wins - user Nov 18, as solids and the ground; it was the first listed)
       if (I_[c]) continue;
       const g = Math.min(islGroundAt(x, R), ST[c]), dry = g < WATER_Y - 1; if (dry && seaAtX(x)) continue;
       const t = v[0]; if (t < WATER_Y - 1 && t < v[1] - 1 && (!dry || t < g - 1)) { I_[c] = 2; T[c] = t; any = true; if (dry) DR[c] = 1; }
@@ -48971,7 +49064,7 @@ function islSplitEnd(k, q) {
    out of it); its handles drag anywhere (the ends too); a double-click on its line adds a point; right-click a handle (or
    hold a finger on it) removes it - with fewer than three points left, the island goes. Press its line to pick its pieces
    for the SKIN buttons (50-land-unified). Built as it changes, as the ground. ---- */
-const ISL_ED = { drag: null, ptr: null, hover: null, lastDown: null, hold: 0 };
+const ISL_ED = { drag: null, ptr: null, hover: null, lastDown: null, hold: 0, jc: null };   // (jc: the join a dragged layer point would make - joinCand)
 // (Nov 11, editing is live) the shapes changed: kept, and built as they are now (50-zzzz-live-edit.js); the Biome Editor builds its own
 function islChanged() { islSave(); if (VEG_MODE) { if (window.__vgTerrChanged) window.__vgTerrChanged(); } else liveEdit(); }
 function islAdd() {
@@ -48979,6 +49072,22 @@ function islAdd() {
   const I = { p: [[Math.round(cx - w / 2), 220], [Math.round(cx - w / 5), -60], [Math.round(cx), -160], [Math.round(cx + w / 5), -60], [Math.round(cx + w / 2), 220]] };
   ISLANDS.push(I); islChanged();
   TERRAIN_ED.sel = { I: ISLANDS.length - 1, k: 0, k1: I.p.length - 1 }; terrainSyncSkin();   // (picked whole, its foot too: a terrain button types all of it)
+}
+// (terrain layers - user Nov 18 21:03: "the front layer ... always needs to start from a point of the layer behind it"; 21:15: on a layer too) ADD LAYER:
+// a new shape of the picked one's kind in front of it, joined at the picked piece's first point - a road going down and out to the left from it (600 along, 300 down),
+// then down into the ground and back under the join, for the user to reshape. Picked after
+function islAddLayer() {
+  const s = TERRAIN_ED.sel, note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+  const I = s && s.I != null ? ISLANDS[s.I] : null;
+  if (!I) { note('Click a piece of a shape\'s line first.'); return; }
+  if (I.k === 'H') { note('Caves can\'t have layers.'); return; }
+  shpIds();
+  const k = selLo(s); if (joinAt(I, k)) { note('That point already holds a join - pick another piece.'); return; }   // (a point holds one join at most)
+  const [ax, ad, sk] = I.p[k], d = v => Math.round(clamp(v, ISL_MIN_D, ISL_MAX_D)), mark = sk ? [sk] : [];
+  const p = [[ax, ad, ...mark], [ax - 300, d(ad + 150), ...mark], [ax - 600, d(ad + 300)], [ax - 600, d(ad + 600)], [ax, d(ad + 600)]];
+  const L = Object.assign({ id: shpNewId(), lay: shpLay(I) + 1, on: { id: I.id, k }, p }, I.k === 'S' ? { k: 'S' } : {}, I.ug != null ? { ug: I.ug } : {});
+  ISLANDS.push(L); islChanged();
+  TERRAIN_ED.sel = { I: ISLANDS.length - 1, k: 0, k1: p.length - 1 }; terrainSyncSkin(); note('Layer added in front - drag its points to shape the road.');
 }
 // (user Nov 2 13:16: "splines that create holes in the terrain") a hole in the middle of the view: a ring of eight points about
 // the ground there, cutting whatever shape or ground it overlaps (50-land-shapes, built as it changes)
@@ -49001,15 +49110,26 @@ function islSetKind(k) {
   const s = TERRAIN_ED.sel, L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [];
 
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Click a shape\'s line first.'; return; }
-  for (const n of L) if (ISLANDS[n] && !(ISLANDS[n].t && k !== 'H')) { ISLANDS[n].k = k; delete ISLANDS[n].solid; }   // (a tunnel is a hole only)
-  islChanged(); terrainSyncSkin(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Now ' + SHP_NAME[k].toLowerCase() + '.';
+  let kept = 0;
+  for (const n of L) { const I = ISLANDS[n]; if (!I || (I.t && k !== 'H')) continue;   // (a tunnel is a hole only)
+    if (k === 'H' && (shpLay(I) || I.p.some((q, j) => joinAt(I, j)))) { kept++; continue; }   // (a layer, or a shape holding a join, is never a cave)
+    I.k = k; delete I.solid; }
+  islChanged(); terrainSyncSkin(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = kept ? 'A layer or a joined shape can\'t be a cave.' : 'Now ' + SHP_NAME[k].toLowerCase() + '.';
 }
 const islSetSolid = on => islSetKind(on ? 'S' : 'I');
 function islDelete() {
-  const s = TERRAIN_ED.sel;
-  if (s && s.Is) { ISLANDS = ISLANDS.filter((I, n) => !s.Is.includes(n)); TERRAIN_ED.sel = null; islChanged(); terrainSyncSkin(); return; }   // (whole shapes picked: all of them)
-  if (!s || s.I == null) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Click a shape\'s line first.'; return; }
-  ISLANDS.splice(s.I, 1); TERRAIN_ED.sel = null; islChanged(); terrainSyncSkin();
+  const s = TERRAIN_ED.sel, L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [];   // (whole shapes picked: all of them)
+  if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Click a shape\'s line first.'; return; }
+  const c = islCut(L); TERRAIN_ED.sel = null; islChanged(); terrainSyncSkin();
+  if (TERRAIN_ED.skinNote && (c[0] || c[1])) TERRAIN_ED.skinNote.textContent = joinsNote(c);
+}
+// shapes ns taken out, and every layer standing on one of them (a layer stands only on its parent): [layers that went with them, extra joins undone]
+function islCut(ns) { const all = withLayers(ns), go = new Set(all.map(n => ISLANDS[n])); ISLANDS = ISLANDS.filter(I => !go.has(I)); let j = 0; for (const I of go) j += joinsDrop(I.id); return [all.length - ns.length, j]; }
+const joinsNote = c => [c[0] ? 'Its layers went with it (' + c[0] + ').' : '', c[1] ? 'Joins undone (' + c[1] + ').' : ''].filter(Boolean).join(' ');
+// shape I's points after k moved round by d (a point added after k: +1, point k taken out: -1): every join on them, and its own extra joins, kept on their points
+function joinsShift(I, k, d) {
+  for (const L of ISLANDS) { if (L.on && L.on.id === I.id && L.on.k > k) L.on.k += d; for (const J of L.also || []) if (J.id === I.id && J.k > k) J.k += d; }
+  for (const J of I.also || []) if (J.j > k) J.j += d;
 }
 // the handle and the loop's line nearest the pointer (Nov 2: any way round - 50-land-shapes)
 /* ---- (user Nov 2 16:12: "an editor button to allow split at a segment so we can separate giant shapes") SPLIT SHAPE: the shape
@@ -49074,9 +49194,22 @@ function islSplitShape() {
     if (!L) { note('Can\'t split the shape at an upright piece - click a sloped or flat one.'); return; }
     parts = L.map(p => Object.assign({}, props, { p }));
   }
-  ISLANDS.splice(s.I, 1, ...parts);
-  TERRAIN_ED.sel = { Is: parts.map((q, j) => s.I + j) };
-  islChanged(); terrainSyncSkin(); note('Split into ' + parts.length + ' shapes.');
+  // (terrain layers) the first part keeps the shape's id, each other its own; a layer joined to it is joined to the part holding its point
+  // (the cut keeps every point); the shape a layer itself: the part holding its join stays the layer, its join first - the others shapes of the back
+  let nid = shpNewId(); parts.forEach((q, j) => { q.id = j ? nid++ : I.id; });
+  const at = (q, pt) => q.p.findIndex(r => r[0] === pt[0] && r[1] === pt[1]);
+  const lost = [];
+  for (const L of layersOf(I)) { const pt = P[L.on.k], j = parts.findIndex(q => at(q, pt) >= 0); if (j < 0) lost.push(ISLANDS.indexOf(L)); else L.on = { id: parts[j].id, k: at(parts[j], pt) }; }
+  let undone = 0;
+  for (const L of ISLANDS) if (L.also) L.also = L.also.filter(J => { if (J.id !== I.id) return true; const pt = P[J.k], j = parts.findIndex(q => at(q, pt) >= 0); if (j < 0) { undone++; return false; } J.id = parts[j].id; J.k = at(parts[j], pt); return true; });
+  if (shpLay(I)) parts.forEach(q => { const i = at(q, P[0]); if (i < 0) { delete q.lay; delete q.on; delete q.also; return; }
+    if (i > 0) q.p = q.p.slice(i).concat(q.p.slice(0, i));
+    if (q.also) q.also = q.also.map(J => ({ id: J.id, k: J.k, j: at(q, P[J.j]) })).filter(J => J.j > 0); });   // (its extra joins on the points this part kept)
+  const n0 = ISLANDS.indexOf(I);
+  ISLANDS.splice(n0, 1, ...parts);
+  const c = lost.length ? islCut(lost.map(n => n >= n0 ? n + parts.length - 1 : n)) : [0, 0]; c[0] += lost.length; c[1] += undone;
+  TERRAIN_ED.sel = { Is: parts.map(q => ISLANDS.indexOf(q)) };
+  islChanged(); terrainSyncSkin(); note('Split into ' + parts.length + ' shapes. ' + joinsNote(c));
 }
 // (user 14:15: "the same way we can drag a cave part ... just like cave parts, we should be able to scale them ... the same global system
 // for all these parts") each shape's cross in its middle drags it whole, its square scales it about its middle - the caves' rooms' own
@@ -49094,9 +49227,17 @@ function islPick(e) {
   return { x, y, r, h: best, line: ed ? ed.n : null, edge: ed };
 }
 function islRemovePt(n, k) {
-  const I = ISLANDS[n]; if (!I) return;
-  if (I.p.length <= (I.t ? 2 : 3)) { ISLANDS.splice(n, 1); TERRAIN_ED.sel = null; terrainSyncSkin(); } else I.p.splice(k, 1);
-  islChanged();
+  const I = ISLANDS[n]; if (!I) return; const note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+  if (shpLay(I) && k === 0) { note('That point joins the layer to its shape - delete the layer instead.'); return; }
+  let c = [0, 0];
+  if (I.p.length <= (I.t ? 2 : 3)) { c = islCut([n]); TERRAIN_ED.sel = null; terrainSyncSkin(); }
+  else {
+    const at = layersOf(I, k); if (at.length) { c = islCut(at.map(L => ISLANDS.indexOf(L))); c[0] += at.length; }   // (the point a layer is first joined at: the layer goes)
+    c[1] += joinsDrop(I.id, k);                                                                                       // (an extra join there: undone)
+    if (I.also) { const was = I.also.length; I.also = I.also.filter(J => J.j !== k); c[1] += was - I.also.length; }  // (its own point joined: undone)
+    I.p.splice(k, 1); joinsShift(I, k, -1);
+  }
+  islChanged(); if (c[0] || c[1]) note(joinsNote(c));
 }
 // the piece of shape n's loop nearest (x, y)
 const islPieceAt = (I, x, y) => { const n = ISLANDS.indexOf(I), q = n >= 0 ? shpNearEdge(x, y == null ? islTopAt(I, 0, x) : y, 1e9, n) : null; return q ? q.k : 0; };
@@ -49127,7 +49268,7 @@ window.addEventListener('pointerdown', e => {
   if (S1 && S1.Is && S1.Is.includes(n0) && e.button !== 2) {
     // (whole islands: they, what stands on them and everything in their groups by the same step - grpDragStart)
     ISL_ED.drag = { n: n0, k: q.h ? q.h.k : 0, all: true };
-    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, G: grpDragStart(S1.Is.filter(n => ISLANDS[n]).map(n => grpM.i(ISLANDS[n]))) };
+    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, G: grpDragStart(withLayers(S1.Is.filter(n => ISLANDS[n])).map(n => grpM.i(ISLANDS[n]))) };   // (a shape's layers with it)
     return;
   }
   if (!q.h) {
@@ -49140,7 +49281,8 @@ window.addEventListener('pointerdown', e => {
       if (I.t) { const T = shpPoly(I).tube; let bd2 = Infinity; for (let i = 0; i < T.X.length; i++) { const d = (T.X[i] - q.x) ** 2 + (T.Y[i] - q.y) ** 2; if (d < bd2) { bd2 = d; ex = T.X[i]; ey = T.Y[i]; } } }   // (a tunnel: the point on its middle line)
       const P = I.p, np = [Math.round(ex), Math.round(clamp(ey - WATER_Y, ISL_MIN_D, ISL_MAX_D)), ...P[k0].slice(2)];
       if (!P.some(p => Math.abs(p[0] - np[0]) < 2 && Math.abs(p[1] - np[1]) < 2)) {
-        P.splice(k0 + 1, 0, np); islChanged();
+        P.splice(k0 + 1, 0, np); joinsShift(I, k0, 1);   // (the joins further round keep their points)
+        islChanged();
         // (user Nov 7 20:59: "its selecting 2 points immediately and a segment. Can we have just the point we created selected?") the first
         // press picked the segment; the new point is picked alone now - as a press on any point (ISL_ED.pt)
         TERRAIN_ED.sel = null; TERRAIN_ED.selDrag = false; ISL_ED.pt = { n: q.line, k: k0 + 1 }; terrainSyncSkin();
@@ -49152,7 +49294,7 @@ window.addEventListener('pointerdown', e => {
   if (q.h.kind === 'C' && e.button !== 2) {                   // (the cross: the whole shape, and what stands on it and its group - grpDragStart)
     TERRAIN_ED.sel = { Is: [q.h.n] }; terrainSyncSkin();
     ISL_ED.drag = { n: q.h.n, k: -1, all: true, kind: 'C' };
-    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, G: grpDragStart([grpM.i(ISLANDS[q.h.n])]) };
+    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, G: grpDragStart(withLayers([q.h.n]).map(n => grpM.i(ISLANDS[n]))) };   // (its layers with it)
     return;
   }
   if (q.h.kind === 'Sc' && e.button !== 2) {                  // (the square: every point about the middle, as far as the pointer is from it)
@@ -49169,7 +49311,7 @@ window.addEventListener('pointerdown', e => {
   if (q.h.kind) return;
   if (e.button === 2) { islRemovePt(q.h.n, q.h.k); return; }
   ISL_ED.pt = { n: q.h.n, k: q.h.k }; if (typeof terrainSyncSkin === 'function') terrainSyncSkin();   // (the point pressed: its CURVE in the TERRAIN tab)
-  ISL_ED.drag = q.h; ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, st: dragGroup({ I: q.h.n }, q.h.k).map(k => [k, ISLANDS[q.h.n].p[k][0], WATER_Y + ISLANDS[q.h.n].p[k][1]]) };   // (the picked pieces' handles with it - dragGroup, 50-land-unified)
+  ISL_ED.drag = q.h; ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, st: dragGroup({ I: q.h.n }, q.h.k).map(k => [k, ISLANDS[q.h.n].p[k][0], WATER_Y + ISLANDS[q.h.n].p[k][1]]) };   // (the picked pieces' handles with it - dragGroup, 50-land-unified)
   clearTimeout(ISL_ED.hold);
   if (e.pointerType === 'touch') ISL_ED.hold = setTimeout(() => { const p = ISL_ED.ptr; if (p && !p.moved && ISL_ED.drag === q.h) { ISL_ED.drag = null; ISL_ED.ptr = null; islRemovePt(q.h.n, q.h.k); } }, 650);
 }, { capture: true, passive: false });
@@ -49188,14 +49330,16 @@ window.addEventListener('pointermove', e => {
   if (q.wd != null) { const I = ISLANDS[ISL_ED.drag.n]; if (!I) return; const c = tunWidthAt(I, q.wd)[2], rs = (I.rs || TUN_RS0).slice(); rs[q.wd] = Math.round(clamp(Math.hypot(x - c[0], y - c[1]), 12, 240)); I.rs = rs; liveEdit(); return; }
   if (q.sc) { const I = ISLANDS[ISL_ED.drag.n]; if (!I) return; if (I.t) { if (!q.sc.rs) q.sc.rs = (I.rs || TUN_RS0).slice(); const [cx, cy] = q.sc.mid, f = clamp(Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(q.x - cx, q.y - cy)), 0.15, 6); I.rs = q.sc.rs.map(v => Math.round(clamp(v * f, 12, 240))); } const [cx, cy] = q.sc.mid, f = clamp(Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(q.x - cx, q.y - cy)), 0.15, 6); q.sc.p0.forEach((p, k) => { I.p[k][0] = Math.round(cx + (p[0] - cx) * f); I.p[k][1] = Math.round(clamp(cy + (WATER_Y + p[1] - cy) * f - WATER_Y, ISL_MIN_D, ISL_MAX_D)); }); liveEdit(); return; }
   islDragBy(ISL_ED.drag.n, q.st, x - q.x, y - q.y);
+  ISL_ED.jc = q.st && q.st.length === 1 ? joinCand(ISL_ED.drag.n, q.st[0][0], STR_SNAP * q.r) : null;   // (a layer's point near a point behind it: where it would join)
   liveEdit();                                                    // (built as it moves - 50-zzzz-live-edit.js)
 }, { capture: true, passive: true });
 // shape n's handles (st: [k, x, y] each, as pressed) moved by (dx, dy) - anywhere: a loop's points go any way round (Nov 2)
 function islDragBy(n, st, dx, dy) {
-  const P = ISLANDS[n] && ISLANDS[n].p; if (!P) return;
+  const I = ISLANDS[n], P = I && I.p; if (!P) return;
   for (const [k, x, y] of st) {
     P[k][0] = Math.round(clamp(x + dx, -1e7, 1e7));
     P[k][1] = Math.round(clamp(y + dy - WATER_Y, ISL_MIN_D, ISL_MAX_D));
+    joinMove(I, k);   // (a joined point: one point with its partner's, and on back - layerSync brings the layers in front)
   }
 }
 // (user Oct 31, 09:53: "does the game understand the concept of buildings attached to those islands so we can move them
@@ -49204,6 +49348,8 @@ function islUp(e) {
   const q = ISL_ED.ptr; if (!q || q.id !== e.pointerId) return;
   e.stopImmediatePropagation(); clearTimeout(ISL_ED.hold);
   const was = ISL_ED.drag; ISL_ED.drag = null; ISL_ED.ptr = null;
+  const jc = ISL_ED.jc; ISL_ED.jc = null;
+  if (jc && !jc.bad && q.moved) { const I = ISLANDS[jc.n]; I.p[jc.j][0] = jc.px; I.p[jc.j][1] = jc.pd; (I.also || (I.also = [])).push({ id: jc.id, k: jc.k, j: jc.j }); }   // (dropped on it: joined)
   if (was && q.moved) { if (q.G) grpDragEnd(q.G); else islChanged(); }   // (whole islands: and what moved with them; a scale: kept)
 }
 window.addEventListener('pointerup', islUp, { capture: true });
@@ -49225,6 +49371,7 @@ function edSeg(X0, Y0, X1, Y1, w, gap) {
 let ED_M = null;   // (the view's transform while the editor's lines are drawn: islEdDraw sets it, edSeg turns from it)
 
 const SHP_ED_COL = { I: 'rgba(214,140,255,0.9)', S: 'rgba(235,235,235,0.9)', H: 'rgba(110,235,255,0.95)' }, SHP_HANDLE = { I: '#d68cff', S: '#e8e8e8', H: '#6eebff' };
+const LAY_ED_COL = 'rgba(255,214,64,0.95)', LAY_HANDLE = '#ffd640';   // (a layer's line and handles, whatever its kind - its join ringed)
 function islEdDraw() {
   if (!floorEdOn()) return;
   ED_M = C.getTransform();
@@ -49233,7 +49380,7 @@ function islEdDraw() {
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }
   // (the ground's own shapes: their sides and crosses drawn with the ground line - groundShapesDraw, 50-land-zz-ground)   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
-    const Q = shpPoly(I), k = shpK(I); if (Q.x1 < x0 || Q.x0 > x1) return;
+    const Q = shpPoly(I), k = shpK(I), lay = shpLay(I); if (Q.x1 < x0 || Q.x0 > x1) return;
     // (zoomed out, a curve's pieces are under a pixel: pieces of one look are joined until a few pixels long - close up each is its own, as
     // before; its colour set only when it changes - a colour string is read every time it's set)
     const P = I.p, N = Q.X.length; let col0 = null, kc = null, kw = 0, kg = false, sx = PX(Q.X[0]), sy = PY(Q.Y[0]), ex = sx, ey = sy;
@@ -49241,7 +49388,7 @@ function islEdDraw() {
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N, e = Q.E[i];
       const sel = s && (s.Is ? s.Is.includes(n) : s.I === n && e >= Math.min(s.k, s.k1) && e <= Math.max(s.k, s.k1)), sk = P[e][2], tt = sel ? t * 3 : sk ? t * 2 : t;
-      const col = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k], gap = k === 'H' && (i >> 2) % 2 === 1;
+      const col = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || (lay ? LAY_ED_COL : SHP_ED_COL[k]), gap = k === 'H' && (i >> 2) % 2 === 1;
       if (col !== kc || tt !== kw || gap !== kg) { flush(); sx = ex; sy = ey; kc = col; kw = tt; kg = gap; }
       ex = PX(Q.X[j]); ey = PY(Q.Y[j]);
       if (Math.abs(ex - sx) + Math.abs(ey - sy) >= 3 * tt) flush();
@@ -49266,9 +49413,17 @@ function islEdDraw() {
       const X = PX(p[0]), Y = PY(WATER_Y + p[1]); if (X < -hs || X > VWP + hs) return;
       const h = ISL_ED.drag || ISL_ED.hover, hot = (h && h.n === n && h.k === k2) || (ISL_ED.pt && ISL_ED.pt.n === n && ISL_ED.pt.k === k2), sl = TERRAIN_ED.sel, onSel = sl && sl.I === n && (k2 >= selLo(sl) && k2 <= selHi(sl) + 1 || (selHi(sl) === P.length - 1 && k2 === 0));
       C.fillStyle = '#04070f'; C.fillRect(X - hs - 1, Y - hs - 1, 2 * hs + 2, 2 * hs + 2);
-      C.fillStyle = hot || onSel ? '#ffb347' : SHP_HANDLE[k]; C.fillRect(X - hs, Y - hs, 2 * hs, 2 * hs);   // (the one pressed or picked: orange, on every shape - as the ground's handles were)
+      C.fillStyle = hot || onSel ? '#ffb347' : lay ? LAY_HANDLE : SHP_HANDLE[k]; C.fillRect(X - hs, Y - hs, 2 * hs, 2 * hs);   // (the one pressed or picked: orange, on every shape - as the ground's handles were)
+      if (lay && (k2 === 0 || (I.also || []).some(J => J.j === k2))) { const a = Math.round(hs * 2.2), w = Math.max(2, t);   // (a join: a ring round it - where a vehicle picks its road)
+        C.fillStyle = '#04070f'; C.fillRect(X - a - 1, Y - a - 1, 2 * a + 2, w + 2); C.fillRect(X - a - 1, Y + a - w - 1, 2 * a + 2, w + 2); C.fillRect(X - a - 1, Y - a - 1, w + 2, 2 * a + 2); C.fillRect(X + a - w - 1, Y - a - 1, w + 2, 2 * a + 2);
+        C.fillStyle = LAY_HANDLE; C.fillRect(X - a, Y - a, 2 * a, w); C.fillRect(X - a, Y + a - w, 2 * a, w); C.fillRect(X - a, Y - a, w, 2 * a); C.fillRect(X + a - w, Y - a, w, 2 * a); }
     });
   });
+  // (a layer's point dragged near a point behind it: the join it would make ringed there - red with the reason where it can't)
+  const jc = ISL_ED.drag && ISL_ED.jc;
+  if (jc) { const X = Math.round(PX(jc.px)), Y = Math.round(PY(WATER_Y + jc.pd)), a = Math.round(edHandle(4.5, Infinity) * 2.6), w = Math.max(2, t), c = jc.bad ? '#ff5046' : LAY_HANDLE, qq = Math.max(1, Math.round(2 * dpr / PIXW));
+    C.fillStyle = c; C.fillRect(X - a, Y - a, 2 * a, w); C.fillRect(X - a, Y + a - w, 2 * a, w); C.fillRect(X - a, Y - a, w, 2 * a); C.fillRect(X + a - w, Y - a, w, 2 * a);
+    if (jc.bad) drawText(C, jc.bad, X, Y + a + 6 * qq, [255, 120, 110], qq, 'center'); }
   ED_M = null;
 }
 
@@ -50914,9 +51069,7 @@ function tankSink(t) {
   if (t.state !== 'alive' || netGuestHold()) return;
   t.state = 'sink'; t.sinkT = 0;   // (it goes in with the speed it had: the water takes it - stepTankSink)
   lakeSplash(t.x, 1.2);
-  emit('lost', { kind: 'tank', o: t });
-  landWait[t.id].tank = LAND_RESPAWN;
-  if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
+  tankLost(t);   // (50-land-units.js)
 }
 /* (user Nov 17 22:00: "The tank when it sinks, it should go vertical slowly because of its weight") anything long and heavy going down in water turns
    slowly end-down: the end already lower leads (level: way's end - a tank's nose), toward nearly on end, the water's drag holding the turn slow (on its
@@ -53590,21 +53743,35 @@ function stepLandRest(dt) {
 // not its middle; and it comes to rest on a face - right way up or on its roof, whichever it's nearer - along the ground's slope
 const wreckLie = (a, slope) => Math.round((a - slope) / Math.PI) * Math.PI + slope;
 function stepArmyWreck(w, dt) {
-  const half = w.kind === 'tank' ? TANK_L * 0.4 : w.kind === 'turret' ? TANK_L * 0.15 : 20, oy = w.oy || 0;
-  // thrown by its own blast (killTank): up and over, turning, till it comes down on the ground (or into water: then it sinks as it would)
-  if (w.air) {
-    w.vy += 520 * dt; w.x = clamp(w.x + w.vx * dt, PLAY_L() + half, PLAY_R() - half); w.y += w.vy * dt; w.a = (w.a || 0) + (w.av || 0) * dt;
-    const g = onLand(w.x) && !lakeAt(w.x) ? landBelow(w.x, w.y + oy - 12) : surfaceY(w.x);
-    if (w.vy > 0 && w.y + oy >= g) { w.air = false; w.y = g - oy; w.av = 0; if (oy) w.a = wreckLie(w.a, restGround(w.x, g, half)[1]); if (onLand(w.x) && !lakeAt(w.x)) restLanded(w.x, g, w.vy, 1); w._rv = 1; w.vx = w.vy = 0; }   // (_rv: it settles onto the ground's slope from here)
-    else return;
-  }
+  const half = w.kind === 'tank' ? TANK_L * 0.4 : w.kind === 'turret' ? TANK_L * 0.15 : 20, oy = w.oy || 0, body = w.kind === 'tank' ? tankBodyOf(w.facing, w.noTop) : w.kind === 'turret' ? turretBodyOf() : null;
   if (w.deck) {
     const c = w.deck; w.x += c.dx || 0;
     const d = shipTopAt(w.x, w.y - 10);
     if (deckUp(c) && d && d.c === c && d.y < w.y + 8) { w.y = d.y; if (w.kind === 'tank') w.a = c.a + c.tilt; return; }
     w.deck = null; w._rv = 0;                                      // (she's gone from under it: it falls)
   }
-  if (onLand(w.x) && !lakeAt(w.x)) { const ft = w.y + oy; if (w._rv || landWoke(w.x, half) || ft < landBelow(w.x, ft - 6) - 1) { if (restSettle(w, w.x, ft, half, dt)) { w.y = RS.foot - oy; if (w.kind === 'tank') w.a = RS.a; else if (oy) w.a = wreckLie(w.a, RS.a); restLanded(w.x, RS.foot, RS.hit, 1); } } return; }
+  // (user Nov 18 19:45: "all land vehicles should follow this rule") a tank's wreck and its turret over land - thrown by its blast, falling, lying - are
+  // the one body as the tank was (landBody): they land on whatever part meets the ground first and come to rest on a face, tracks or roof, along the
+  // ground; lying still, they're looked at again only when the ground under them changes (landWoke)
+  if (body && onLand(w.x) && !lakeAt(w.x)) {
+    if (w.still && !landWoke(w.x, half)) return;
+    w.x = clamp(w.x + (w.vx || 0) * dt, PLAY_L() + half, PLAY_R() - half);
+    const air0 = w.air;
+    landBody(w, dt, body);
+    layStep(w, LB.on, !!air0 && LB.on, half, 1, 0);           // (its terrain layer: off the front's ground onto the back's - 50-story-cars.js)
+    if (LB.hit > 60) restLanded(w.x, w.y + oy, LB.hit, 1);
+    if (LB.on) w.vx = (w.vx || 0) * Math.exp(-dt * 6);              // (its own weight on the ground stops it sliding)
+    w.air = !LB.on; w.still = LB.on && Math.abs(w.vy) < 2 && Math.abs(w.av) < 0.05 && Math.abs(w.vx || 0) < 1 ? 1 : 0;
+    return;
+  }
+  // over water, thrown: up and over, turning, till it comes down into it (then it sinks as it would)
+  if (w.air) {
+    w.vy += 520 * dt; w.x = clamp(w.x + w.vx * dt, PLAY_L() + half, PLAY_R() - half); w.y += w.vy * dt; w.a = (w.a || 0) + (w.av || 0) * dt;
+    const g = surfaceY(w.x);
+    if (w.vy > 0 && w.y + oy >= g) { w.air = false; w.av = 0; w._rv = w.vy; w.vx = 0; w.vy = 0; }
+    else return;
+  }
+  if (onLand(w.x) && !lakeAt(w.x)) { const ft = w.y + oy; if (w._rv || landWoke(w.x, half) || ft < landBelow(w.x, ft - 6) - 1) { if (restSettle(w, w.x, ft, half, dt)) { w.y = RS.foot - oy; if (oy) w.a = wreckLie(w.a, RS.a); restLanded(w.x, RS.foot, RS.hit, 1); } } return; }
   // on the bottom: a tank down on its end falls over onto the nearer face - its tracks or its roof - its lower end on the bed
   if (w.bed) { if (w.lie != null && Math.abs(w.lie - w.a) > 0.005) { w.a += (w.lie - w.a) * Math.min(1, dt * 2.5); w.y = w.bedY - tankLow(w.a); } return; }
   // (on the harbour's deck: ground while it's there - the pier gone from under it, it falls in - user Oct 27)
@@ -54367,7 +54534,7 @@ artFamily(() => { if (LAND && seaplanes.length) rlSheetPut(SEA_KIND); return fal
    Built into columns once a land build (shpBuild): each shape's outline sampled every grid column, and in each column the
    y spans inside it (even-odd), so the land's grid (50-land-terrain), the islands' roots and the queries read spans, never
    the curve. The base seabed (SHP.base): the lowest point of any shape or the ground's own line - user 13:16. ---- */
-const SHP = { cols: [], polys: [], base: 0, any: false, holes: [], isls: [], isl: false, ver: 0 };   // (ver: a build's - what's kept from the shapes knows it's old: landGaps)
+const SHP = { cols: [], polys: [], base: 0, any: false, holes: [], isls: [], lays: new Map(), layList: [], layMax: 0, isl: false, ver: 0 };   // (ver: a build's - what's kept from the shapes knows it's old: landGaps)
 const shpK = I => I && (I.k === 'S' || I.k === 'H') ? I.k : I && I.solid ? 'S' : 'I';
 const SHP_NAME = { S: 'SOLID', I: 'ISLAND', H: 'CAVE' };   // (Nov 7: every carved shape is a cave now)
 // the loop's runs one way along x: [{ P: points left to right (each with the marks of the piece from it to the next), e: the
@@ -54536,7 +54703,7 @@ function shpColSpans(poly, c0, c1) {
 // (Nov 11, editing is live: a shape whose outline and kind didn't change keeps its columns - I._cols - so an edit builds only the shapes it
 // touched; live: built for an edit in place (50-zzzz-live-edit.js) - the version kept, what's made from the shapes is made again in its range there)
 function shpBuild(live) {
-  const L = islandsUsed(); SHP.cols = []; SHP.polys = []; SHP.holes = []; SHP.isls = []; SHP.any = L.length > 0; if (!live) SHP.ver++;
+  const L = islandsUsed(); SHP.cols = []; SHP.polys = []; SHP.holes = []; SHP.isls = []; SHP.lays = new Map(); SHP.layMax = 0; SHP.any = L.length > 0; if (!live) SHP.ver++;
   let base = WATER_Y + Math.max(0, floorDeep && floorDeep[1] || 0, SEA_FLOOR_MAX - WATER_Y);
   L.forEach((I, n) => {
     const poly = shpPoly(I); SHP.polys[n] = poly; base = Math.max(base, poly.y1);
@@ -54556,8 +54723,11 @@ function shpBuild(live) {
     SHP.cols[n] = S;
     if (shpK(I) === 'H') SHP.holes.push(n);
     if (SHP.cols[n].k === 'I') SHP.isls.push(n);
+    if (I.lay >= 1 && (S.k === 'S' || S.k === 'I')) { const L = I.lay | 0; if (!SHP.lays.has(L)) SHP.lays.set(L, []); SHP.lays.get(L).push(n); SHP.layMax = Math.max(SHP.layMax, L); }   // (a terrain layer - its own ground beside the grid's: 50-land-zz-layers.js)
   });
   SHP.base = base; SHP.isl = SHP.isls.length > 0;
+  SHP.layList = [...SHP.lays.keys()].sort((a, b) => a - b);
+  if (typeof land !== 'undefined' && land.ls) for (let L = 1; L < land.ls.length; L++) if (!SHP.lays.has(L)) land.ls[L] = null;   // (a layer gone: its cells let go)
 }
 // is (column c, y) inside an ISLAND shape (a body under the water - ltBody)
 // the top of the SOLID's or ISLAND's span holding (column c, y) - the ground under the sea's own top (ltFillCol); y itself if none
@@ -56097,10 +56267,11 @@ const ltCol = x => Math.floor(x / LT_CELL), ltRow = y => Math.floor((y - LT_Y0) 
 function lakeColLv(c) { const x = c * LT_CELL; for (const K of land.pockets || []) if (x >= K.x0 && x < K.x1) return K.lv != null ? K.lv : WATER_Y; return WATER_Y; }
 // (user Nov 13 18:09: "Why would anything still use the old stepped ground? We want a single unified system") the ground is its cells and the
 // smooth line over them (gedgeLine): solid in a cell or under the line over the ground's top within reach (a line stands at most GEDGE_UP cells over it)
-function landSolid(x, y) {
-  const c = ltCol(x), r = ltRow(y); if (ltCell(c, r) !== M_AIR) return true;
-  const T = ltTop(x); if (y < T) return gedgeOver(x, T) <= y;   // (over the column's top: its line)
-  for (let q = 1; q <= GEDGE_UP; q++) if (ltCell(c, r + q) !== M_AIR) return gedgeOver(x, LT_Y0 + (r + q) * LT_CELL) <= y;
+// (lay: whose cells - 0 the back ground's, every shape's; L >= 1 terrain layer L's own - layCell, 50-land-zz-layers.js)
+function landSolid(x, y, lay = 0) {
+  const cellF = lay ? (cc, rr) => layCell(cc, rr, lay) : ltCell, c = ltCol(x), r = ltRow(y); if (cellF(c, r) !== M_AIR) return true;
+  if (!lay) { const T = ltTop(x); if (y < T) return gedgeOver(x, T) <= y; }   // (over the column's top: its line)
+  for (let q = 1; q <= GEDGE_UP; q++) if (cellF(c, r + q) !== M_AIR) return gedgeOver(x, LT_Y0 + (r + q) * LT_CELL, lay) <= y;
   return false;
 }
 // the first cell at or below y in column x (world y of its top), or the grid's bottom - the cells alone: for work on the cells (a cell's row, its
@@ -56150,18 +56321,19 @@ function gedgeLine(c, t, solid, up) {
 // THE GROUND UNDER y AT x - the one answer for anything that meets, stands on or measures the ground: the first cell's top at or below y (ltBelow)
 // raised to the smooth line over it, or y itself when y is already under the line
 function landBelow(x, y) { const Y = ltBelow(x, y); return Math.max(y, gedgeOver(x, Y)); }
-// the smooth line over the cell top Y in column x (gedgeLine; each column's kept until the ground there changes) - Y where none
-function gedgeOver(x, Y) {
-  const c = ltCol(x), t = ltRow(Y);
-  if (c < 0 || c >= land.cols || Y >= LT_Y1 || ltCell(c, t - 1) !== M_AIR) return Y;
-  if (!land.edV || land.edV.length !== land.cols) { land.edV = new Uint32Array(land.cols); land.edT = new Int32Array(land.cols); land.edL = new Float32Array(land.cols); land.edR = new Float32Array(land.cols); }
-  const v = (land.ver || 0) + 1;
-  if (land.edV[c] !== v || land.edT[c] !== t) {
-    const solid = (cc, r) => cc >= 0 && cc < land.cols && ltCell(cc, r) !== M_AIR;
+// the smooth line over the cell top Y in column x (gedgeLine; each column's kept until the ground there changes) - Y where none. lay: whose cells -
+// 0 the back ground's (every shape), L >= 1 terrain layer L's own (layCell): each layer its own line over its own cells, kept apart (land.ed[lay])
+function gedgeOver(x, Y, lay = 0) {
+  const c = ltCol(x), t = ltRow(Y), cellF = lay ? (cc, rr) => layCell(cc, rr, lay) : ltCell;
+  if (c < 0 || c >= land.cols || Y >= LT_Y1 || cellF(c, t - 1) !== M_AIR) return Y;
+  if (!land.ed || land.edN !== land.cols) { land.ed = []; land.edN = land.cols; }
+  const K = land.ed[lay] || (land.ed[lay] = { V: new Uint32Array(land.cols), T: new Int32Array(land.cols), L: new Float32Array(land.cols), R: new Float32Array(land.cols) }), v = (land.ver || 0) + 1;
+  if (K.V[c] !== v || K.T[c] !== t) {
+    const solid = (cc, r) => cc >= 0 && cc < land.cols && cellF(cc, r) !== M_AIR;
     const up = (cc, r) => { let n = 0; while (n < 255 && solid(cc, r - n - 1)) n++; return n; };
-    const E = gedgeLine(c, t, solid, up); land.edV[c] = v; land.edT[c] = t; land.edL[c] = E[0]; land.edR[c] = E[1];
+    const E = gedgeLine(c, t, solid, up); K.V[c] = v; K.T[c] = t; K.L[c] = E[0]; K.R[c] = E[1];
   }
-  const f = x / LT_CELL - c, h = land.edL[c] + (land.edR[c] - land.edL[c]) * f;
+  const f = x / LT_CELL - c, h = K.L[c] + (K.R[c] - K.L[c]) * f;
   return h > 0 ? Y - h * LT_CELL : Y;
 }
 // (user Oct 31) the ground in front's own top at x - under a segment over land (whose top is the ground there: landTop),
@@ -56288,6 +56460,7 @@ function ltFillCol(c) {
       }
     }
   }
+  layFillCol(c);                                                 // (the front layer's own cells - 50-land-zz-layers.js)
   // (the ground's first top, humps and all, before anything is dug: the desert's crust and sand follow it - desertCell)
   { let r = ltR0(c); const r1 = ltR1(c); while (r < r1 && land.cell[ltIdx(c, r)] === M_AIR) r++; land.top0[c] = LT_Y0 + r * LT_CELL; }
   if (bodyCol) ltBody(c, bodyCol[0], bodyCol[1], bodyCol[2]);
@@ -58443,7 +58616,7 @@ function landReseat(x0 = 0, x1 = WORLD_W) {
   for (const h of helis) if (h && h.state === 'landed' && on(h.x)) h.y = heliGround(h.x, -Infinity) - heliSkid();
   // (Nov 11, a shape's point dragged under them: a car still kept her old height, in the raised ground) a car standing there - placed or at a
   // structure's spot - put down on the new top as she was made (carSettle); a placed helicopter on its ground (placedStrVeh's)
-  for (const c of storyCars) if (c.state === 'run' && c.driven == null && !c.air && on(c.x)) { c.set = 0; c.rest = 0; carSettle(c); }
+  for (const c of storyCars) if (c.state === 'run' && c.driven == null && c.gnd && on(c.x)) { c.set = 0; c.rest = 0; carSettle(c); }
   for (const h of civHelis) if (h.placed != null && h.state === 'parked' && on(h.x)) h.y = top(h.x) - chStand(h);
   for (const w of landWrecks) if (on(w.x) && !w.deck && !w.onDeck) { w.y = top(w.x); w._rv = 0; w.bed = lakeAt(w.x); }
   for (const W of crashes) if (!W.deck && on(W.x)) { W.y = top(W.x); for (const p of W.pieces) if (p.mode === 'land' || p.mode === 'air') { p.y = top(p.x) + 1; p.mode = lakeAt(p.x) ? 'air' : 'land'; } }
@@ -58847,7 +59020,7 @@ function terrainLoad(text) {
     if (JSON.stringify(L) !== JSON.stringify(KR_SET)) { KR_SET = JSON.parse(JSON.stringify(L)); krSetSave(); placeKraken(); floorEdited(); } }
   if (o.BG !== undefined && bgOk(o.BG) && JSON.stringify(o.BG) !== JSON.stringify(BGS)) { BGS = JSON.parse(JSON.stringify(o.BG)); bgSave(); }   // (the backgrounds - 50-zz-backgrounds)
   if (o.LK !== undefined || LAKE_SET.length) { LAKE_SET = Array.isArray(o.LK) ? o.LK.filter(q => q && isFinite(q.x) && isFinite(q.y)).map(q => ({ x: +q.x, y: +q.y })) : []; lakeSave(); }   // (the lakes' own levels - 50-land-lake, Nov 2)
-  if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {}, I.see ? { see: true } : {}, I.ug != null ? { ug: I.ug ? 1 : 0 } : {}, I.t ? { t: 1, rs: (I.rs || [60, 60, 60]).slice() } : {}, I.wl != null ? { wl: I.wl } : {}, I.gnd ? { gnd: 1 } : {})); /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
+  if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {}, I.see ? { see: true } : {}, I.ug != null ? { ug: I.ug ? 1 : 0 } : {}, I.t ? { t: 1, rs: (I.rs || [60, 60, 60]).slice() } : {}, I.wl != null ? { wl: I.wl } : {}, I.gnd ? { gnd: 1 } : {}, Number.isInteger(I.id) ? { id: I.id } : {}, I.lay > 0 && I.on ? { lay: I.lay, on: { id: I.on.id, k: I.on.k } } : {}, I.lay > 0 && Array.isArray(I.also) ? { also: I.also.map(J => ({ id: J.id, k: J.k, j: J.j })) } : {}));   /* (its id and the layer it is - 50-land-islands) */ /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
   if (o.ST !== undefined || STRS.length) { STRS = strsValid(o.ST) ? strsFix(JSON.parse(JSON.stringify(o.ST))) : []; SE.sel = []; strChanged(); }   // (the placed structures - 50-zz-struct)
 }
@@ -58957,6 +59130,8 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
   ['SPLIT SEGMENT', 'Cuts each picked segment into equal pieces, so you can give them different types', terrainSplit],
   ['SPLIT SHAPE', 'Cuts the shape into two shapes at the picked segment', islSplitShape],
+  ['ADD LAYER', 'Adds a shape in front, joined at the picked segment', islAddLayer],   // (terrain layers - 50-land-islands)
+  ['DETACH', 'Undoes the picked point\'s extra join', islDetach],
 ]);
 const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
 { const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
@@ -59017,7 +59192,7 @@ const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 // (Nov 11, tables) the tanks and the army helicopters: record tables, every hull a row - each side's own (tankOf(p), heliOf(p): none
 // till one comes in), the placed ones, the lost ones still going down (05-game-state.js THE ARMY'S HULLS)
-const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet av sinkT',   // (av: its body's turn, rad/s - off the ground (tankSettle) and in water (sinkTurn); hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks)
+const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT gnd cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet av sinkT lay',   // (av: its body's turn, rad/s - landBody, and in water (sinkTurn); gnd: on its tracks on the ground, it drives (landBody); hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks; lay: its terrain layer - groundBelow, layStep)
   'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick scorch', ...CIV_REC));
 const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin cap smokeT input fixT roll lampPh enter col turb washT bitT',
   'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag scorch', ...CIV_REC));
@@ -59113,9 +59288,9 @@ function landArrive(p, k) {
 // is one standing (or flying) now, or can one come in?
 const landUp = (p, k) => { const v = k === 'tank' ? tankOf(p) : heliOf(p); return !!v && (k === 'tank' ? v.state === 'alive' : v.state === 'fly' || v.state === 'landed'); };
 const landCanCome = (p, k) => !landUp(p, k) && !(landWait[p][k] > 0) && !crew[p].dead && capsLeft(p) > 0;
-function makeTank(p, x) {
-  const t = { id: p, fac: p, kind: 'tank', state: 'alive', x, y: landTop(x), a: 0, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, input: 0, hp: VTUNE.tank.hp,
-    ammo: VTUNE.tank.ammo, rk: 0, recoil: 0, mgT: 0, fall: 0, cap: null, smokeT: 0, hitT: -9, fixT: 0 };
+function makeTank(p, x, y) {   // (y: where it's put down - on the terrain layer whose ground is there: tankSettle)
+  const t = { id: p, fac: p, kind: 'tank', state: 'alive', x, y: Number.isFinite(y) && layHas(x) ? y : landTop(x), a: 0, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, input: 0, hp: VTUNE.tank.hp,
+    ammo: VTUNE.tank.ammo, rk: 0, recoil: 0, mgT: 0, gnd: 1, cap: null, smokeT: 0, hitT: -9, fixT: 0 };
   tankSettle(t, 0, true);
   return t;
 }
@@ -59145,24 +59320,33 @@ function landListsReset() {
 // holes and tilts with the ground. TANK_STEP: what it climbs in one go)
 const TANK_STEP = 30;
 const TANK_FALL_KILL = Math.sqrt(2 * 520 * 10 * 21 * REAL.tank);      // (the speed of a fall from ten times its height: user Oct 25)
-const tankGround = (t, x) => wheelGround(x, t.y, TANK_L * 0.42, TANK_STEP);
+const tankGround = (t, x) => wheelGround(x, t.y, TANK_L * 0.42, TANK_STEP, 0.5, t.lay);
 // (Nov 1, the cars) every land vehicle on wheels or tracks stands by this one rule: the ground under five points along it
 // (half: its middle to its end wheels), searched from `step` over the body (what it climbs in one go)
 // the first solid ground at or below y at x - the one rule for what stands on the ground: the land's (an island out of the water
 // too - onLand), at sea a harbour's deck or the sea's own floor with its rock formations (seabedY - what everything sinks to; the
 // land's grid has no ground there, its bottom is no floor - user Nov 1 22:27, a car stopped mid-water)
-function groundBelow(x, y) { return onLand(x) ? Math.min(landBelow(x, y), deckOn(x, y), hangarRoofUnder(x, y)) : Math.min(harbourTop(x, y), floorUnder(x, y)); }   // (on land too: a pier's deck where it runs into the ground - deckOn, 50-zz-structh)
+// (terrain layers, Nov 18 - terrain-layers-plan-nov18.md) lay: the layer what stands is on - 0 the back, today's ground (every layer in it: nothing on
+// it goes behind a front layer); 1 the front layer's ground alone (layBelow) where it has any under y, the back's where it has none (off its edge)
+function groundBelow(x, y, lay = 0) {
+  if (lay) { const f = layBelow(x, y, 1); if (f < Infinity) return Math.min(f, deckOn(x, y), hangarRoofUnder(x, y)); }
+  return onLand(x) ? Math.min(landBelow(x, y), deckOn(x, y), hangarRoofUnder(x, y)) : Math.min(harbourTop(x, y), floorUnder(x, y)); }   // (on land too: a pier's deck where it runs into the ground - deckOn, 50-zz-structh)
 // (user Nov 2 14:32, the taxi on a slope: "the front part is clearly floating") each end stands on the highest ground under its own
 // footprint (foot: that footprint inward from the end, a share of half) - a track runs its end's whole half (the tank's 0.5); a wheel
 // touches where it is (a car's 0: half = half the length between her wheels - carGround). Measured from halfway along, a car's
 // downhill wheel stood on ground half a length up the slope and hung in the air
-function wheelGround(x, y, half, step, foot = 0.5) {
+// one point's ground, searched down from sy: the ground's (groundBelow) or, at sea, a ship's top over the water (its ship: ship)
+function wheelPt(gx, sy, lay = 0) {
+  const g = groundBelow(gx, sy, lay), d = onLand(gx) ? null : shipTopAt(gx, sy);   // (at sea: the harbour's deck or the sea's own floor - groundBelow)
+  return d && d.y < g && d.y < surfaceY(gx) ? { y: d.y, ship: d.c } : { y: g, ship: null };
+}
+function wheelGround(x, y, half, step, foot = 0.5, lay = 0) {
   const ys = [];
   // (and a ship's top over the sea - user Oct 26, GTA: a tank dropped on the container ship stands on her and rides)
   let ship = null;
   // (user Oct 27: the harbour's deck, the block and the hangar roof too - harbourTop; the pier gone, it falls in)
-  for (let k = 0; k < 5; k++) { const u = k === 2 ? 0 : (k < 2 ? -1 : 1) * (k === 0 || k === 4 ? 1 : 1 - foot), gx = x + u * half, sy = y - step - 2 - Math.abs(u) * 6, g = groundBelow(gx, sy), d = onLand(gx) ? null : shipTopAt(gx, sy);   // (at sea: the harbour's deck or the sea's own floor - groundBelow)
-    if (d && d.y < g && d.y < surfaceY(gx)) { ys.push(d.y); if (!ship || k === 2) ship = d.c; } else ys.push(g); }
+  for (let k = 0; k < 5; k++) { const u = k === 2 ? 0 : (k < 2 ? -1 : 1) * (k === 0 || k === 4 ? 1 : 1 - foot), P = wheelPt(x + u * half, y - step - 2 - Math.abs(u) * 6, lay);
+    ys.push(P.y); if (P.ship && (!ship || k === 2)) ship = P.ship; }
   const back = Math.min(ys[0], ys[1]), front = Math.min(ys[3], ys[4]), mid = ys[2];
   // (user Nov 17 14:49, report v1048: going up a hill the tank's tracks "clearly floating") the line a rigid track rests on: the highest line no sample
   // pokes through, touching the ground on both sides of its middle (the samples' upper hull, its edge over the middle). Each half's highest point
@@ -59180,27 +59364,52 @@ function wheelGround(x, y, half, step, foot = 0.5) {
   return { back, front, mid, top: Math.min(back, front, mid), ship, lineB, lineF };
 }
 function tankSettle(t, dt, snap) {
+  if (snap && layHas(t.x)) t.lay = layRest(t.x, t.y).lay;          // (set down: on the layer whose ground it's put on - layRest)
   const G = tankGround(t, t.x), half = TANK_L * 0.42;
   const want = (G.lineB + G.lineF) / 2;   // (its tracks' line: on the ground under both ends, over any bump - wheelGround)
-  const a = Math.atan2(G.lineF - G.lineB, half * 2);
-  if (snap) { t.y = want; t.a = a; return; }
+  if (snap) { t.y = want; t.a = Math.atan2(G.lineF - G.lineB, half * 2); t.vy = 0; t.av = 0; t.gnd = 1; return; }   // (set down where it stands: placed, the ground changed under it)
   t.deck = G.ship && t.y >= want - 3 ? G.ship : null;
-  if (want > t.y + 1.5 || t.vy < 0) {
-    // the ground's gone from under it (or it hopped): it falls
-    // (user Nov 17 22:00: "it stays perfectly horizontal, even if falling vertically from a cliff") off the ground its body keeps the turn it had (av); one end
-    // still on its ground with the other over nothing - the edge of a cliff, a crater's lip - it tips over that end, its middle past it (a bar on a pivot:
-    // 1.5 g / its length, by how level it is); its lower end touching down first, the same turns it down onto its tracks
-    const sa = Math.sin(t.a), onB = G.back <= t.y - sa * half + 2, onF = G.front <= t.y + sa * half + 2;
-    if (onB !== onF) t.av = (t.av || 0) + (onB ? 1 : -1) * 0.75 * 520 / half * Math.cos(t.a) * dt;
-    t.a += (t.av || 0) * dt;
-    const low = Math.abs(Math.sin(t.a)) * half;                    // (its lower end under its middle: that end meets the ground)
-    t.vy = Math.min(600, t.vy + 520 * dt); t.y = Math.min(want - low, t.y + t.vy * dt);
-    if (t.y >= want - low - 0.5) { if (t.vy > 280) tankHurt(t, t.vy >= TANK_FALL_KILL ? VTUNE.tank.hp : (t.vy - 280) / 120, t.x, t.y, -1); /* (user Oct 25: dropped from high up it's hurt; from ten times its own height it's destroyed) */ if (t.vy > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); } t.vy = 0; }
-    return;
-  }
-  t.y += (want - t.y) * Math.min(1, dt * 14); t.vy = 0;
-  const na = t.a + (a - t.a) * Math.min(1, dt * 8);
-  t.av = dt > 0 ? clamp((na - t.a) / dt, -3, 3) : 0; t.a = na;   // (on the ground it follows the ground; the turn it's making goes with it over an edge)
+  const was = t.gnd;
+  landBody(t, dt, tankBodyOf(t.facing, false));                     // (the one body for everything on wheels or tracks - 50-story-cars.js)
+  layStep(t, t.gnd, !was && !!t.gnd, half, Math.sign(t.vx) || t.facing, crew[t.id].mode === 'tank' && !t.enter ? civStick(t.id) : 0);   // (its terrain layer - at a junction, by its driver's up / down)
+  if (LB.hit > 280) tankHurt(t, LB.hit >= TANK_FALL_KILL ? VTUNE.tank.hp : (LB.hit - 280) / 120, t.x, t.y, -1);   // (user Oct 25: dropped from high up it's hurt; from ten times its own height it's destroyed)
+  if (LB.hit > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); }
+  if (LB.roof) tankRoofed(t);                                       // (come to rest on its roof)
+}
+// the tank's body (landBody): its tracks' feet every 0.37 m (they drive - an edge between two turns it about the edge, not a point far back), its
+// hull's nose and tail, its deck, its turret's roof (which way it faces: its turret sits back of its middle) - without it, its wreck once the turret's
+// thrown (killTank); its weight in its middle. Made once for each way it faces
+const TANK_BODY = {};
+function tankBodyOf(facing, noTop) {
+  const key = (facing > 0 ? 'R' : 'L') + (noTop ? '-' : ''); if (TANK_BODY[key]) return TANK_BODY[key];
+  const f = facing > 0 ? 1 : -1, half = TANK_L * 0.42, deck = TAY(TANKA.deck), pts = [];
+  for (let k = 0; k <= 16; k++) pts.push([(k / 8 - 1) * half, 0, 1]);
+  pts.push([TAX(TANKA.l) * f, deck * 0.5, 0], [TAX(TANKA.r) * f, deck * 0.5, 0]);
+  for (const x of [0.15, 0.35, 0.65, 0.85]) pts.push([TAX(TANKA.l + (TANKA.r - TANKA.l) * x) * f, deck, 0]);
+  if (!noTop) for (const x of [0, 0.5, 1]) pts.push([TAX(TANKA.turL + (TANKA.turR - TANKA.turL) * x) * f, TAY(TANKA.turTop), 0]);
+  return (TANK_BODY[key] = bodyMake(pts, 0, TANK_W, -TAY(TANKA.turTop), 520, TANK_STEP));
+}
+// the turret thrown off its hull (killTank): a box held at its middle (oy: from there down to its foot)
+let TURRET_BODY = null;
+function turretBodyOf() {
+  if (TURRET_BODY) return TURRET_BODY;
+  const w = (TANKA.turR - TANKA.turL) * TANK_K, h = (TANKA.deck - TANKA.turTop) * TANK_K, pts = [];
+  for (const x of [-0.5, -0.25, 0, 0.25, 0.5]) pts.push([x * w, h / 2, 0], [x * w, -h / 2, 0]);
+  return (TURRET_BODY = bodyMake(pts, 0, w, h, 520, 6));
+}
+// (user Nov 18 19:30, asked what a tank on its roof does: "Knocked out") like a real one, its crew can't go on: it's lost where it lies - no blast, its
+// wreck as it is (stepArmyWreck: the same body, lying on its roof)
+function tankRoofed(t) {
+  if (t.state !== 'alive' || netGuestHold()) return;
+  t.state = 'dead';
+  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.a, av: 0, facing: t.facing, t: 0, burn: 0, deck: t.deck || null, air: false, vx: 0, vy: 0, lay: t.lay || 0 });
+  tankLost(t);
+}
+// a tank lost - blown up (killTank), sunk (tankSink), on its roof (tankRoofed): the game told, the next one on its way, its player put ashore
+function tankLost(t) {
+  emit('lost', { kind: 'tank', o: t });
+  landWait[t.id].tank = LAND_RESPAWN;
+  if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
 }
 // the tank's make for the one drive (driveStep): 30 t, its middle between its road wheels, low; its tracks all driven, gripping
 // TANK grip times what tyres do; the ground under its back end (VTUNE.tank: kw, grip - the GAME EDITOR)
@@ -59237,13 +59446,13 @@ function stepTank(t, dt) {
   // tracks - all of it driven, gripping more than tyres (TANK grip) - up a slope as far as they hold, spinning past it (driveStep,
   // 50-story-cars.js); in the air (hopping, falling) it keeps its way. Too steep a step ahead (a wall) and it stops - below
   const way = want ? Math.sign(want) : Math.sign(t.vx) || t.facing;
-  if (t.vy === 0) t.vx = driveStep(t, dt, Math.abs(want), 0, way, tankMake(t, way));
+  if (t.gnd) t.vx = driveStep(t, dt, Math.abs(want), 0, way, tankMake(t, way));
   if (Math.abs(t.vx) > 0.5) {
     const nx = clamp(t.x + t.vx * dt, PLAY_L() + TANK_X0, PLAY_R() - TANK_X0), G = tankGround(t, nx);   // (user Nov 17 16:55, TANK VS TANK's cliffs over the sea: "you can drive and sink yourself" - no stop at a land's edge any more: off it, into the sea, it sinks - stepTank's water)   // (on a ship at sea it drives her deck - off her end, into the water)
     const lead = t.vx > 0 ? G.front : G.back;
     if (lead < t.y - TANK_STEP - 1) {                           // a wall: it can't climb that - pushed on, it hops
       t.vx = 0; t.stuckT = (t.stuckT || 0) + dt;
-      if (want && t.stuckT > 0.35 && t.vy >= 0) { t.vy = -170; t.y -= 2; t.stuckT = 0; kickLandDust(t.x + Math.sign(want) * TANK_L * 0.4, t.y, 6); }
+      if (want && t.stuckT > 0.35 && t.gnd) { t.vy = -170; t.y -= 2; t.gnd = 0; t.stuckT = 0; kickLandDust(t.x + Math.sign(want) * TANK_L * 0.4, t.y, 6); }
     }
     else { t.x = nx; t.stuckT = 0; }
     if (landUnitR() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
@@ -59256,7 +59465,7 @@ function stepTank(t, dt) {
   }
   // its tracks turn by their own run (spinning loose, faster than it goes) - and spinning they throw the ground up behind them
   t.track = (t.track || 0) + (t.wsp != null ? t.wsp * UPM * (t.way || way) : t.vx) * dt;
-  if (!SIM_ONLY && Math.abs(t.slipV || 0) > 0.6 && t.vy === 0 && landUnitR() < dt * (4 + Math.abs(t.slipV) * 3)) { const bx = t.x - (t.way || way) * TANK_L * 0.4, s = carGrd(bx, t.y); if (s === 'sand' || s === 'paved') { const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: s === 'sand' ? 'sand' : 'gray', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -(t.way || way) * luRnd(10, 30), vy: -luRnd(8, 24), life: luRnd(2, 3.2), alpha: luRnd(0.35, 0.55), stream: smStream(t, 'sand') }); } else kickLandDust(bx, t.y, 3); }
+  if (!SIM_ONLY && Math.abs(t.slipV || 0) > 0.6 && t.gnd && landUnitR() < dt * (4 + Math.abs(t.slipV) * 3)) { const bx = t.x - (t.way || way) * TANK_L * 0.4, s = carGrd(bx, t.y); if (s === 'sand' || s === 'paved') { const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: s === 'sand' ? 'sand' : 'gray', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -(t.way || way) * luRnd(10, 30), vy: -luRnd(8, 24), life: luRnd(2, 3.2), alpha: luRnd(0.35, 0.55), stream: smStream(t, 'sand') }); } else kickLandDust(bx, t.y, 3); }
   tankSettle(t, dt, false);
   tankWheels(t, dt);
   // (user Nov 16 21:38: "when there's a lake and the [tank] goes underwater, there's no bubbles, there's no splash, there's nothing ... It should not be able
@@ -59426,16 +59635,14 @@ function killTank(t) {
   // gets hit" - since Nov 16 21:23 the hull had been thrown up by its own blast, turning; only the turret is thrown now)
   const thrown = !t.deck && t.carry == null && !t.hook && onLand(t.x), [bx, by] = tankBlowDir(t);
   landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null, noTop: thrown,
-    air: false, vx: 0, vy: 0, av: 0, _rv: thrown ? 1 : 0 });
+    air: false, vx: 0, vy: 0, av: 0, _rv: thrown ? 1 : 0, lay: t.lay || 0 });
   // (user Nov 16 21:32: the turret "separate and go high in the sky. Not too high, but separate from the body as it explodes") its turret thrown off on
   // its own, higher and turning faster, to fall and lie as a wreck of its own
   if (thrown) { const ca = Math.cos(t.a), sa = Math.sin(t.a), lx = ((TANKA.turL + TANKA.turR) / 2 - TCX) * TANK_K * t.facing, ly = ((TANKA.turTop + TANKA.deck) / 2 - TANKA.foot) * TANK_K;
-    landWrecks.push({ kind: 'turret', id: t.id, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true, oy: (TANKA.deck - TANKA.turTop) / 2 * TANK_K,
+    landWrecks.push({ kind: 'turret', id: t.id, lay: t.lay || 0, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true, oy: (TANKA.deck - TANKA.turTop) / 2 * TANK_K,
       vx: t.vx * 0.5 + bx * 70 + luRnd(-20, 20), vy: -luRnd(175, 205), av: (bx || 1) * (t.facing || 1) * luRnd(4.5, 7) }); }   // (user Nov 16 21:45: "it should rotate in the air ... it should not go that high because it should be heavy" - ~half a tank's length up, never under 4.5 turns of a radian a second, the way the blow throws it)
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
-  emit('lost', { kind: 'tank', o: t });
-  landWait[t.id].tank = LAND_RESPAWN;
-  if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
+  tankLost(t);
 }
 
 /* ---- the helicopter ---- */
@@ -60427,22 +60634,28 @@ function drawLandHeli(h) {
   if (vi === 0 && h.state !== 'down' && h.state !== 'sink') { const [nx, ny] = heliPoint(h, heliHalf() * 0.15, 7); acNav(PX(nx), PY(ny + (h.susY || 0)), face); }
 }
 // (the tanks, the helicopters and their wrecks in one batch of the things' pass, the ropes and magnets' blocks in their place among them)
-function drawLandUnits(x0, x1) {
+// lay: the terrain layer whose tanks and wrecks are drawn (each between its own ground and the next layer's - terrain-layers-plan-nov18.md)
+function drawLandUnits(x0, x1, lay) {
   thingsBegin(C);
   for (const w of landWrecks) {
+    if ((w.kind === 'heli' ? 0 : w.lay || 0) !== lay) continue;   // (a helicopter's wreck lies on the back's ground)
     if (w.kind === 'tank') drawLandTank({ id: w.id, x: w.x, y: w.y, a: w.a, facing: w.facing, recoil: 0, noTop: !!w.noTop }, true);
     else if (w.kind === 'turret') drawTankTurret(w);
     else drawLandHeliWreck(w);
   }
-  drawLooseRopes();   // (blocks in the batch, in their place)
-  for (let p = 0; p < landN(); p++) {
-    const t = tanks.hAt(p), h = helis.hAt(p);
-    if (t && (t.state === 'alive' || t.state === 'sink')) { drawLandTank(t, false); if (t.state === 'alive') tankLights(t); }
-    if (h && h.rope) drawHeliRope(h);
-    if (h && h.state !== 'dead' && h.state !== 'gone') drawLandHeli(h);
-  }
+  for (let p = 0; p < landN(); p++) { const t = tanks.hAt(p); if (t && (t.state === 'alive' || t.state === 'sink') && (t.lay || 0) === lay) { drawLandTank(t, false); if (t.state === 'alive') tankLights(t); } }
   thingsEnd();
 }
+// the army helicopters, their ropes and what hangs from them: what flies, in front of every terrain layer
+function drawLandFliers() {
+  thingsBegin(C);
+  drawLooseRopes();   // (blocks in the batch, in their place)
+  for (let p = 0; p < landN(); p++) { const h = helis.hAt(p); if (h && h.rope) drawHeliRope(h); if (h && h.state !== 'dead' && h.state !== 'gone') drawLandHeli(h); }
+  thingsEnd();
+}
+// what's on terrain layer L (1, 2 ...), in front of its ground and behind the next layer's (terrain-layers-plan-nov18.md): its cars (their pass - carPass),
+// its tanks and wrecks
+function drawLayThings(x0, x1, L) { drawStoryCars(x0, x1, 'lay' + L); drawLandUnits(x0, x1, L); }
 // a tank's turret blown off (killTank): its picture and its gun, burnt, turned about its middle (the things' pass)
 function drawTankTurret(w) {
   if (w.x < CAMPX / SV - 100 || w.x > CAMPX / SV + VWW + 100) return;
@@ -60562,7 +60775,10 @@ function renderLandObjects0() {
     if (!edTiny(0.3 * UPM) && !VEG_NOPARTS) drawLeaves(x0, x1); lt('crashLeaves');
   }
   drawCoastWedges(x0, x1);                               // (OPEN WORLD: the embankment under each harbour's block, user Oct 25 late)
-  lt('coast'); drawLandUnits(x0, x1); lt('units');                               // (a helicopter can be out over the sea)
+  lt('coast'); drawLandUnits(x0, x1, 0);                // (what's on the back layer - terrain layers, 50-story-cars.js layStep)
+  // (each terrain layer in front, back to front: its ground over everything behind it, then what's on it - terrain-layers-plan-nov18.md)
+  for (let L = 1, N = layN(); L <= N; L++) { drawLay(x0, x1, L); drawLayThings(x0, x1, L); }
+  drawLandFliers(); lt('units');                         // (a helicopter can be out over the sea)                               // (a helicopter can be out over the sea)
   if (!spans.length) return;
   drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
   lt('lake2');
@@ -61402,7 +61618,7 @@ frameShare('ground.cells', () => GCELLS_SHARE);
    hash with the same thresholds. The palettes are the JS ones, written in when the shader is first made (ggWgsl).
    ================================================================ */
 // (the slots' numbers and the page lookup: one source for this shader and for what the ground hands another part's shader - ggFloorWgsl. P: the names' prefix)
-const ggSlotWgsl = P => 'struct ' + P + 'Slot { k: i32, c0: i32, rT: i32, rB: i32, j0: i32, npr: i32, sb: u32, w: i32, rBL: i32, rBR: i32, p1: i32, p0: i32 }\n';
+const ggSlotWgsl = P => 'struct ' + P + 'Slot { k: i32, c0: i32, rT: i32, rB: i32, j0: i32, npr: i32, sb: u32, w: i32, rBL: i32, rBR: i32, ns: i32, p0: i32 }\n';
 // a cell's words at level L in page set wh (c in slot si's columns, row r - the level's cell holding it): its page's offset, NONE (not there yet), NONE - 2
 // (over the slice's rows: air) or BLACK (all in the dark)
 const ggCellWgsl = P => `
@@ -61412,7 +61628,7 @@ fn ${P}cellAtW(si: u32, c: i32, r: i32, L: u32, wh: u32) -> u32 {
   let j = ((r + ${-GG_RB}) >> sh) - jl0;
   if (j < 0) { return 0xfffffffdu; }
   if (j > ((S.rB - 1 + ${-GG_RB}) >> sh) - jl0) { return 0xfffffffeu; }
-  let p = ${P}ptab[(si * 2u + wh) * ${GG_PTS}u + ${P}loff(L) + u32(j)]; if (p >= 0xfffffffeu) { return p; }
+  let p = ${P}ptab[(si * u32(S.ns) + wh) * ${GG_PTS}u + ${P}loff(L) + u32(j)]; if (p >= 0xfffffffeu) { return p; }
   return (p * 4096u + (u32((r + ${-GG_RB}) >> L) & 63u) * 64u + (u32(c >> L) & 63u)) * ${GG_CW}u;
 }
 `;
@@ -61591,10 +61807,11 @@ const LT_MIX: f32 = ${LT_MIX.toFixed(1)}; const LT_MIX_DEEP: f32 = ${LT_MIX_DEEP
 @group(0) @binding(6) var<storage, read> bcols: array<vec4f>;
 @group(0) @binding(8) var<storage, read> art: array<u32>;
 const COLV: u32 = ${GG_COLV}u;
-// which page set this draw is (FD[0].w): 0 the ground in front - the rows from each column's split row down -, 1 the islands' over it
+// which page set this draw is (FD[0].w): 0 the ground in front - the rows from each column's split row down -, 1 the islands' over it, 1 + L terrain
+// layer L's own cells (50-land-zz-layers.js), every row of them
 fn which() -> u32 { return u32(FD[0].w); }
-// a row in this draw's rows: the ground in front's from the split row down, the islands' over it
-fn mine(si: u32, c: i32, r: f32) -> bool { return (r < col(si, c, 2u).x) == (which() == 1u); }
+// a row in this draw's rows: the ground in front's from the split row down, the islands' over it, a layer's all
+fn mine(si: u32, c: i32, r: f32) -> bool { let wh = which(); return wh >= 2u || (r < col(si, c, 2u).x) == (wh == 1u); }
 const BIOV: u32 = 17u;
 // the level this draw reads (the instance's: a cell every 2^LV - ggLevel), and the levels' places in a slot's page table (GG_LOFF)
 var<private> LV: u32 = 0u;
@@ -62211,7 +62428,15 @@ const GG_COLV = 7;                                            // (vec4s a column
 /* (the islands, Nov 9) TWO PAGE SETS a slot - which: 0 the ground in front (its rows from islSplitEnd down, a SOLID's body under the water's line in it -
    bodyIn(k, 2)), 1 the islands' (the rows over it, every body in - bodyIn(k, 1)): the same grid, the same shader, drawn in the pass each is drawn in (the
    ground's, the sea's). A slot's pages / stale: npr main page rows then npr island ones; its page table 2 x GG_MAXPR */
-const GG = { on: true, ep: -1, cap: 0, slotsN: 0, stoneCap: 0, pagesBuf: null, ptabBuf: null, slotBuf: null, colBuf: null, stoneBuf: null, scrBuf: null,
+/* (terrain layers, Nov 18 - 50-land-zz-layers.js) A SET A LAYER, which 1 + L: terrain layer L's own cells (layCell) - every row of its slices, the same
+   shader, drawn over what's behind it (drawLay); its pages only where its cells can show (ggSetNone: its slices - laySlices -, its rows - S.fr). GG.ns:
+   the sets a slot has (2 + the highest layer - ggNS; 2 with none, as before): each slot's page table GG.ns x GG_PTS, the stride in the slot's words for
+   the shader (ns); the tables made again when it changes (ggStep) */
+const ggWhOf = (S, i) => (i / S.npr) | 0;
+// (set wh's rows from row a, n rows on, in slot Sl: nothing of it can show - the islands' over their split rows (islMax), a layer's outside its rows
+// and the smooth line's reach over its top (S.fr[wh]); the ground in front's always can)
+const ggSetNone = (Sl, wh, a, n) => { if (wh === 1) return a >= Sl.islMax; if (!wh) return false; const R = Sl.fr && Sl.fr[wh]; return !R || a >= R[1] || a + n + GEDGE_UP < R[0]; };
+const GG = { ns: 2, on: true, ep: -1, cap: 0, slotsN: 0, stoneCap: 0, pagesBuf: null, ptabBuf: null, slotBuf: null, colBuf: null, stoneBuf: null, scrBuf: null,
   free: [], slot: null, sk: [], sUse: null, ptab: null, stoneTop: 0, cellRef: null, dirtyRef: null, ug: -1, gapV: -1, dk: null,
   stats: { jobs: 0, black: 0, dark: 0, slots: 0, ms: 0, frameJobs: 0, frameDisp: 0, bufs: 0, grows: 0 }, fj: 0, grewAt: -1 };
 /* (Nov 10) THE OPEN FLOOR - past the world's ends (slices k < 0 and k >= nk, and the last slice's columns past land.cols) the open ocean's floor by the sea's
@@ -62244,7 +62469,7 @@ function ggPools() {
   GG.cap = Math.max(64, Math.min(GG.cap || GG_CAP0, Math.floor(lim / GG_PB)));
   GG.stoneCap = GG.stoneCap || 32768;
   GG.pagesBuf = gpuBuf(GG.cap * GG_PB, 'ground grid');
-  GG.slotsN = 0; ggSlotBufs();
+  GG.slotsN = 0; GG.ns = ggNS(); ggSlotBufs();
   GG.artBuf = null; GG.artRef = null; GG.art0 = gpuBuf(16, 'ground grid'); gpuWriteBuf(GG.art0.gb, 0, new Uint8Array(16)); GG.stoneBuf = gpuBuf(GG.stoneCap * 9 * 16, 'ground grid');
   GG.scrBuf = gpuBuf(GG_JOBS * GG_SCRR * 64 * 4, 'ground grid'); GG.bat = { z0: 0, n: 0, bw: 0, pages: new Set() }; GG.stage = gpuBuf(GG_JOBS * GG_JOBB, 'ground grid'); GG.stats.bufs += 5;
   ggReset();
@@ -62255,7 +62480,7 @@ function ggSlotBufs() {
   const n = ggSlotsNeed(); if (GG.slotsN >= n && GG.ptabBuf) return false;
   for (const b of [GG.ptabBuf, GG.slotBuf, GG.colBuf, GG.bcolBuf]) if (b) gpuBufFree(b);
   GG.slotsN = n;
-  GG.ptabBuf = gpuBuf(GG.slotsN * 2 * GG_PTS * 4, 'ground grid'); GG.slotBuf = gpuBuf(GG.slotsN * 48, 'ground grid');
+  GG.ptabBuf = gpuBuf(GG.slotsN * GG.ns * GG_PTS * 4, 'ground grid'); GG.slotBuf = gpuBuf(GG.slotsN * 48, 'ground grid');
   GG.colBuf = gpuBuf(GG.slotsN * 64 * GG_COLV * 16, 'ground grid'); GG.bcolBuf = gpuBuf((GG_STRATA + GG.slotsN * 64 * GG_BCV) * 16, 'ground grid'); GG.stats.bufs += 4;
   // (the desert's strata picks: the processor's hash, a stratum each - the first GG_STRATA vec4s of the back fields' column buffer: the
   // ground's draw is held to 8 storage buffers, the iPad's limit (Nov 10: its own strata buffer made 9, a black world there))
@@ -62273,7 +62498,7 @@ function ggReset() {
   GG.free = []; for (let p = GG.cap - 1; p >= 0; p--) GG.free.push(p);
   GG.slot = new Map(); GG.nk = Math.ceil((land.cols || 1) / LT_CHUNK); GG.rows = new Map(); GG.rk = new Set();   // (slice k -> its slot; the world's slices; each slice's rows - ggRows)
   GG.sk = new Array(GG.slotsN).fill(null);              // (each slot's slice: { k, j0, npr, pages: Int32Array, stale: Uint8Array, used, cols, stones })
-  GG.ptab = new Uint32Array(GG.slotsN * 2 * GG_PTS).fill(GG_NONE);
+  GG.ptab = new Uint32Array(GG.slotsN * GG.ns * GG_PTS).fill(GG_NONE);
   GG.stoneTop = 0; GG.cellRef = land.cell; GG.dirtyRef = land.dirty; GG.ug = ugReach(); GG.gapV = land.gapsV;
   GG.dk = new Map(); GG.air = new Map(); GG.lv = new Map(); GG.lvK = new Map(); GG.wr = new Set(); GG.candAt = -1;
   GG.baseLeft = new Set(); ggBaseAll();                         // (the world's base groups still to make - ggBaseStep)
@@ -62296,13 +62521,13 @@ function ggReshape(k) {
   GG.rows.delete(k); if (GG.air) GG.air.delete(k);
   const si = ggSi(k); if (si < 0) return;
   const S = GG.sk[si], [rT, rB] = ggRows(k), j0 = (rT - GG_RB) >> 6, npr = Math.min(GG_MAXPR, ((rB - 1 - GG_RB) >> 6) - j0 + 1);
-  const P = new Int32Array(2 * npr).fill(-1), T = GG.ptab.slice(si * 2 * GG_PTS, (si + 1) * 2 * GG_PTS), o = si * 2 * GG_PTS;
-  GG.ptab.fill(GG_NONE, o, o + 2 * GG_PTS);
-  for (let wh = 0; wh < 2; wh++) for (let i = 0; i < S.npr; i++) {
+  const P = new Int32Array(GG.ns * npr).fill(-1), T = GG.ptab.slice(si * GG.ns * GG_PTS, (si + 1) * GG.ns * GG_PTS), o = si * GG.ns * GG_PTS;
+  GG.ptab.fill(GG_NONE, o, o + GG.ns * GG_PTS);
+  for (let wh = 0; wh < GG.ns; wh++) for (let i = 0; i < S.npr; i++) {
     const p = S.pages[wh * S.npr + i], j = S.j0 + i - j0;
     if (j >= 0 && j < npr) { P[wh * npr + j] = p; GG.ptab[o + wh * GG_PTS + j] = T[wh * GG_PTS + i]; } else if (p >= 0) GG.free.push(p);
   }
-  Object.assign(S, { j0, npr, pages: P, pu: new Int32Array(2 * npr), ru: new Int32Array(2 * npr), stale: new Uint8Array(2 * npr).fill(1), cols: false, top: null });
+  Object.assign(S, { j0, npr, pages: P, pu: new Int32Array(GG.ns * npr), ru: new Int32Array(GG.ns * npr), stale: new Uint8Array(GG.ns * npr).fill(1), cols: false, top: null });
   ggLvFill(S); ggPtabWrite(S); ggSlotWrite(S);
   for (const q of [k - 1, k + 1]) { const sq = ggSi(q); if (sq >= 0 && GG.sk[sq].ever) ggSlotWrite(GG.sk[sq]); }   // (its neighbours': the dark under it - ggSlotWrite)
 }
@@ -62313,8 +62538,8 @@ function ggWidth() {
   const n0 = GG.slotsN, n = ggSlotsNeed();
   if (n > n0) {
     const grow = (b, per, at = 0) => { const B = gpuBuf(at + n * per, 'ground grid'); gpuCopyBuf(b, 0, B, 0, at + n0 * per); gpuBufFree(b); GPU.stats.copies++; return B; };
-    GG.ptabBuf = grow(GG.ptabBuf, 2 * GG_PTS * 4); GG.slotBuf = grow(GG.slotBuf, 48); GG.colBuf = grow(GG.colBuf, 64 * GG_COLV * 16); GG.bcolBuf = grow(GG.bcolBuf, 64 * GG_BCV * 16, GG_STRATA * 16);
-    const T = new Uint32Array(n * 2 * GG_PTS).fill(GG_NONE); T.set(GG.ptab); GG.ptab = T;
+    GG.ptabBuf = grow(GG.ptabBuf, GG.ns * GG_PTS * 4); GG.slotBuf = grow(GG.slotBuf, 48); GG.colBuf = grow(GG.colBuf, 64 * GG_COLV * 16); GG.bcolBuf = grow(GG.bcolBuf, 64 * GG_BCV * 16, GG_STRATA * 16);
+    const T = new Uint32Array(n * GG.ns * GG_PTS).fill(GG_NONE); T.set(GG.ptab); GG.ptab = T;
     for (let i = n0; i < n; i++) GG.sk.push(null);
     GG.slotsN = n; GG.stats.bufs += 4;
   }
@@ -62323,6 +62548,7 @@ function ggWidth() {
 // a cell as painted: the grid's, or a body's under the water's line (ltBody) - which 0: a SOLID's only (the ground in front), 1: every body (the islands');
 // past the world's ends the open floor's
 function ggMat(c, r, which) {
+  if (which >= 2) return ltOpen(c) ? M_AIR : layCell(c, r, ggSetLay(which));   // (a layer's own - layCell; none past the world's ends)
   if (ltOpen(c)) return ltOpenCell(c, r);
   const m = ltCell(c, r); if (m !== M_AIR || !land.bd) return m;
   const B = land.bd[c]; if (!B || r < B.r0 || r >= B.r0 + B.m.length) return m;
@@ -62331,6 +62557,7 @@ function ggMat(c, r, which) {
 // a column's cells from row a to b (exclusive) as the ground in front: materials, layers (out) - the grid's direct, the bodies in
 function ggColCells(c, a, b, mat, lay, o, which) {
   const n = b - a;
+  if (which >= 2) { const L = ggSetLay(which); for (let i = 0; i < n; i++) { const r = a + i; mat[o + i] = ltOpen(c) ? M_AIR : layCell(c, r, L); lay[o + i] = mat[o + i] === M_AIR ? 0 : layLay(c, r, L); } return; }   // (a layer's own cells - layCell)
   if (ltOpen(c)) { const fl = ltOpenFl(c); for (let i = 0; i < n; i++) { mat[o + i] = seaBedCell(fl, LT_Y0 + (a + i + 0.5) * LT_CELL); lay[o + i] = 0; } return; }   // (past the world's ends: the open floor - ltOpenCell's rule)
   ltCell(c, 0);                                               // (its column laid, its slice made whole - ltCell)
   const k = (c / LT_CHUNK) | 0, rT = land.rT[k], rB = land.rB[k], w = land.cw[k], base = land.base[k] + (c - k * LT_CHUNK), B = land.bd ? land.bd[c] : null;
@@ -62399,8 +62626,11 @@ function ggSliceCols(k, S) {
     if (S.stoneSig !== undefined && S.stoneSig !== sig) S.stale.fill(1); S.stoneSig = sig; }
   ggSliceStones(k, S, true);
   // its first solid row a column (the open sky over the air above it)
-  S.top = [new Int32Array(64), new Int32Array(64)];
-  { const [rT, rB] = ggRows(k); for (const wh of [0, 1]) for (let q = 0; q < 64; q++) S.top[wh][q] = Math.min(rB, ggRun(c0 + q, rT, wh)[0]); }   // (the slice's runs - ggRun)
+  S.top = []; for (let wh = 0; wh < GG.ns; wh++) S.top.push(new Int32Array(64));
+  { const [rT, rB] = ggRows(k); for (let wh = 0; wh < GG.ns; wh++) for (let q = 0; q < 64; q++) S.top[wh][q] = Math.min(rB, ggRun(c0 + q, rT, wh)[0]); }   // (the slice's runs - ggRun)
+  // (each layer's rows in it - its runs' first top and last foot - ggSetNone; none: null)
+  S.fr = []; for (let wh = 2; wh < GG.ns; wh++) { S.fr[wh] = null; if (!layK(k, ggSetLay(wh))) continue; let a = 1 << 30, b = -(1 << 30);
+    for (const Rn of ggAirOf(k).runs[wh]) for (let i = 0; i + 1 < Rn.length; i += 2) { if (Rn[i] >= 1 << 30) break; a = Math.min(a, Rn[i]); b = Math.max(b, Rn[i + 1]); } if (a < b) S.fr[wh] = [a, b]; }
   S.ever = true;
   ggSlotWrite(S);
 }
@@ -62530,12 +62760,12 @@ function ggStonesPack(need, me) {
 // (a slot's numbers - and its neighbours' bottom rows: the dark under each slice is filled a pixel wider than it, over theirs - drawLandGround's)
 function ggSlotWrite(S) {
   const k = S.k, [rT, rB] = ggRows(k);
-  const a = new Int32Array([k, k * LT_CHUNK, rT, rB, S.j0, S.npr, S.sb | 0, LT_CHUNK, ggRB(k - 1), ggRB(k + 1), 0, 0]);
+  const a = new Int32Array([k, k * LT_CHUNK, rT, rB, S.j0, S.npr, S.sb | 0, LT_CHUNK, ggRB(k - 1), ggRB(k + 1), GG.ns, 0]);   // (ns: its page table's sets - the shader's stride)
   gpuWriteBuf(GG.slotBuf.gb, S.si * 48, new Uint8Array(a.buffer));
 }
-function ggPtabWrite(S) { gpuWriteBuf(GG.ptabBuf.gb, S.si * 2 * GG_PTS * 4, new Uint8Array(GG.ptab.buffer, S.si * 2 * GG_PTS * 4, 2 * GG_PTS * 4)); }
-// (page i of slot S - its first npr the ground in front's page rows, the next npr the islands' - in the page table)
-const ggPti = (S, i) => S.si * 2 * GG_PTS + (i >= S.npr ? GG_PTS + i - S.npr : i);
+function ggPtabWrite(S) { gpuWriteBuf(GG.ptabBuf.gb, S.si * GG.ns * GG_PTS * 4, new Uint8Array(GG.ptab.buffer, S.si * GG.ns * GG_PTS * 4, GG.ns * GG_PTS * 4)); }
+// (page i of slot S - its first npr the ground in front's page rows, the next npr the islands', the next the front layer's - in the page table)
+const ggPti = (S, i) => S.si * GG.ns * GG_PTS + ggWhOf(S, i) * GG_PTS + i % S.npr;
 // slice k's slot (made: the least lately used one given back if none is free)
 function ggSlotOf(k) {
   let si = ggSi(k);
@@ -62543,8 +62773,8 @@ function ggSlotOf(k) {
   si = GG.sk.indexOf(null);
   if (si < 0) { let best = -1, bu = Infinity; for (let i = 0; i < GG.sk.length; i++) { const S = GG.sk[i]; if (S.used < bu && S.used < renderTick && !ggKeep(S.k)) { bu = S.used; best = i; } } if (best < 0) return null; ggSlotFree(best); si = best; }   // (the world's own never: the base)
   const [rT, rB] = ggRows(k), j0 = (rT - GG_RB) >> 6, j1 = (rB - 1 - GG_RB) >> 6, npr = Math.min(GG_MAXPR, j1 - j0 + 1);
-  const S = GG.sk[si] = { si, k, j0, npr, pages: new Int32Array(2 * npr).fill(-1), pu: new Int32Array(2 * npr), ru: new Int32Array(2 * npr), stale: new Uint8Array(2 * npr).fill(1), used: renderTick, cols: false, sb: 0, sn: 0, top: null };
-  GG.slot.set(k, si); GG.ptab.fill(GG_NONE, si * 2 * GG_PTS, (si + 1) * 2 * GG_PTS); ggLvFill(S); ggPtabWrite(S);
+  const S = GG.sk[si] = { si, k, j0, npr, pages: new Int32Array(GG.ns * npr).fill(-1), pu: new Int32Array(GG.ns * npr), ru: new Int32Array(GG.ns * npr), stale: new Uint8Array(GG.ns * npr).fill(1), used: renderTick, cols: false, sb: 0, sn: 0, top: null };
+  GG.slot.set(k, si); GG.ptab.fill(GG_NONE, si * GG.ns * GG_PTS, (si + 1) * GG.ns * GG_PTS); ggLvFill(S); ggPtabWrite(S);
   return S;
 }
 function ggSlotFree(si) {
@@ -62581,7 +62811,7 @@ function ggPageGet(pre) {
 function ggCandTop(pre) {
   if (GG.candAt !== renderTick) {
     const L = [];
-    for (const S of GG.sk) if (S) for (let i = 0; i < 2 * S.npr; i++) if (S.pages[i] >= 0 && S.pu[i] < renderTick) L.push([Math.max(S.pu[i], S.ru[i]), S, i]);
+    for (const S of GG.sk) if (S) for (let i = 0; i < GG.ns * S.npr; i++) if (S.pages[i] >= 0 && S.pu[i] < renderTick) L.push([Math.max(S.pu[i], S.ru[i]), S, i]);
     for (const e of GG.lv.values()) if (e.p >= 0 && e.used < renderTick && !ggBaseE(e)) L.push([Math.max(e.used, e.ru), e, -1]);   // (the base's never)
     L.sort((a, b) => b[0] - a[0]); GG.cand = L; GG.candAt = renderTick;
   }
@@ -62602,21 +62832,25 @@ const ggPreRoom = () => GG.free.length > 0 || !!ggCandTop(true);
 function ggAirOf(k) {
   const A0 = GG.air.get(k); if (A0) return A0;
   const [rT, rB] = ggRows(k), b0 = (rT - GG_RB) >> 6, nb = ((rB - 1 - GG_RB) >> 6) - b0 + 1, c0 = k * LT_CHUNK, w = LT_CHUNK;
-  const A = { top: rT, b0, nb, lo: [new Int32Array(nb).fill(0x7fffffff), new Int32Array(nb).fill(0x7fffffff)], hi: [new Int32Array(nb).fill(-0x7fffffff), new Int32Array(nb).fill(-0x7fffffff)], see: false, runs: [[], []] };
+  const A = { top: rT, b0, nb, lo: [], hi: [], see: false, runs: [] };
+  // (a layer's set only in its slices: elsewhere no cell of it - no run, no open air asked)
+  const sets = []; for (let wh = 0; wh < GG.ns; wh++) { A.lo.push(new Int32Array(nb).fill(0x7fffffff)); A.hi.push(new Int32Array(nb).fill(-0x7fffffff)); A.runs.push([]); if (wh < 2 || layK(k, ggSetLay(wh))) sets.push(wh); }
   const n = rB - rT; if (!GG_FILL.cm || GG_FILL.cm.length < n) { GG_FILL.cm = new Uint8Array(n); GG_FILL.cl = new Uint8Array(n); }
   const cm = GG_FILL.cm, cl = GG_FILL.cl;
   for (let q = 0; q < w; q++) {
     const c = c0 + q, U = land.ugBody ? land.ugBody[c] : null;
     if (land.ugSee && land.ugSee[c]) A.see = true;
-    for (let wh = 0; wh < 2; wh++) {
+    for (let wh = 2; wh < GG.ns; wh++) if (!sets.includes(wh)) A.runs[wh].push(GG_NORUN);
+    for (const wh of sets) {
       ggColCells(c, rT, rB, cm, cl, 0, wh); const lo = A.lo[wh], hi = A.hi[wh], RN = [];
       for (let i = 0; i < n; i++) {
         if (cm[i] !== M_AIR) { if (!(RN.length & 1)) RN.push(rT + i); continue; }
         if (RN.length & 1) RN.push(rT + i);
-        const r = rT + i; if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) continue;
+        const r = rT + i; if (wh < 2 && U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) continue;
         const b = ((r - GG_RB) >> 6) - b0; if (r < lo[b]) lo[b] = r; if (r > hi[b]) hi[b] = r;
       }
-      if (!(RN.length & 1)) RN.push(rB); RN.push(1 << 30); A.runs[wh].push(Int32Array.from(RN));   // (its solid runs [start, end): the last one on under the slice)
+      if (wh >= 2) { if (RN.length & 1) RN.push(rB); } else if (!(RN.length & 1)) RN.push(rB);   // (a layer has no rock under the slice: a run of it ends there)
+      RN.push(1 << 30); A.runs[wh].push(Int32Array.from(RN));   // (its solid runs [start, end): the last one on under the slice)
     }
   }
   GG.air.set(k, A); return A;
@@ -62628,7 +62862,7 @@ function ggAirIn(k, a, b, wh) {
   return false;
 }
 // (the slices' solid runs, each column's - ggAirOf) the run holding row r of column c (set wh), or else the first under it: GG_RUN [start, end)
-const GG_RUN = [0, 0];
+const GG_RUN = [0, 0], GG_NORUN = Int32Array.from([1 << 30]);   // (GG_NORUN: a column with no run at all)
 function ggRun(c, r, wh) {
   const k = Math.floor(c / LT_CHUNK), Rn = ggAirOf(k).runs[wh][c - k * LT_CHUNK];
   for (let i = 0; i < Rn.length; i += 2) if (Rn[i + 1] > r) { GG_RUN[0] = Rn[i]; GG_RUN[1] = Rn[i + 1]; return GG_RUN; }
@@ -62639,7 +62873,7 @@ function ggDepth(c, r, wh, SE) { const R = ggRun(c, r, wh); return R[0] > r ? 0 
 function ggDown(c, r, wh) { const R = ggRun(c, r, wh); return Math.max(0, R[0] - r); }
 // page i of slot S dark, known from the slices' open air (false: the job decides)
 function ggDark(S, i) {
-  const wh = i >= S.npr ? 1 : 0, k = S.k, r0 = GG_RB + (S.j0 + i % S.npr) * 64, H = Math.min(64, Math.max(Math.ceil(ugReach() / LT_CELL) + 2, 30));
+  const wh = ggWhOf(S, i), k = S.k, r0 = GG_RB + (S.j0 + i % S.npr) * 64, H = Math.min(64, Math.max(Math.ceil(ugReach() / LT_CELL) + 2, 30));
   if (ggAirOf(k).see) return false;
   return !ggAirIn(k - 1, r0 - H, r0 + 64 + H, wh) && !ggAirIn(k, r0 - H, r0 + 64 + H, wh) && !ggAirIn(k + 1, r0 - H, r0 + 64 + H, wh);
 }
@@ -62649,7 +62883,7 @@ function ggDark(S, i) {
 function ggLevel(px) { if (!(px > 0) || px >= 0.5) return 0; let f = 2, L = 1; while (f < 8 && f * 2 * px <= 1) { f *= 2; L++; } return L; }
 // the record of level L's page row JL of slices K F .. K F + F - 1, set wh (made when first asked for: no page, stale)
 function ggLv(L, K, wh, JL) {
-  const g = ggLvKey(L, K), key = (g * 2 + wh) * 1024 + JL; let e = GG.lv.get(key);
+  const g = ggLvKey(L, K), key = (g * GG.ns + wh) * 1024 + JL; let e = GG.lv.get(key);
   if (!e) { e = { L, K, wh, JL, p: -1, black: false, stale: 1, used: 0, ru: 0 }; GG.lv.set(key, e); let A = GG.lvK.get(g); if (!A) GG.lvK.set(g, A = []); A.push(e); }
   return e;
 }
@@ -62661,12 +62895,12 @@ function ggLvPub(e) {
   const F = 1 << e.L;
   for (let k = e.K * F; k < (e.K + 1) * F; k++) {
     const si = ggSi(k), j = si >= 0 ? ggLvRow(k, e.L, e.JL) : -1; if (j < 0) continue;
-    GG.ptab[si * 2 * GG_PTS + e.wh * GG_PTS + GG_LOFF[e.L] + j] = ggLvVal(e); GG.wr.add(GG.sk[si]);
+    GG.ptab[si * GG.ns * GG_PTS + e.wh * GG_PTS + GG_LOFF[e.L] + j] = ggLvVal(e); GG.wr.add(GG.sk[si]);
   }
 }
 // a slot just made: the level pages its slice is in, in its table
 function ggLvFill(S) {
-  for (let L = 1; L <= GG_LMAX; L++) for (const e of GG.lvK.get(ggLvKey(L, S.k >> L)) || []) { const j = ggLvRow(S.k, L, e.JL); if (j >= 0) GG.ptab[S.si * 2 * GG_PTS + e.wh * GG_PTS + GG_LOFF[L] + j] = ggLvVal(e); }
+  for (let L = 1; L <= GG_LMAX; L++) for (const e of GG.lvK.get(ggLvKey(L, S.k >> L)) || []) { const j = ggLvRow(S.k, L, e.JL); if (j >= 0) GG.ptab[S.si * GG.ns * GG_PTS + e.wh * GG_PTS + GG_LOFF[L] + j] = ggLvVal(e); }
 }
 // a level page's halo (in its cells): the light's reach, the edge class's 3, the overhang's 29 columns
 const ggLvH = (F, cap) => Math.min(64, Math.max(4, Math.ceil(cap / F) + 2, Math.ceil(29 / F) + 1));
@@ -62701,7 +62935,7 @@ function ggLvJob(e, pre) {
   const L = e.L, F = 1 << L, h = F >> 1, wh = e.wh, k0 = e.K * F, c0 = k0 * LT_CHUNK, r0 = GG_RB + e.JL * 64 * F;
   const SS = [];
   for (let i = 0; i < F; i++) { const k = k0 + i, Sl = ggSlotOf(k); if (!Sl) return false; Sl.used = renderTick; if (!Sl.cols) { ggSliceCols(k, Sl); Sl.cols = true; } SS.push(Sl); }
-  if (wh && SS.every(Sl => !Sl || r0 >= Sl.islMax)) { e.black = true; e.stale = 0; if (e.p >= 0) GG.free.push(e.p); e.p = -1; ggLvPub(e); return false; }   // (no island's rows in it)
+  if (wh && SS.every(Sl => !Sl || ggSetNone(Sl, wh, r0, 64 * F))) { e.black = wh === 1; e.stale = 0; if (e.p >= 0) GG.free.push(e.p); e.p = -1; ggLvPub(e); return false; }   // (no island's rows in it)
   const cap = Math.ceil(ugReach() / LT_CELL) + 2, H = ggLvH(F, cap), BW = 64 + 2 * H, N = BW * BW;
   const p = e.p >= 0 ? e.p : ggPageGet(pre); if (p < 0) return false;
   e.p = p; e.black = false; e.stale = 0; ggLvPub(e);
@@ -62710,10 +62944,10 @@ function ggLvJob(e, pre) {
   const hb = N * 4, ib = 4096 * 4, gb = BW * 16 * 4, nw = (80 + hb + 3 * ib + gb) / 4;
   if (!GG.pay || GG.pay.length < nw) GG.pay = new Uint32Array(nw);
   const u = GG.pay, hpos = 20, ipos = 20 + N, npos = ipos + 4096, wpos = npos + 4096, gpos = wpos + 4096;
-  const gapC = land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;
+  const fr = wh >= 2, gapC = fr ? null : land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;   // (a layer's: its own cells only - ggPageJob)
   const slotOf = c => SS[(c - c0) >> 6];
   for (let x = 0; x < BW; x++) {
-    const c = c0 + (x - H) * F + h, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = inC && land.ugBody ? land.ugBody[c] : null, inner = x >= H && x < H + 64;
+    const c = c0 + (x - H) * F + h, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = !fr && inC && land.ugBody ? land.ugBody[c] : null, inner = x >= H && x < H + 64;
     ggColCells(c, rA, rA + n, colM, colL, 0, wh);
     const Sl = inner ? slotOf(c) : null, sTop = Sl && Sl.top ? Sl.top[wh][c & 63] : -1e9, sb = inner && inC && seam ? seam[c] : -1;
     for (let y = 0; y < BW; y++) {
@@ -62722,15 +62956,15 @@ function ggLvJob(e, pre) {
       if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; }
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (l & 15) << 11;
-        const ug = ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
+        const ug = fr ? -1 : ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
         if (sb >= 0 && ltTC(c, r) >= sb) w |= 1 << 21;
       } else if (inner && y >= H && y < H + 64) w |= l << 11;
       u[hpos + y * BW + x] = w >>> 0;
     }
   }
-  const SR = ggStoneLv(c0, r0, F), W1 = new Uint32Array(64);
+  const SR = fr ? null : ggStoneLv(c0, r0, F), W1 = new Uint32Array(64);
   for (let q = 0; q < 64; q++) {
-    const c = c0 + q * F + h, x = q + H, Sl = slotOf(c), SE = Sl && Sl.seg ? Sl.seg[c & 63] : -1e9;
+    const c = c0 + q * F + h, x = q + H, Sl = slotOf(c), SE = Sl && Sl.seg && !fr ? Sl.seg[c & 63] : -1e9;
     // depth at the page's first cell: the solid cells straight over it, counted a level's cell at a time
     let depth = 0;
     if (mat[H * BW + x] !== M_AIR) depth = ggDepth(c, r0 + h, wh, SE);   // (the slices' runs - ggRun)
@@ -62743,7 +62977,7 @@ function ggLvJob(e, pre) {
       u[ipos + o] = Math.min(0xffff, depth);
       const hsh = hash(c * 1.37 + r * 7.91);
       u[npos + o] = (Math.min(65535, Math.floor(hsh * 65536)) | Math.min(65535, Math.floor(hash(c * 2.17 + r * 0.61) * 65536)) << 16) >>> 0;
-      const sj = SR.id[o], si = sj >= 0 && Sl && Sl.sIdx ? Sl.sIdx.get(sj) : undefined;
+      const sj = SR ? SR.id[o] : -1, si = sj >= 0 && Sl && Sl.sIdx ? Sl.sIdx.get(sj) : undefined;
       u[wpos + o] = ((si === undefined ? 0xffff : si) | ggRare(c, r, m, depth, hsh, mat[(H + j + 1) * BW + x], lay[(H + j) * BW + x], sj, SR, o, r < SE) << 16) >>> 0;
       depth += F;
     }
@@ -62771,7 +63005,7 @@ function ggBaseGroup(K, late) {
     if (!Sl.cols) { if (late()) return false; ggSliceCols(k, Sl); Sl.cols = true; }
     const [a, b] = ggRows(k); if (a < rT) rT = a; if (b > rB) rB = b;
   }
-  for (let J = (rT - GG_RB) >> (6 + L), J1 = (rB - 1 - GG_RB) >> (6 + L); J <= J1; J++) for (const wh of [0, 1]) {
+  for (let J = (rT - GG_RB) >> (6 + L), J1 = (rB - 1 - GG_RB) >> (6 + L); J <= J1; J++) for (const wh of [0, 1, ...SHP.layList.filter(Lq => layGroup(K, Lq)).map(Lq => 1 + Lq)]) {
     const e = ggLv(L, K, wh, J); if (!e.stale) continue;
     if (late()) return false;
     if (ggLvDark(e)) { if (e.p >= 0) GG.free.push(e.p); e.p = -1; e.black = true; e.stale = 0; ggLvPub(e); GG.stats.dark++; continue; }
@@ -62795,7 +63029,7 @@ const GG_FILL = { mat: null, lay: null };
 // page i of slot S all dark: no page, the table's BLACK (drawn the ground's dark)
 function ggPageBlack(S, i) { if (S.pages[i] >= 0) GG.free.push(S.pages[i]); S.pages[i] = -1; GG.ptab[ggPti(S, i)] = GG_BLACK; S.stale[i] = 0; }
 function ggPageJob(S, i, pre) {
-  const which = i >= S.npr ? 1 : 0, k = S.k, c0 = k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, cap = Math.ceil(ugReach() / LT_CELL) + 2, H = Math.min(64, Math.max(cap, 30)), BW = 64 + 2 * H;
+  const which = ggWhOf(S, i), k = S.k, c0 = k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, cap = Math.ceil(ugReach() / LT_CELL) + 2, H = Math.min(64, Math.max(cap, 30)), BW = 64 + 2 * H;
   const N = BW * BW; if (!GG_FILL.mat || GG_FILL.mat.length < N) { GG_FILL.mat = new Uint8Array(N); GG_FILL.lay = new Uint8Array(N); }
   const mat = GG_FILL.mat, lay = GG_FILL.lay, colM = new Uint8Array(BW), colL = new Uint8Array(BW);
   // the block's cells, a column at a time
@@ -62816,9 +63050,11 @@ function ggPageJob(S, i, pre) {
   if (!GG.pay || GG.pay.length < nw) GG.pay = new Uint32Array(nw);
   const u = GG.pay;
   const hpos = 20, ipos = 20 + N, npos = ipos + 4096, wpos = npos + 4096, gpos = wpos + 4096;
-  const gapC = land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;
+  // (a layer's set - which >= 2: its own cells only - none of the shapes' overhangs, bodies under the water or HIDE INTERIOR, no stones: those are the
+  // back ground's)
+  const fr = which >= 2, gapC = fr ? null : land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;
   for (let x = 0; x < BW; x++) {
-    const c = c0 - H + x, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = inC && land.ugBody ? land.ugBody[c] : null, q = x - H, inner = q >= 0 && q < 64;
+    const c = c0 - H + x, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = !fr && inC && land.ugBody ? land.ugBody[c] : null, q = x - H, inner = q >= 0 && q < 64;
     const sTop = inner && S.top ? S.top[which][q] : -1e9, sb = inner && inC && seam ? seam[c] : -1;
     for (let y = 0; y < BW; y++) {
       const r = r0 - H + y, m = mat[y * BW + x]; let w = m;
@@ -62826,7 +63062,7 @@ function ggPageJob(S, i, pre) {
       if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; }
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (lay[y * BW + x] & 15) << 11;
-        const ug = ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
+        const ug = fr ? -1 : ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
         if (sb >= 0 && ltTC(c, r) >= sb) w |= 1 << 21;
       } else if (inner && y >= H && y < H + 64) w |= lay[y * BW + x] << 11;
       u[hpos + y * BW + x] = w >>> 0;
@@ -62835,14 +63071,14 @@ function ggPageJob(S, i, pre) {
   // the page's columns: depth, rows to the ground under the air, the smooth edge's neighbours' tops; its noise
   // the page's stones (stoneRaster - the processor's, in doubles): each cell's stone, its place in the slice's list
   // (stones only in the world's columns - its first sw)
-  const sw = ggWW(k), ra = sw ? Math.max(land.rT[k], r0) : 0, rb = sw ? Math.min(land.rB[k], r0 + 64) : 0, SR = rb > ra ? stoneRaster(k, sw, ra, rb) : null;
+  const sw = ggWW(k), ra = sw ? Math.max(land.rT[k], r0) : 0, rb = sw ? Math.min(land.rB[k], r0 + 64) : 0, SR = rb > ra && !fr ? stoneRaster(k, sw, ra, rb) : null;
   const runStart = (c, r) => ggRun(c, r, which)[0];   // (the run holding r - the slices' runs, ggRun)
   const splitRow = c => { if (c < 0 || c >= land.cols) return -1e9; const kk = (c / LT_CHUNK) | 0, e = islSplitEnd(kk, c - kk * LT_CHUNK); return e > 0 ? e - 4 + land.rT[kk] : -1e9; };
   for (let q = 0; q < 64; q++) {
     const c = c0 + q, x = q + H;
     // depth at the page's first row: the solid cells straight over it
     // (ltDepthAt: and never across a segment's end row SE - the ground in front's own top under it)
-    const SE = q < 64 && S.seg ? S.seg[q] : -1e9;
+    const SE = q < 64 && S.seg && !fr ? S.seg[q] : -1e9;
     let depth = mat[H * BW + x] !== M_AIR ? ggDepth(c, r0, which, SE) : 0;
     // rows to the ground under the page's last row
     let down = ggDown(c, r0 + 64, which);
@@ -62929,7 +63165,8 @@ function ggStep(views) {
   if (!ggPools()) { if (GPU.on) frameWait('ground'); return; }   // (a ground to draw and the device lost - not drawn: the loading cover waits)
   ggFlush();                                                   // (a batch left from a frame cut short: sent before its places are given again)
   const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0; GG.bat.z0 = 0;
-  if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggPagesAgain(); ggReset(); }   // (a bigger world: its slots' buffers made again; a new world: the pages' pool at its start)
+  const nsNew = GG.ns !== ggNS(); if (nsNew) { GG.ns = ggNS(); GG.slotsN = 0; }   // (a layer more or fewer: the page tables made again for its sets - all the ground loaded again, a piece a frame)
+  if (nsNew || GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggPagesAgain(); ggReset(); }   // (a bigger world: its slots' buffers made again; a new world: the pages' pool at its start)
   else if (GG.nk !== Math.ceil(land.cols / LT_CHUNK)) ggWidth();   // (its width changed in place - an edit: everything kept)
   for (const k of GG.rk) ggReshape(k); GG.rk.clear();          // (slices whose rows an edit changed)
   { const rs = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic'].map(n => biomeSides(n).roots).join() + JSON.stringify((typeof BIOME_SURF !== 'undefined' && BIOME_SURF.sea) || []);   // (BOTTOM ROOTS, the sea's layers: the rare picks made with them)
@@ -62941,7 +63178,7 @@ function ggStep(views) {
     for (let L = 1; L <= GG_LMAX; L++) for (const e of GG.lvK.get(ggLvKey(L, k >> L)) || []) { const a = GG_RB + e.JL * (64 << L); if (a + (64 << L) > D[0] && a < D[1]) e.stale = 1; }   // (the levels' pages it reaches)
     const si = ggSi(k); if (si < 0) continue; const S = GG.sk[si];
     S.cols = false;
-    for (let i = 0; i < 2 * S.npr; i++) { const a = GG_RB + (S.j0 + i % S.npr) * 64; if (a + 64 > D[0] && a < D[1]) S.stale[i] = 1; }
+    for (let i = 0; i < GG.ns * S.npr; i++) { const a = GG_RB + (S.j0 + i % S.npr) * 64; if (a + 64 > D[0] && a < D[1]) S.stale[i] = 1; }
   }
   GG.dk.clear();
   // the work: every page a view shows (and a view's width either side, a view's height over and under, when there's time left) - at the view's level
@@ -62952,7 +63189,7 @@ function ggStep(views) {
     const [x0, x1, y0, y1, sv] = R.length >= 4 && !R[0].z ? R : (([v, cp, , w]) => { const sv = S * v.z, a = cp / sv; return [a, a + w / sv, v.top, v.top + VIEW_H / v.z, sv]; })(R);
     const Lv = ggLevel((sv || 1) * LT_CELL), xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, W = x1 - x0, Hh = y1 - y0;
     { const [a, b, c, d] = ring ? [x0 - W, x1 + W, y0 - Hh, y1 + Hh] : [x0, x1, y0, y1];
-      for (const [wh, ks] of [[0, ggSlices(a, b)], [1, islSlices(a, b)]]) for (const k of ks) {   // (the ground in front's pages - past the world's ends too -, the islands')
+      for (const [wh, ks] of [[0, ggSlices(a, b)], [1, islSlices(a, b)], ...laySets(a, b)]) for (const k of ks) {   // (the ground in front's pages - past the world's ends too -, the islands', each layer's)
         const [rT, rB] = ggRows(k), ra = Math.max(rT, Math.floor((c - LT_Y0) / LT_CELL) - 4), rb = Math.min(rB, Math.ceil((d - LT_Y0) / LT_CELL) + 4), xk = (k + 0.5) * LT_CHUNK * LT_CELL;
         const si = ggSi(k), Sk = si >= 0 ? GG.sk[si] : null;
         if (!ring) { if (Sk) Sk.used = renderTick; if (!wh) want.push([Math.abs(xk - xm) < W / 4 ? 0 : 1, Math.abs(xk - xm), 2, k]); }   // (its slot: its columns' numbers, stones - drawn only with them)
@@ -62992,10 +63229,10 @@ function ggStep(views) {
     if (j - Sl.j0 < 0 || j - Sl.j0 >= Sl.npr) continue;
     const i = j - Sl.j0 + wh * Sl.npr; if (pr < 3) Sl.pu[i] = renderTick; else Sl.ru[i] = renderTick;
     if (!Sl.stale[i] && Sl.cols) continue;
-    if (wh && Sl.cols && GG_RB + j * 64 >= Sl.islMax) { Sl.stale[i] = 0; continue; }   // (no island's rows in it: no island page)
+    if (wh && Sl.cols && ggSetNone(Sl, wh, GG_RB + j * 64, 64)) { Sl.stale[i] = 0; continue; }   // (no island's rows in it: no island page; none of the front layer's)
     if (late(pr)) break;
     if (!Sl.cols) { ggSliceCols(k, Sl); Sl.cols = true; }
-    if (wh && GG_RB + j * 64 >= Sl.islMax) { Sl.stale[i] = 0; continue; }
+    if (wh && ggSetNone(Sl, wh, GG_RB + j * 64, 64)) { Sl.stale[i] = 0; continue; }
     if (!Sl.stale[i]) continue;
     if (ggDark(Sl, i)) { ggPageBlack(Sl, i); GG.wr.add(Sl); GG.stats.dark++; nd++; continue; }   // (dark: known from the slices' open air, no job - ggDark)
     if (GG.fj >= GG_JOBS) continue;                             // (the frame's jobs all given out - GG_JOBS: the dark ones still marked)
@@ -63145,22 +63382,22 @@ function ggNeed() {
   for (const R of GG.views || []) {
     const [x0, x1, y0, y1, sv] = R.length >= 4 && !R[0].z ? R : (([v, cp, , w]) => { const sv = S * v.z, a = cp / sv; return [a, a + w / sv, v.top, v.top + VIEW_H / v.z, sv]; })(R);
     const Lv = ggLevel((sv || 1) * LT_CELL); o.levels.push(Lv);
-    for (const [wh, ks] of [[0, ggSlices(x0, x1)], [1, islSlices(x0, x1)]]) for (const k of ks) {
+    for (const [wh, ks] of [[0, ggSlices(x0, x1)], [1, islSlices(x0, x1)], ...laySets(x0, x1)]) for (const k of ks) {
       o.slices++;
       const [rT, rB] = ggRows(k), ra = Math.max(rT, Math.floor((y0 - LT_Y0) / LT_CELL) - 4), rb = Math.min(rB, Math.ceil((y1 - LT_Y0) / LT_CELL) + 4), si = ggSi(k), Sl = si >= 0 ? GG.sk[si] : null;
-      if (wh && Sl && Sl.cols && ra >= Sl.islMax) continue;
+      if (wh && Sl && Sl.cols && ggSetNone(Sl, wh, ra, rb - ra)) continue;
       const sh = 6 + Lv, seen = new Set();
       for (let J = (ra - GG_RB) >> sh; J <= (rb - 1 - GG_RB) >> sh; J++) {
         o.want++;
         if (!Sl) { o.noSlot++; continue; }
-        const v = GG.ptab[si * 2 * GG_PTS + wh * GG_PTS + GG_LOFF[Lv] + (J - ((rT - GG_RB) >> sh))];
-        const E = Lv ? GG.lv.get((ggLvKey(Lv, k >> Lv) * 2 + wh) * 1024 + J) : null;
+        const v = GG.ptab[si * GG.ns * GG_PTS + wh * GG_PTS + GG_LOFF[Lv] + (J - ((rT - GG_RB) >> sh))];
+        const E = Lv ? GG.lv.get((ggLvKey(Lv, k >> Lv) * GG.ns + wh) * 1024 + J) : null;
         const st = Lv ? (E || { stale: 1 }).stale : Sl.stale[J - Sl.j0 + wh * Sl.npr];
         if (st) o.stale++; else if (v === GG_BLACK) o.black++; else if (v !== GG_NONE) o.page++; else o.stale++;
       }
       for (let j = (ra - GG_RB) >> 6; j <= (rb - 1 - GG_RB) >> 6; j++) {
         let any = false;
-        if (Sl) for (let L = 0; L <= GG_LMAX && !any; L++) { const jj = L ? ggLvRow(k, L, j >> L) : j - Sl.j0; if (jj >= 0 && jj < (L ? 64 : Sl.npr) && GG.ptab[si * 2 * GG_PTS + wh * GG_PTS + GG_LOFF[L] + jj] !== GG_NONE) any = true; }
+        if (Sl) for (let L = 0; L <= GG_LMAX && !any; L++) { const jj = L ? ggLvRow(k, L, j >> L) : j - Sl.j0; if (jj >= 0 && jj < (L ? 64 : Sl.npr) && GG.ptab[si * GG.ns * GG_PTS + wh * GG_PTS + GG_LOFF[L] + jj] !== GG_NONE) any = true; }
         if (!any) o.hole++;
       }
     }
@@ -63170,9 +63407,9 @@ function ggNeed() {
 // (tools: every dark page ggDark gives in the slots checked against the job's own test - its halo's cells, ugSee's) -> [checked, wrong]
 function ggDarkCheck() {
   let n = 0, bad = 0;
-  for (const S of GG.sk) if (S) for (let i = 0; i < 2 * S.npr; i++) {
+  for (const S of GG.sk) if (S) for (let i = 0; i < GG.ns * S.npr; i++) {
     if (!ggDark(S, i)) continue; n++;
-    const which = i >= S.npr ? 1 : 0, c0 = S.k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, H = Math.min(64, Math.max(Math.ceil(ugReach() / LT_CELL) + 2, 30)), BW = 64 + 2 * H;
+    const which = ggWhOf(S, i), c0 = S.k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, H = Math.min(64, Math.max(Math.ceil(ugReach() / LT_CELL) + 2, 30)), BW = 64 + 2 * H;
     const cm = new Uint8Array(BW), cl = new Uint8Array(BW); let open = false;
     for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x; ggColCells(c, r0 - H, r0 - H + BW, cm, cl, 0, which); const U = land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null;
       for (let y = 0; y < BW; y++) if (cm[y] === M_AIR && !(U && ugInBody(c, LT_Y0 + (r0 - H + y + 0.5) * LT_CELL))) { open = true; break; } }
@@ -63192,7 +63429,7 @@ if (typeof window !== 'undefined') window.__ggShot = async (x0, y0, sv, w, h, op
   CAMPX = Math.round(x0 * sv); TOPPX = Math.round(y0 * sv); SV = sv; VSX = 0; VWW = w / sv; SHX = SHY = 0;
   try {
     if (opt.back) ggDrawTo(t, frameCam(0, null, w, h), landSlices(R[0], R[1]), { which: 0, fx: opt.fx || [1, 1, 1], back: { cover: false, hz: [0, 0, 0], nohaze: true } });   // (opt.back: the field behind and the back wall, no haze)
-    if (opt.back !== 'only') for (const which of opt.which == null ? [1, 0] : [opt.which]) ggDrawTo(t, frameCam(0, null, w, h), which ? islSlices(R[0], R[1]) : ggSlices(R[0], R[1]), { which, fx: opt.fx || [1, 1, 1], rim: opt.rim || null, lx: -1, ly: -0.5 });   // (the islands' rows, then the ground in front)
+    if (opt.back !== 'only') for (const which of opt.which == null ? [1, 0, ...SHP.layList.map(L => 1 + L)] : [opt.which]) ggDrawTo(t, frameCam(0, null, w, h), which === 1 ? islSlices(R[0], R[1]) : which >= 2 ? laySlices(R[0], R[1], ggSetLay(which)) : ggSlices(R[0], R[1]), { which, fx: opt.fx || [1, 1, 1], rim: opt.rim || null, lx: -1, ly: -0.5 });   // (the islands' rows, then the ground in front)
   }
   finally { [CAMPX, TOPPX, SV, VSX, VWW, SHX, SHY] = was; }
   const key = 'ggshot:' + seenR('ggshot'); gpuRead(t, 0, 0, w, h, key); gpuSubmit();
@@ -63302,6 +63539,102 @@ function vegFadeAt(x, isl) {
   return n ? s / n : 1;
 }
 const vegFadeKeep = (x, salt, isl) => { const f = vegFadeAt(x, isl); return f >= 0.999 || hash(x * 0.913 + salt * 7.7) < f; };   // (a plant there kept, as its piece fades)
+
+//@src 50-land-zz-layers.js:1
+/* ================================================================
+   TERRAIN LAYERS - EACH LAYER'S OWN GROUND (terrain-layers chat, Nov 18 - terrain-layers-plan-nov18.md; the user's drawing, 20:59: a road running down
+   IN FRONT of a hill to a dock, joining the hill's slope at a point; 21:03 "you would not be able to drive behind a layer"; 21:15 layers sit on layers).
+   A shape's lay (a whole number >= 1, its parent's + 1 - the editor keeps it) puts it in front of every shape of a lower layer; 0 (none) is every
+   shape as it always was.
+   - LAYER 0, THE BACK GROUND, is the grid as it always was (land.cell): every shape, every layer's too. Everything that flies meets it.
+   - LAYER L's OWN GROUND (L >= 1) is its shapes alone, laid by the one material rule (ltColP / ltMatAt - grass, sand, the TERRAIN SURFACE layers from
+     its own top) - only the columns its shapes stand in, a column at a time as the grid's are laid (ltFillCol -> layFillCol): land.ls[L][c], the
+     column's rows from ltR0(c). A layer's cell is ground only where the back ground's cell is too (layCell): a crater, a hole, anything that digs the
+     grid digs every layer with it - one dig.
+   - WHAT A THING ON LAYER L MEETS is its own layer's ground and every layer's in front of it - never one behind: so nothing can go behind a layer in
+     front of it, it meets its ground there, as ground or a wall. Asked through layBelow / laySolid / layTop (L 0: the back ground's own answers -
+     landBelow, landSolid, landTop - everything, as always); layHas.
+   - Drawn by the ground's one shader, a GPU page set a layer (50-land-zz-grid.js: set 1 + L), back to front over the back ground (drawLay - each layer's ground, then what stands on it: renderLandObjects0).
+   ================================================================ */
+// any terrain layer at all (SHP.lays: each layer's shapes - shpBuild)
+const layOn = () => SHP.layMax > 0;
+// does a shape of layer L stand in column c (its spans - no cells needed)
+// (L left out: any layer in front of the back - a column where a vehicle may have a layer to keep or choose)
+function layColHas(c, L) { if (L == null) { for (const k of SHP.layList) if (layColHas(c, k)) return true; return false; } const N = SHP.lays.get(L); if (!N) return false; for (const n of N) { const v = shpIv(n, c); if (v && v.length) return true; } return false; }
+const layHas = (x, L) => layColHas(ltCol(x), L);
+// layer L's shapes' spans in column c, merged ([top, bottom) pairs, world y), or null
+function laySpans(c, L) { let A = null; for (const n of SHP.lays.get(L) || []) { const v = shpIv(n, c); if (v && v.length) (A || (A = [])).push(...v); } return A ? ivMerge(A) : null; }
+// (ltFillCol, after the holes are cut) column c's cells of every layer: the material each would be from its own layer's span's top - m | its
+// TERRAIN SURFACE layer << 3 (ltMatAt, LT_LAY); a layer with no shape there keeps nothing for the column
+function layFillCol(c) {
+  if (!layOn()) return;
+  if (!land.ls) land.ls = [];
+  const r0 = ltR0(c), r1 = ltR1(c), x = c * LT_CELL;
+  for (const L of SHP.layList) {
+    const A = land.ls[L] || (land.ls[L] = []), v = laySpans(c, L);
+    if (!v) { A[c] = undefined; continue; }
+    const col = A[c] && A[c].length === r1 - r0 ? A[c].fill(0) : (A[c] = new Uint8Array(r1 - r0));
+    for (let i = 0; i + 1 < v.length; i += 2) {
+      const tp = v[i], P = ltColP(c, x, tp, land.R);
+      for (let r = Math.max(r0, Math.ceil((v[i] - LT_Y0) / LT_CELL)); r < r1; r++) {
+        const y = LT_Y0 + r * LT_CELL; if (y >= v[i + 1]) break;
+        col[r - r0] = ltMatAt(c, r, y, tp, P) | LT_LAY << 3;
+      }
+    }
+  }
+}
+// layer L's own cell at (c, r) as kept (0 none)
+function layRaw(c, r, L) {
+  if (!layColHas(c, L) || ltCell(c, r) === M_AIR || !ltIn(c, r)) return 0;   // (ltCell: its column laid first; the back ground's cell dug - every layer's)
+  const A = land.ls && land.ls[L], col = A && A[c];
+  return col && col.length === ltR1(c) - ltR0(c) ? col[r - ltR0(c)] : 0;
+}
+// layer L's own cell at (c, r): its material, M_AIR where none
+const layCell = (c, r, L) => layRaw(c, r, L) & 7;
+// its TERRAIN SURFACE layer + 1 (0 none)
+const layLay = (c, r, L) => layRaw(c, r, L) >> 3;
+// layer L's own ground under y at x: its first cell's top at or under y raised to its own smooth line (gedgeOver), y itself when y is already under the
+// line; Infinity where it has none under y
+function layOwnBelow(x, y, L) {
+  const c = ltCol(x); if (c < 0 || c >= land.cols || !layColHas(c, L)) return Infinity;
+  for (let r = Math.max(ltR0(c), ltRow(y)), r1 = ltR1(c); r < r1; r++) if (layCell(c, r, L) !== M_AIR) return Math.max(y, gedgeOver(x, LT_Y0 + r * LT_CELL, L));
+  return Infinity;
+}
+// THE GROUND UNDER y AT x FOR A THING ON LAYER L: the nearest among its own layer's and every layer's in front of it (Infinity: none); L 0 the back
+// ground's, every shape's (landBelow)
+function layBelow(x, y, L) {
+  if (!L) return landBelow(x, y);
+  let g = Infinity; for (const M of SHP.layList) if (M >= L) g = Math.min(g, layOwnBelow(x, y, M));
+  return g;
+}
+// solid at (x, y) for a thing on layer L (landSolid's rule, on each layer's own cells from L forward)
+function laySolid(x, y, L) {
+  if (!L) return landSolid(x, y);
+  const c = ltCol(x); for (const M of SHP.layList) if (M >= L && layColHas(c, M) && landSolid(x, y, M)) return true;
+  return false;
+}
+// the top of the ground at x for a thing on layer L (Infinity: none)
+const layTop = (x, L) => L ? layBelow(x, -Infinity, L) : landTop(x);
+// does slice k hold a shape of layer L
+function layK(k, L) { for (const n of SHP.lays.get(L) || []) { const S = SHP.cols[n]; if (S && S.c1 >= k * LT_CHUNK && S.c0 < (k + 1) * LT_CHUNK) return true; } return false; }
+// does the far level's group K (its 2^GG_LMAX slices - the grid's base) hold a shape of layer L
+function layGroup(K, L) { const F = 1 << GG_LMAX; for (let k = K * F; k < (K + 1) * F; k++) if (layK(k, L)) return true; return false; }
+// the slices a shape of layer L stands in, over [x0, x1] (its GPU page set - ggStep, drawLay)
+function laySlices(x0, x1, L) {
+  if (!land.dirty || !SHP.lays.has(L)) return [];
+  const a = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)), b = Math.min(land.dirty.length - 1, Math.floor(ltCol(x1) / LT_CHUNK)), on = new Set();
+  for (const n of SHP.lays.get(L)) { const S = SHP.cols[n]; if (!S) continue; for (let k = Math.max(a, Math.floor(S.c0 / LT_CHUNK)); k <= Math.min(b, Math.floor(S.c1 / LT_CHUNK)); k++) on.add(k); }
+  return [...on].sort((p, q) => p - q);
+}
+// (the GPU's page sets: 0 the ground in front, 1 the islands', 1 + L layer L's - 50-land-zz-grid.js) a set's layer (0: not a layer's); the sets the
+// world needs (ggStep: the page tables made again when it changes - none with no layer)
+const ggSetLay = wh => wh >= 2 ? wh - 1 : 0;
+const ggNS = () => 2 + SHP.layMax;
+// the layers' page sets over [x0, x1]: [set, its slices] each
+const laySets = (x0, x1) => SHP.layList.map(L => [1 + L, laySlices(x0, x1, L)]);
+// layer L's own ground drawn over what's behind it - the one shader, its own page set; layers drawn back to front, each before what stands on it
+// (renderLandObjects0: a thing on layer L between layer L's ground and the next one's)
+function drawLay(x0, x1, L) { const K = laySlices(x0, x1, L); if (K.length) ggDraw(K, 1 + L); }
 
 //@src 50-land-zz-light.js:1
 /* ---- THE ONE LIGHT UNDER THE GROUND (user Nov 8 16:21-16:26: "Even this darkness you've made for the cave is not dynamic. I'm rotating the sun and it
@@ -66954,10 +67287,10 @@ function storyInvAdd(k, n) { if (!story.inv) story.inv = {}; story.inv[k] = Math
 // quiet - settling unseen), her engine and her wreck's smoulder (eng burnT smT), turned at her spot (turn - the story's swap), lost
 // (dmgOf draws her wrecked); her picture (art), her day's routine (rt); the STORY's (STORY_REC) and every civilian vehicle's (CIV_REC). Put in
 // by addRow (her structure's spot, renewed the next morning) or the table's own put (placed); each made settled first - carSettle)
-const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV air wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost hornOn',   // (hornOn: her horn held - 50-land-civdrive.js)
+const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV gnd wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost hornOn lay',   // (hornOn: her horn held - 50-land-civdrive.js; lay: her terrain layer - groundBelow, layStep)
 'txt: kind state art','val: rt fl', ...STORY_REC, ...CIV_REC));
 const CAR_V = 14;                                         // (top speed, metres a second: about 50 km/h)
-function newStoryCar(d) { return Object.assign({ story: true, car: true, kind: 'car', state: 'run', x: 0, y: LAND_Y, dir: -1, v: CAR_V * UPM, vDrive: 0, drv: 0, cin: 0, hp: 2, fuel: 1, ph: 0, vx: 0, vy: 0, a: 0, pit: 0, pitV: 0, air: 0, wet: 0, eng: 0, set: 0, roll: 0 }, d); }
+function newStoryCar(d) { return Object.assign({ story: true, car: true, kind: 'car', state: 'run', x: 0, y: LAND_Y, dir: -1, v: CAR_V * UPM, vDrive: 0, drv: 0, cin: 0, hp: 2, fuel: 1, ph: 0, vx: 0, vy: 0, a: 0, pit: 0, pitV: 0, gnd: 1, wet: 0, eng: 0, set: 0, roll: 0 }, d); }
 defTable('storyCars', null, { cols: storyCars });
 // her size: the picture at its own metres (the sheet not loaded: a car's)
 function storyCarSize(c) { const P = tropPic(c.art); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [4.5 * UPM, 1.6 * UPM, null]; }
@@ -66977,8 +67310,6 @@ function carParts(P, art) {
   return (P._cw = { cuts, wheels });
 }
 const CAR_G = 2.5 * 9.81 * UPM;                           // (gravity, world units a second a second - user 23:01, "gravity is too light for vehicles, they fly off too much": two and a half times the real)
-const CAR_NOSE = 2.5;                                     // (in the air her engine's weight brings her nose down: radians a second a second - user 23:01, "the weight of the front should be stronger")
-const CAR_GAP = 3;                                        // (higher than this over the ground she's in the air: more than a ground cell)
 const CAR_CLIMB = 1.73;                                   // (a wall: steeper than 60 degrees ahead she stops against it - a step of the ground. Slopes under it are for her engine and her tyres to win or lose - carDrive)
 const CAR_PARK = 2;                                       // (asked to go slower than this - units a second - she's parked: her brakes hold her on any slope)
 const CAR_PIT = [70, 8, 0.0006, 0.08];                    // (her body on its springs: spring, damping, tilt per unit of speeding up, the most it tilts)
@@ -67099,6 +67430,8 @@ function carWreck(c, s) {
   harmed(c, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120);
   const H = storyCarSize(c)[1]; sectionBlast(c.x, c.y - H * 0.5, 0.4, 0); spawnDebris(c.x, c.y - H * 0.5, 6, (c.vx || 0) * 0.2); sound('impact', c.x);
 }
+// (user Nov 18 19:30 / 19:45, a land vehicle on its roof: "Knocked out", every one) at rest on her roof she's a wreck where she lies - no blast
+function carRoofed(c) { if (netGuestHold()) return; c.hp = 0; c.vDrive = 0; c.drv = 0; c.npcV = 0; c.rest = 0; }
 // (user Nov 2 14:32: "the front part is clearly floating") she stands on the ground under her own wheels - where her picture has
 // them (CAR_WHEELS), not at a guessed share of her length: the line through her wheels' ground is the lie she takes, and the ground
 // at her middle is on that line ([m, hw]: her axles' middle from her own middle along the world, half the length between her wheels)
@@ -67107,7 +67440,7 @@ function carAxle(c, L) {
   let a = 1e9, b = -1e9; for (const q of K) { const u = -(c.dir || 1) * (q[0] / P.width - 0.5) * L; a = Math.min(a, u); b = Math.max(b, u); }   // (her picture faces left; mirrored facing right)
   return [(a + b) / 2, (b - a) / 2];
 }
-const carGround = (c, x, m, hw, step) => { const G = wheelGround(x + m, c.y, hw, step, 0), k = (G.front - G.back) / (2 * hw); G.k = k; G.y = Math.min((G.back + G.front) / 2, G.mid + 2) - m * k; return G; };   // (G.y: the ground's line at her middle; G.k its slope)
+const carGround = (c, x, m, hw, step) => { const G = wheelGround(x + m, c.y, hw, step, 0, c.lay); G.k = (G.front - G.back) / (2 * hw); return G; };   // (G.k: the ground's slope under her wheels - a wall ahead; G.ship: a deck she's on)
 // ---- HER DRIVE (user Nov 2 15:48-15:50: "I should be able to go up a hill with a taxi. And if Im not ... the back wheel should
 // be spinning and doing smoke / dust and we hear the engine, showing the 2WD. This applies to all vehicles (a Jeep would be 4WD),
 // the wheels must also physically spin"; the model he pointed at: Marco Monster's "Car Physics for Games" and its JavaScript port,
@@ -67209,10 +67542,146 @@ function driveStep(v, dt, want, deep, way, K) {
   v.slipV = v.wslip ? v.wsp - u2 : 0;
   return u2 * UPM * ca * way;
 }
+// ONE BODY FOR EVERYTHING ON WHEELS OR TRACKS - and their wrecks (user Nov 18 17:57, a tank flipped going down a hill: "A tank is much heavier than that";
+// 19:24: "it should feel natural everywhere"; 19:45: "all land vehicles should follow this rule. They should use one single system"). It is a rigid body
+// on the ground and off it alike: gravity on its middle of mass, its turn (av) kept, and its outline's points (its wheels' or tracks' feet, its ends, its
+// roof) where they really are as it's turned, each over its own ground (wheelPt). Each step no point near its ground goes into it (an impulse at each
+// - lifting the body and turning it by how far across from its middle that point is, its turning weight I), then any point left in its ground is put
+// back on it, the body lifted and turned the same way. Resting on its wheels, up and down hills, rocking over a crest, tipping over a cliff's edge,
+// landing nose-first, rolling onto its roof all come from that one rule. On its wheels (o.gnd - they grip, it drives: driveStep) with any driving
+// point on its ground, right way up; a point it drives onto it climbs (to B.step - steeper is a wall: its family's own check), off them only a point
+// coming down onto its ground from above is on it - one that swung in beside a wall, a cliff's face, is beside it.
+// B, its make (bodyMake: tankBodyOf, turretBodyOf, carBodyOf): p [u, v, drives] x n - each point from o's own (x, y), along it (+ to the world's right
+// at a = 0) and up (-); cu / cv where it turns about, the same way; I its turning weight over its mass (units squared); g its gravity; step what it climbs.
+// LB: what came of the step - hit (how fast it was falling as it came down), on (any point on its ground), roof (at rest on its roof)
+const LB = { hit: 0, on: false, roof: false }, LB_GAP = new Float64Array(64), LB_OK = new Uint8Array(64), LB_R = new Float64Array(64);
+function landBody(o, dt, B) {
+  const P = B.p, n = P.length / 3, I = B.I, gap = LB_GAP, ok = LB_OK, R = LB_R, was = o.gnd;
+  let a = o.a || 0, ca = Math.cos(a), sa = Math.sin(a), av = o.av || 0;
+  const cx = o.x + B.cu * ca - B.cv * sa; let cy = o.y + B.cu * sa + B.cv * ca;
+  o.vy = Math.min(600, (o.vy || 0) + B.g * dt);
+  for (let k = 0; k < n; k++) {
+    const du = P[3 * k] - B.cu, dv = P[3 * k + 1] - B.cv, px = cx + du * ca - dv * sa, py = cy + du * sa + dv * ca;
+    gap[k] = wheelPt(px, py - B.step - 2, o.lay).y - py; ok[k] = gap[k] >= (was ? -B.step : -4) ? 1 : 0; R[k] = px - cx;
+  }
+  // its speed: no point near its ground goes into it this step (the gap it has left it may close)
+  let hit = 0; const vy0 = o.vy;
+  for (let it = 0; it < 8; it++) for (let k = 0; k < n; k++) {
+    if (!ok[k] || gap[k] > 4) continue;
+    const over = o.vy + av * R[k] - Math.max(0, gap[k]) / dt;
+    if (over <= 0) continue;
+    hit = vy0;
+    const J = over / (1 + R[k] * R[k] / I); o.vy -= J; av -= J * R[k] / I;
+  }
+  cy += o.vy * dt; a += av * dt;
+  for (let k = 0; k < n; k++) gap[k] -= o.vy * dt + av * dt * R[k];
+  a = Math.atan2(Math.sin(a), Math.cos(a)); ca = Math.cos(a); sa = Math.sin(a);
+  for (let k = 0; k < n; k++) { const du = P[3 * k] - B.cu, dv = P[3 * k + 1] - B.cv; R[k] = du * ca - dv * sa; }
+  // its place: a point left in its ground put back on it
+  for (let it = 0; it < 6; it++) {
+    let q = -1, pen = 0.01;
+    for (let k = 0; k < n; k++) if (ok[k] && -gap[k] > pen) { pen = -gap[k]; q = k; }
+    if (q < 0) break;
+    const r = R[q], w = 1 + r * r / I, dy = -pen / w, da = -pen * r / I / w;
+    cy += dy; a += da;
+    for (let k = 0; k < n; k++) gap[k] -= dy + da * R[k];
+  }
+  ca = Math.cos(a); sa = Math.sin(a);
+  o.a = a; o.av = av; o.x = cx - (B.cu * ca - B.cv * sa); o.y = cy - (B.cu * sa + B.cv * ca);
+  let on = false, drv = false; for (let k = 0; k < n; k++) if (ok[k] && gap[k] <= 1.5) { on = true; if (P[3 * k + 2]) drv = true; }
+  o.gnd = drv && ca > 0 ? 1 : 0;
+  LB.hit = hit; LB.on = on; LB.roof = on && ca < 0 && Math.abs(av) < 0.5 && Math.abs(o.vy) < 20;
+}
+/* TERRAIN LAYERS (user Nov 18 20:59-21:15, a lighthouse's hill with a road in front of it down to a dock - terrain-layers-plan-nov18.md): what drives or
+   stands is on a layer (o.lay: 0 the back - today's ground; 1, 2 ... each in front of the one it was added to). It meets its own layer's ground and every
+   layer's in front of it (layBelow - groundBelow), so nothing goes behind a layer in front of its own. Two layers meet only at their joins (layerJoins:
+   { x, y, lay, play } - the layer that starts there and the one it starts from): at one, on its wheels with both roads at its feet and the two parting
+   ahead, the one driving it takes the higher road on UP and the lower on DOWN (the one vertical control - civStick); nothing held, it keeps its layer.
+   With no ground of its layer under it, it's on the join's other layer there, or away from any join the frontmost layer behind it with ground right
+   under it (a road's end, a fall onto the ground behind); come down onto ground, it's on the frontmost layer whose ground that is. What flies meets
+   every layer (layer 0's: all of them) */
+const LAY_FEET = 3;                                                 // (world units: ground this close under its feet is the ground it stands on)
+// the layers in front of the back (0 none) - the highest layer that starts at a join
+const layN = () => SHP.layMax || 0;   // (the frontmost layer there is - shpBuild)
+// layer L's ground (with every layer's in front of it) at its feet at (x, y)
+const layFeet = (x, y, L) => Math.abs(layBelow(x, y - 2 * LAY_FEET, L) - y) <= LAY_FEET;
+// the frontmost layer, of 0 .. L, whose ground is at its feet at (x, y) - -1 none
+const layFrontAt = (x, y, L) => { for (let k = L; k >= 0; k--) if (layFeet(x, y, k)) return k; return -1; };
+// a join within r of x between layer L and another
+const layJoinNear = (x, r, L) => { for (const J of layerJoins()) if ((J.lay === L || J.play === L) && Math.abs(J.x - x) <= r) return J; return null; };
+// at a join with the two roads parting ahead of it (half: its half length, dir: its way): { J, hi, lo } - the layers of the higher road and the
+// lower - else null. The road of the layer in front is the lower: one under the road behind it ahead would be behind it, never a road
+function layFork(o, half, dir) {
+  if (!o.gnd || !layHas(o.x)) return null;
+  const L = o.lay || 0, xa = o.x + dir * half, yr = o.y - 2 * half;
+  for (const J of layerJoins()) {
+    if ((J.lay !== L && J.play !== L) || Math.abs(J.x - o.x) > half || !layFeet(o.x, o.y, J.lay)) continue;
+    const yF = layBelow(xa, yr, J.lay);
+    if (yF < Infinity && layBelow(xa, yr, J.play) < yF - LAY_FEET) return { J, hi: J.play, lo: J.lay };
+  }
+  return null;
+}
+// its layer after a step of the one body (on: a point of it on its ground; landed: come down onto it this step; stick: its driver's up / down)
+function layStep(o, on, landed, half, dir, stick) {
+  if (!on || (!o.lay && !layHas(o.x))) return;
+  if (Math.abs(stick) > 0.2) { const F = layFork(o, half, dir); if (F) { o.lay = stick < 0 ? F.hi : F.lo; return; } }
+  const L = o.lay || 0;
+  if (landed) { const f = layFrontAt(o.x, o.y, layN()); if (f >= 0) { o.lay = f; return; } }
+  if (L && !(layBelow(o.x, o.y - 2 * LAY_FEET, L) <= o.y + half)) {   // (no ground of its layer under it)
+    const J = layJoinNear(o.x, half, L);
+    o.lay = J ? (J.lay === L ? J.play : J.lay) : Math.max(0, layFrontAt(o.x, o.y, L - 1));
+  }
+}
+// what's put down at (x, y) - placed, dropped in the editor, set down - rests on: the first open top under y (where y is in a layer's ground, a top of a
+// layer in front of it) and the frontmost layer whose top that is - { y, lay }; y not given: from the sky down
+function layRest(x, y) {
+  const y0 = y == null || !isFinite(y) ? -Infinity : y - LAY_FEET, N = layN();
+  let top = Infinity, k0 = 0;
+  for (let k = 0; k <= N; k++) { const t = layBelow(x, y0, k); if (t > y0 + 0.01 || y0 === -Infinity) { top = t; k0 = k; break; } }   // (layBelow gives y0 itself inside a layer's ground)
+  let lay = k0; for (let k = N; k > k0; k--) if (Math.abs(layBelow(x, y0, k) - top) <= LAY_FEET) { lay = k; break; }
+  return { y: top, lay };
+}
+// the vehicle player p drives on the ground, with its half length and its way - for the junction's arrow and the UP / DOWN buttons
+function layDriven(p) {
+  const m = crew[p].mode;
+  if (m === 'tank') { const t = tankOf(p); return t && t.state === 'alive' ? [t, TANK_L * 0.42, Math.sign(t.vx) || t.facing] : null; }
+  const v = m === 'civ' ? crew[p].civ : null;
+  return v && civClass(v) === 'car' && storyCars.includes(v) ? [v, storyCarSize(v)[0] * 0.5, v.dir || 1] : null;
+}
+const layForkOf = p => { const D = layDriven(p); return D ? layFork(D[0], D[1], D[2]) : null; };
+// the junction's arrow (drawHud, the player's own view): over the other road just ahead - a turn there on UP or DOWN
+function drawLayFork(p) {
+  const D = layDriven(p), F = D && layFork(D[0], D[1], D[2]); if (!F) return;
+  const [o, half, dir] = D, xa = o.x + dir * half * 1.6, y = layBelow(xa, o.y - 2 * half, (o.lay || 0) === F.hi ? F.lo : F.hi);
+  if (!(y < Infinity)) return;
+  const half2 = Math.floor(bw / 2), i0 = ONEVIEW() ? 0 : HUD_HALF != null ? HUD_HALF : p;
+  const at = i => { const v = cam.view[i], sv = S * v.z, camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half2 : Math.round(v.l * sv);
+    return [xa * sv - camPx + (i ? half2 : 0), y * sv - Math.round(v.top * sv)]; };
+  let q = at(i0); if (ONEVIEW() && q[0] >= half2) q = at(1);
+  const [X, Y] = toUI(q[0] * PIXW / dpr, q[1] * PIXW / dpr), bob = Math.round(ARROW_BOB * Math.abs(Math.sin(time * 3.4)));
+  pxArrow(Math.round(X), Math.round(Y) - ARROW_GAP - bob, ARROW_B - 1, ARROW_COL.to);
+}
+// a body's make from its outline: pts [[u, v, drives]], where its weight sits along it (cu), its size for its turning weight (a box L x H), its gravity
+// and climb. It turns about its base's line under its weight (cv 0: held up there, nothing sideways stops its feet - a middle of mass above them
+// would slide them back as it tips; and side-on, how high its weight sits only matters on slopes steeper than anything drives up)
+function bodyMake(pts, cu, L, H, g, step) { return { p: Float64Array.from(pts.flat()), cu, cv: 0, I: (L * L + H * H) / 12, g, step }; }
+// a car's (and every Story / civilian vehicle on wheels): her wheels' feet (CAR_WHEELS - they drive: the drive's own make says which are driven),
+// her two ends at a third of her height, her roof; her weight where her make has it along her (CAR_SPEC: forward of her axles' middle)
+const CAR_BODY = new Map();
+function carBodyOf(c, L, H) {
+  const key = c.art + (c.dir > 0 ? '>' : '<'); let B = CAR_BODY.get(key); if (B) return B;
+  const K = CAR_WHEELS[c.art], P = tropPic(c.art), [am, hw] = carAxle(c, L), S = CAR_SPEC[c.art] || [1500, 0, 0.4], pts = [];
+  if (K && P && K.length >= 2) for (const q of K) pts.push([-(c.dir || 1) * (q[0] / P.width - 0.5) * L, 0, 1]); else pts.push([am - hw, 0, 1], [am + hw, 0, 1]);
+  pts.push([-L * 0.49, -H * 0.33, 0], [L * 0.49, -H * 0.33, 0]);
+  for (const u of [-0.42, -0.2, 0, 0.2, 0.42]) pts.push([u * L, -H * 0.95, 0]);
+  B = bodyMake(pts, am + (c.dir || 1) * S[1] * 2 * hw, L, H, CAR_G, L * 0.36);
+  if (P) CAR_BODY.set(key, B);
+  return B;
+}
 // her driven wheels spinning loose: what they throw - the ground's own (sand, earth, grass) or tyre smoke on the road -, more the
 // faster they spin, from each driven wheel where it meets the ground, flung back off her way
 function carSpinFx(c, dt) {
-  const sv = Math.abs(c.slipV || 0); if (sv < 0.6 || c.air) return;
+  const sv = Math.abs(c.slipV || 0); if (sv < 0.6 || !c.gnd) return;
   const W = carWheelsOf(c); if (!W) return;
   const back = -c.dir * Math.sign(c.slipV);
   for (let i = 0; i < W.on.length; i++) {
@@ -67226,7 +67695,7 @@ function carSpinFx(c, dt) {
 }
 function storyCarBody(c, dt) {
   const [L, H] = storyCarSize(c), half = L * 0.36;
-  if (!c.set) { c.y = onLand(c.x) ? landTop(clamp(c.x, 0, WORLD_W - 1)) : Math.min(seabedY(c.x), harbourTop(c.x)); c.vx = c.vy = c.a = c.pit = c.pitV = 0; c.set = 1; c.rest = 0; }
+  if (!c.set) { const x = clamp(c.x, 0, WORLD_W - 1), R = layHas(x) ? layRest(x) : null; c.lay = R ? R.lay : 0; c.y = R ? R.y : onLand(c.x) ? landTop(x) : Math.min(seabedY(c.x), harbourTop(c.x)); c.vx = c.vy = c.a = c.av = c.pit = c.pitV = 0; c.set = 1; c.rest = 0; }
   c.ph += dt;
   const run = c.state === 'run';
   // (standing still with nobody in her and nowhere to go, settled on ground that hasn't changed: nothing to work out)
@@ -67240,7 +67709,7 @@ function storyCarBody(c, dt) {
   if (run && c.driven == null && c.vDrive && !dryLand(c.x + c.dir * L * 0.5)) c.vDrive = 0;   // (the story's own drivers stop at the water's edge)
   if (c.berth != null && !c.vDrive) c.vx = 0;                                                     // (tied up at her spot)
   const wy = carWater(c.x), deep = wy == null ? 0 : clamp((c.y - wy) / H, 0, 1);                  // (how deep she's in: 0 dry, 1 over her roof)
-  const [am, hw] = carAxle(c, L), G0 = carGround(c, c.x, am, hw, half), gy0 = G0.y, onGround = c.y > gy0 - CAR_GAP;
+  const [am, hw] = carAxle(c, L), G0 = carGround(c, c.x, am, hw, half), onGround = !!c.gnd;                       // (on her wheels: they grip - landBody)
   const v0 = c.vx, want = (c.vDrive || 0) * (1 - deep);                                          // (the speed asked, along her way: her engine and tyres decide what she makes of it - carDrive)
   if (G0.ship && onGround) c.x += G0.ship.dx || 0;                                                // (on a ship's deck: she goes with her)
   if (onGround) {
@@ -67251,30 +67720,24 @@ function storyCarBody(c, dt) {
   let nx = c.x + c.vx * dt;
   if (nx < PLAY_L() + 20 || nx > PLAY_R() - 20) { nx = clamp(nx, PLAY_L() + 20, PLAY_R() - 20); c.vx = 0; }
   // her way: too steep ahead (a wall) and she stops
-  let G1 = carGround(c, nx, am, hw, half);
-  if (onGround && c.vx && (c.vx > 0 ? -G1.k : G1.k) > CAR_CLIMB) { c.vx = 0; nx = c.x; G1 = G0; }
+  const G1 = carGround(c, nx, am, hw, half);
+  if (onGround && c.vx && (c.vx > 0 ? -G1.k : G1.k) > CAR_CLIMB) { c.vx = 0; nx = c.x; }
   if (!onGround && run) {                                                                          // (in the air: her driven wheels run free - the pedal still down revs them up, let go they keep turning)
     const k = c.thr > 0.05 ? CAR_REV : 0; c.wsp = (c.wsp ?? 0) + ((c.vx * c.dir / UPM + k * (c.thr || 0)) - (c.wsp ?? 0)) * Math.min(1, dt * (k ? 3 : 0.3)); c.wslip = 1; c.slipV = 0;
   }
   c.roll = (c.roll || 0) + c.vx * dt;                                                               // (how far her free wheels have turned: her speed)
   c.rollD = (c.rollD || 0) + (c.wsp ?? c.vx * c.dir / UPM) * UPM * c.dir * dt;                       // (her driven wheels: their own spin)
   c.x = nx;
-  // up and down: gravity, and the ground pushing her up where it rises under her; over a crest faster than she can fall,
-  // she leaves it
-  const gy = G1.y, ga = Math.atan2(G1.front - G1.back, hw * 2);
-  const was = c.air, gv = c.vx * Math.tan(c.a);                                                   // (how fast the ground under her rises or falls as she goes)
-  c.vy += CAR_G * dt; if (deep) c.vy *= Math.exp(-dt * 3 * deep);
-  let y = c.y + c.vy * dt;
-  if (y >= gy) {
-    if (was && c.vy - gv > 30) { susKick(c, (c.vy - gv) * 0.6); if (!(SIM_ONLY || c.quiet)) { const s = carSurf(c.x, gy); if (s) for (let i = 0; i < 4; i++) carThrow(c, c.x + carRnd(-half, half), gy, s, 1); } }   // (down on her wheels: her springs take it)
-    y = gy; c.vy = Math.max(Math.min(c.vy, gv), -CAR_G);
-  }
-  c.y = y; c.air = gy - c.y > CAR_GAP ? 1 : 0;
-  if (!c.air) { c.a += (ga - c.a) * Math.min(1, dt * 10); c.av = 0; }
-  else { c.av = (c.av || 0) + c.dir * CAR_NOSE * dt * (1 - deep); c.a = clamp(c.a + c.av * dt, -1.4, 1.4); }   // (in the air: her heavy front drops, nose first)                                             // (on the ground: its lie; in the air: as she left it)
+  // up and down, her lie and her turn: the one body (landBody) - the water holding her back as she goes in
+  if (deep) { c.vy *= Math.exp(-dt * 3 * deep); c.av = (c.av || 0) * Math.exp(-dt * 3 * deep); }
+  const was = c.gnd;
+  landBody(c, dt, carBodyOf(c, L, H));
+  layStep(c, c.gnd, !was && !!c.gnd, L * 0.5, c.dir || 1, run && c.driven != null ? civStick(c.driven) : 0);   // (its terrain layer - at a junction, by its driver's up / down)
+  if (!was && LB.on && LB.hit > 30) { susKick(c, LB.hit * 0.6); if (!(SIM_ONLY || c.quiet)) { const gy = c.y, s = carSurf(c.x, gy); if (s) for (let i = 0; i < 4; i++) carThrow(c, c.x + carRnd(-half, half), gy, s, 1); } }   // (down on her wheels: her springs take it)
+  if (LB.roof && run && !(c.hp <= 0)) carRoofed(c);
   susStep(c, dt);
   // her body on its springs: back as she speeds up, forward as she slows
-  const acc = c.air ? 0 : (c.vx - v0) / Math.max(dt, 1e-3) * c.dir, P = CAR_PIT, tp = clamp(acc * P[2], -P[3], P[3]);
+  const acc = !c.gnd ? 0 : (c.vx - v0) / Math.max(dt, 1e-3) * c.dir, P = CAR_PIT, tp = clamp(acc * P[2], -P[3], P[3]);
   c.pitV += (-P[0] * (c.pit - tp) - P[1] * c.pitV) * dt; c.pit = clamp(c.pit + c.pitV * dt, -0.15, 0.15);
   // the water: a splash going in; over half her height, her engine's drowned and she's lost
   const deepN = wy == null ? 0 : clamp((c.y - wy) / H, 0, 1);
@@ -67296,7 +67759,7 @@ function storyCarBody(c, dt) {
   if (c.state === 'sink') {
     c.sinkT = (c.sinkT || 0) + dt;
     if (!(SIM_ONLY || c.quiet) && c.sinkT < 6 && carFxR() < dt * 10) addBubble(c.x + carRnd(-half, half), c.y - H * carRnd(0.3, 0.9), carRnd(-10, 10), -carRnd(20, 50), carRnd(1, 2.5));
-    if (c.sinkT > 3 && !c.air && Math.abs(c.vx) < 1) { c.state = 'sunk'; c.fl = [floorUnder(c.x - half, c.y - 4), floorUnder(c.x, c.y - 4), floorUnder(c.x + half, c.y - 4)]; }   // (on the bottom, still: a wreck there - fl: the floor under her then)
+    if (c.sinkT > 3 && LB.on && Math.abs(c.vx) < 1) { c.state = 'sunk'; c.fl = [floorUnder(c.x - half, c.y - 4), floorUnder(c.x, c.y - 4), floorUnder(c.x + half, c.y - 4)]; }   // (on the bottom, still: a wreck there - fl: the floor under her then)
     return;
   }
   // her exhaust: a puff as you get in, puffs while her engine runs - more as she's pushed to speed up
@@ -67306,11 +67769,11 @@ function storyCarBody(c, dt) {
   if (!(SIM_ONLY || c.quiet) && eng && carFxR() < dt * ((Math.abs(c.vx) > 4 ? 10 : 3) + Math.max(0, acc) * 0.12)) carPuff(c, L, acc > 40 ? 1.3 : 1);
   if (!(SIM_ONLY || c.quiet) && !deepN) carSpinFx(c, dt);
   // what her back wheels throw: the ground's own, more the faster she goes and the harder she speeds up or brakes
-  if (!(SIM_ONLY || c.quiet) && !c.air && !deepN && Math.abs(c.vx) > 8) {
+  if (!(SIM_ONLY || c.quiet) && c.gnd && !deepN && Math.abs(c.vx) > 8) {
     const bx = c.x - Math.sign(c.vx) * half, by = landBelow(bx, c.y - half), s = carSurf(bx, by);
     if (s && carFxR() < dt * (Math.abs(c.vx) / 7 + Math.abs(acc) / 30) * (s === 'grass' ? 0.8 : 1)) carThrow(c, bx, by, s, clamp(Math.abs(c.vx) / c.v, 0.3, 1));
   }
-  if (!c.vx && !c.vDrive && !c.air && Math.abs(c.vy) < 1 && Math.abs(c.pit) < 1e-3 && Math.abs(c.pitV) < 1e-3 && !c.susY && !c.susV && !eng) c.rest = 1;
+  if (!c.vx && !c.vDrive && LB.on && Math.abs(c.vy) < 1 && Math.abs(c.av || 0) < 0.02 && Math.abs(c.pit) < 1e-3 && Math.abs(c.pitV) < 1e-3 && !c.susY && !c.susV && !eng) c.rest = 1;
 }
 // (the land's pass, from drawStructs) each car in view: her picture (it faces left) on the lie of the ground, her body
 // rocked on its springs, a little bounce while she drives
@@ -67322,7 +67785,7 @@ function storyCarBody(c, dt) {
 function carPass(c) {
   if (c.state === 'sink' || c.state === 'sunk') return lakeAt(clamp(c.x, 0, WORLD_W - 1)) ? 'lake' : 'sea';
   const [L, H] = storyCarSize(c), B = carBox(c, L, H), lx = clamp(B.lx, 0, WORLD_W - 1), w = carWater(lx);
-  if (w == null || B.ly <= w) { const x = clamp(c.x, 0, WORLD_W - 1); return !seaAtX(x) || lakeAt(x) ? 'dry' : onLand(x) ? 'isl' : 'deck'; }   // (drawn in the pass of what she stands on: an island at sea's - drawIslStructs; at sea off the land she's on a deck - a dock, a pier: theirs, behind the boats - drawSeaStructs, user Nov 2 14:33 "A vehicle on a dock ALWAYS renders behind anything in front of it")
+  if (w == null || B.ly <= w) { const x = clamp(c.x, 0, WORLD_W - 1); return c.lay ? 'lay' + c.lay : !seaAtX(x) || lakeAt(x) ? 'dry' : onLand(x) ? 'isl' : 'deck'; }   // (drawn in the pass of what she stands on: an island at sea's - drawIslStructs; at sea off the land she's on a deck - a dock, a pier: theirs, behind the boats - drawSeaStructs, user Nov 2 14:33 "A vehicle on a dock ALWAYS renders behind anything in front of it")
   return lakeAt(lx) ? 'lake' : 'sea';
 }
 // (user Nov 2: "All cars must have lights that turn on automatically at night (front lights) and red lights that turn on in
@@ -67382,7 +67845,7 @@ function drawStoryCars(x0, x1, pass) {
       return artPut(wheelPic(q.r * P0._m, Math.abs((sp || 0) / rw) > WHEEL_SPIN, WHEEL_OFFROAD[c.art]));
     }) : [];
     if (!e || !e.ok || whs.some(q => !q || !q.ok)) continue;    // (her pictures still on their way to the atlas - artStep: at the load)
-    const W = PX(c.x + w / 2) - PX(c.x - w / 2), H = PY(c.y + h) - PY(c.y), bob = c.state === 'run' && !c.air && Math.abs(c.vx || 0) > 2 ? Math.round(Math.sin(c.ph * 18) * 0.5) : 0;
+    const W = PX(c.x + w / 2) - PX(c.x - w / 2), H = PY(c.y + h) - PY(c.y), bob = c.state === 'run' && c.gnd && Math.abs(c.vx || 0) > 2 ? Math.round(Math.sin(c.ph * 18) * 0.5) : 0;
     const clip = strMaskBox(c, w / 2);                          // (at home inside a building with a painted gate: seen only through its door - 50-zz-struct.js)
     const sh = roofShade(c.x - w / 2, c.x + w / 2, c.y - h, c.y), fc = sh < 1 ? fx.map(v => v * sh) : fx;   // (under a roof: in its shade - 50-zz-struct.js)
     const M = thgScale(thgRotate(thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + (c.susY || 0) + (dryLand(c.x) ? VTUNE.ground.veh : 0))) + bob), (c.a || 0) - c.dir * (c.pit || 0)), c.dir > 0 ? -1 : 1, 1);   // (drawn a little into the ground: VEHICLES SINK - user Nov 3 23:02, "so it feels its on the road surface")
@@ -67395,7 +67858,7 @@ function drawStoryCars(x0, x1, pass) {
         thingsQuad(thgRotate(thgTranslate(M.slice(), -W / 2 + q.x * kx, -H + q.y * ky), (rl || 0) / rw * sx), -R, -R, 2 * R, 2 * R, whs[qi], THG_PART, fc, 0, null, 0, 0, null, clip);
       });
     }
-    if (c.state === 'run' && (pass === 'dry' || pass === 'isl' || pass === 'deck')) carLights(c, w, h);
+    if (c.state === 'run' && (pass === 'dry' || pass === 'isl' || pass === 'deck' || pass.startsWith('lay'))) carLights(c, w, h);
   }
   if (own) thingsEnd();
   if (pass === 'dry') drawExhaust(x0, x1);                      // (all of it with the land's: drawn once a frame)                      // (their exhaust, over them - in the hour's light, before the world's tint)
@@ -68655,7 +69118,7 @@ function storyBoard(p, sid) {
 function storyParks(v) {
   if (!v || !v.story || v.plane) return [];   // (a plane parks by taxiing into its hangar)
   if (v.heli ? !(v.state === 'landed' || v.state === 'parked') : v.sub ? !(v.state === 'out' && v.y < surfaceY(v.x) + 14 && Math.abs(v.vx || 0) < 20) : v.state !== 'run') return [];   // (a sub: up at the surface, slow)   // (sinking: nowhere to tie up; a helicopter: set down)
-  if (!v.heli && !v.sub && (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air)) return [];
+  if (!v.heli && !v.sub && (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air || v.car && !v.gnd)) return [];   // (a car off her wheels - landBody's gnd; a boat in the air)
   const cat = civCat(v);
   const len = storyBoatSize(v)[0] / UPM;
   return strsUsed().filter(o => { if (!(strTakes(o) || []).includes(cat) || len > strMaxL(o) || !strAllows(o, v.sv) || !strFits(o, v.sv)) return false; const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; });
@@ -70096,15 +70559,15 @@ function vehRestKind(e) {
   if (e.k === 'car' || e.k === 'tank' || e.k === 'tower' || storyCars.includes(v)) return 'ground';
   return 'water';
 }
-const vehLevel = (k, x) => k === 'ground' ? landTop(clamp(x, 0, WORLD_W - 1)) : waterLv(clamp(x, 0, WORLD_W - 1));   // (afloat: its own water's level - a lake's at any height as the sea's, user Nov 3)
+const vehLevel = (k, x, y) => { const cx = clamp(x, 0, WORLD_W - 1); return k === 'ground' ? (layHas(cx) ? layRest(cx, y).y : landTop(cx)) : waterLv(cx); };   // (on the ground: the top under where it's let go, the front terrain layer's or the back's - layRest)   // (afloat: its own water's level - a lake's at any height as the sea's, user Nov 3)
 // its height over its level as it rests (taken at pick-up: as it is, or - held off it - as its maker would put it down)
 function vehRestOff(e) {
   const k = vehRestKind(e), v = e.v, [x, y] = vehPos(e); if (k === 'air') return null;
   const r = placedRec(v);
-  if (r && r.off) { try { const rows = placedNew(Object.assign({}, r, { y: undefined, off: false })); if (rows && rows[0]) return rows[0][1].y - vehLevel(k, r.x); } catch (err) { } }
-  return y - vehLevel(k, x);
+  if (r && r.off) { try { const rows = placedNew(Object.assign({}, r, { y: undefined, off: false })); if (rows && rows[0]) return rows[0][1].y - vehLevel(k, r.x, rows[0][1].y); } catch (err) { } }
+  return y - vehLevel(k, x, y);
 }
-const vehRestY = (e, x, off) => off == null ? null : vehLevel(vehRestKind(e), x) + off;
+const vehRestY = (e, x, off, y) => off == null ? null : vehLevel(vehRestKind(e), x, y) + off;
 // what's wrong with where it is, or ''
 function vehPlaceBad(e) {
   const v = e.v, k = vehRestKind(e), [x, y] = vehPos(e), g = landTop(clamp(x, 0, WORLD_W - 1)), r = placedRec(v), wl = waterLv(clamp(x, 0, WORLD_W - 1));   // (wl: the water's own level there)
@@ -70623,7 +71086,8 @@ const placedAir = (r, rest) => Number.isFinite(r.y) && r.y < rest - PLACED_AIR;
 function placedStrVeh(r, D) {
   const dir = r.dir < 0 ? -1 : 1, base = placedStory(r);
   if (D.fam === 'boat') return [['jetboats', Object.assign(newJetboat(r.x - 100, r.x + 100, D.col, D.kind), base, { x: r.x, dir })]];
-  if (D.fam === 'car') return [['storyCars', storyCarMade(Object.assign(base, { art: D.art, rt: null, x: r.x, dir }))]];
+  if (D.fam === 'car') { const R = layHas(r.x) && Number.isFinite(r.y) ? layRest(r.x, r.y) : null;   // (put down on a front terrain layer: on it - layRest)
+    return [['storyCars', storyCarMade(Object.assign(base, { art: D.art, rt: null, x: r.x, dir }, R ? { y: R.y, lay: R.lay, set: 1 } : null))]]; }
   if (D.fam === 'heli') { const h = newCivHeli(D.ch, r.x, landOwnD(r.x), 0), gy = landTop(r.x) - chStand(h), air = placedAir(r, gy); return [['civHelis', Object.assign(h, base, { heli: true, role: null, hp: 2, home: r.x, wait: 1e12, facing: dir, y: air ? r.y : gy }, air ? { state: 'fly', spin: 1, gear: 0 } : {})]]; }
   if (ARMY_PLACE[D.fam]) { const A = ARMY_PLACE[D.fam], t = r.own === 1 || r.own === '1' ? 1 : 0, v = A.make(t, r, dir); Object.assign(v, placedBase(r), { sv: r.sv, fac: t }); return [[A.t, v]]; }   // (an army's vehicle - below)
   if (D.fam === 'sub') { const s = newMinisub({ x: r.x, face: dir }); return [['minisubs', Object.assign(s, base, { ship: null, state: 'out', y: placedY(r, surfaceY(r.x) - 1), splashed: true, armed: true, ai: null, sub: true, hp: 2 })]]; }
@@ -70643,7 +71107,7 @@ const ARMY_PLACE = {
   } },
   warship: { t: 'ships', k: 'ship', L: () => ships, mode: 'ship', make: (t, r, dir) => makeShip(t, r.x, dir, homeDock[t] || homeDock[0]) },
   warsub: { t: 'subs', k: 'sub', L: () => subs, mode: 'sub', make: (t, r, dir) => { const y = placedY(r, surfaceY(r.x) + 4); return Object.assign(makeSub(t, homeDock[t] || homeDock[0]), { state: 'out', x: r.x, y, depthT: y, facing: dir, away: true }); } },
-  tank: { t: 'tanks', k: 'tank', L: () => tanks, mode: 'tank', make: (t, r, dir) => Object.assign(makeTank(t, r.x), { facing: dir }) },
+  tank: { t: 'tanks', k: 'tank', L: () => tanks, mode: 'tank', make: (t, r, dir) => Object.assign(makeTank(t, r.x, r.y), { facing: dir }) },
   warheli: { t: 'helis', k: 'heli', L: () => helis, mode: 'heli', make: (t, r, dir) => { const h = Object.assign(makeHeli(t, r.x), { facing: dir }); if (placedAir(r, h.y)) Object.assign(h, { state: 'fly', y: r.y, rotor: 1 }); return h; } },
 };
 const armyFamOf = v => { for (const f in ARMY_PLACE) if (ARMY_PLACE[f].L().includes(v)) return f; return null; };
@@ -71502,7 +71966,7 @@ function storyStill(v) {
   if (v.sub) return v.state === 'out' && v.y < surfaceY(v.x) + 14 && Math.abs(v.vx || 0) < 20;
   if (v.plane) return v.state === 'parked' || (!!v.ground && Math.abs(v.spd || 0) < 6);
   if (v.kind === 'shuttle') return v.state === 'pad' || v.state === 'landed';
-  return v.state === 'run' && Math.abs(v.vDrive || 0) <= (v.v || 60) * 0.35 && !(v.turn > 0) && !v.air && Math.abs(v.vx || 0) < (v.v || 60) * 0.5;
+  return v.state === 'run' && Math.abs(v.vDrive || 0) <= (v.v || 60) * 0.35 && !(v.turn > 0) && !v.air && !(v.car && !v.gnd) && Math.abs(v.vx || 0) < (v.v || 60) * 0.5;
 }
 // the place you're at: its structures
 function storyPlace(cur) {
@@ -74027,7 +74491,7 @@ function grpDragMove(S, dx, dy, r) {
 // a vehicle at height y over x (dragged or spawned): onto its rest when within STR_SNAP press-radii of it, else held there off it -
 // [y, lifted]; a sub anywhere down in the water, up out of it off
 function vehSnapY(e, x, y, off, r) {
-  const R = vehRestY(e, x, off); if (R == null) return [y, false];
+  const R = vehRestY(e, x, off, y); if (R == null) return [y, false];
   const near = Math.abs(y - R) <= STR_SNAP * r;
   if (vehRestKind(e) === 'sub' && y >= R) return [y, false];
   return near ? [R, false] : [y, true];
@@ -75090,6 +75554,7 @@ function liveNowStrs() { const ST = new Map(); for (const o of STRS) ST.set(o.id
 // ---- an edit: to whichever thread runs the game (rules 7.9 - the worker builds the same)
 function liveEdit() {
   if (!LIVE.b || !land.cell || !((typeof EDMODE !== 'undefined' && EDMODE.on) || VEG_MODE)) return;   // (the GAME EDITOR's, the Biome Editor's preview: a structure saved in a game is no edit of the world)
+  layerSync();                                                  // (a dragged point: the layers joined there with it - 50-land-islands)
   const s = JSON.stringify({ I: ISLANDS, ST: STRS, LK: LAKE_SET, CV: typeof CAVE !== 'undefined' && CAVE.P ? CAVE.P : null, H: PRESS.n > 0 ? 1 : 0 });   // (H: a drag's move - the world's parts wait for its drop there too)
   act(0, 'worldEd', s);
   if (SW.live) ACTS.worldEd(0, s);                              // (the worker's game: this page draws its own copy of the world - built here too, whole as the worker builds it - liveApply)
