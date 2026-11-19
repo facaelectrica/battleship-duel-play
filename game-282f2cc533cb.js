@@ -12758,8 +12758,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1093;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 22:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1094;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 22:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49288,14 +49288,22 @@ function islSkinCols(c0 = 0, c1 = land.cols - 1) {
 }
 const islSkinC = c => land.iskin && c >= 0 && c < land.cols ? land.iskin[c] : 0;
 // a segment's cell dd under its top, by its skin (AUTO: as it always was - grass over earth, the ground's sandiness)
-function islCellM(c, dd, sandy) {
-  const k = islSkinC(c), g = ltGrassD(c) * LT_CELL;
+function islCellM(c, dd, sandy, k = islSkinC(c)) {
+  const g = ltGrassD(c) * LT_CELL;
   if (k === 3 || k === 5 || k === 6 || k === 8) return M_ROCK;   // (SEA, MOUNTAIN, ICE, VOLCANIC: rock)
   if (k === 7) return dd < g ? M_GRASS : M_DIRT;   // (SWAMP: as the forest's, its colours its own - bioTint)
   if (k === 2) return dd < 24 * (1 + 0.35 * surfWob(c * LT_CELL, 4)) ? M_SAND : M_DIRT;   // (its sand thicker and thinner along it - user Nov 7 12:51)
   if (k === 4) return M_SAND;   // (TROPICAL: sand - its strip of sand, bushes and boulders drawn over it - then earth and rocks)
   if (k === 1) return dd < g ? M_GRASS : M_DIRT;
   return dd < g && sandy < 0.35 ? M_GRASS : M_DIRT;
+}
+// THE ONE ISLAND RULE: a segment's cell at y under its top tp, by its skin k (ISK - the column's, or a terrain layer's own): its material, and the TERRAIN
+// SURFACE layer it's painted as in LT_LAY (+ 1; 0 none - as ltMatAt) - ltFillCol's segment rows and an island's body, a terrain layer's island (layFillCol)
+function islMatAt(c, x, tp, y, sandy, k = islSkinC(c)) {
+  LT_LAY = 0; let m = islCellM(c, y - tp, sandy, k);
+  const IB = ISK_BIO[k], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, tp, y - tp) : null;
+  if (LA) { const own = surfOwn(IB, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) LT_LAY = LA.i + 1; }
+  return m;
 }
 // (paintLandChunk) the look a segment's rows are painted in (1 the desert's, 0 the rest), -1: the column's own
 const islPaintLook = c => { const k = islSkinC(c); return !k ? -1 : k === 2 ? 1 : 0; };
@@ -56748,13 +56756,10 @@ function ltFillCol(c) {
         const y = LT_Y0 + r * LT_CELL;
         if (GP && shpInGap(GP, y)) continue;
         if ((wetIsl || solIsl) && y >= land.itop[c] && r < rW && y < top) {   // (Nov 7: a segment's own biome's TERRAIN SURFACE layers too - surfLayerAt)
-          let im = islCellM(c, y - land.itop[c], sandy); const IB = ISK_BIO[islSkinC(c)], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, land.itop[c], y - land.itop[c]) : null;
-          if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; }
+          const im = islMatAt(c, x, land.itop[c], y, sandy); if (LT_LAY) land.lay[ltIdx(c, r)] = LT_LAY;
           land.cell[ltIdx(c, r)] = im; continue; }   // (y < top: over dry land the segment stops at the ground in front)
         if (wetIsl && r >= rW && y < top) {   // (user Nov 9 08:43, "nothing should ever get that 'simple picture'": an island in a country's water - its ground on under the water's line, to the bed - a body, ltBody)
-          if (lbm && shpIslAt(c, y + LT_CELL / 2)) { let im = islCellM(c, y - land.itop[c], sandy); const IB = ISK_BIO[islSkinC(c)], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, land.itop[c], y - land.itop[c]) : null;
-            if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) lbl[r - rW] = LA.i + 1; }
-            lbm[r - rW] = im; }
+          if (lbm && shpIslAt(c, y + LT_CELL / 2)) { lbm[r - rW] = islMatAt(c, x, land.itop[c], y, sandy); if (LT_LAY) lbl[r - rW] = LT_LAY; }
           continue; }
         if (y < top) continue;
         if (y < g0 && !shpSolidAt(c, y)) continue;
@@ -57415,11 +57420,11 @@ function landBgBuild(ms, xs) {
 }
 // a chunk's stones rasterised: for each cell the stone it's in (-1: the earth between), how far in from its rim (cells),
 // and where in it (-1..1)
-function stoneRaster(k, w, ra, rb) {
+function stoneRaster(k, w, ra, rb, keep) {   // (keep: the slice's stones that are - a terrain layer's, layStoneIn)
   const rT = ra == null ? land.rT[k] : Math.max(land.rT[k], ra), h = (rb == null ? land.rB[k] : Math.min(land.rB[k], rb)) - rT;   // (the slice's rows, or a tile's band of them; q counts from its top row - SR.r0)
   const n = w * h, id = new Int32Array(n).fill(-1), e = new Float32Array(n), ux = new Float32Array(n), uy = new Float32Array(n), sd = new Float32Array(n), up = new Float32Array(n), c0 = k * LT_CHUNK;
   for (const j of (land.stoneC && land.stoneC[k]) || []) {
-    const o = land.stones[j], m = Math.min(o.rx, o.ry) / LT_CELL;
+    const o = land.stones[j], m = Math.min(o.rx, o.ry) / LT_CELL; if (keep && !keep(o)) continue;
     for (let c = Math.max(c0, ltCol(o.x - o.rx)); c <= Math.min(c0 + w - 1, ltCol(o.x + o.rx)); c++) for (let r = Math.max(rT, ltRow(o.y - o.ry)); r <= Math.min(rT + h - 1, ltRow(o.y + o.ry)); r++) {
       const dx = ((c + 0.5) * LT_CELL - o.x) / o.rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - o.y) / o.ry, d2 = dx * dx + dy * dy; if (d2 > 1) continue;
       if (!stoneHit(stonePoly(o), dx, dy)) continue;
@@ -63250,13 +63255,13 @@ function ggLvDark(e) {
   return true;
 }
 // (stoneRaster's rule at a level's cells: each cell's stone - the one a slice's list puts deepest there - by the page's cell q (64 x 64))
-function ggStoneLv(c0, r0, F) {
+function ggStoneLv(c0, r0, F, keep) {   // (keep: as stoneRaster's)
   const h = F >> 1, n = 4096, id = new Int32Array(n).fill(-1), e = new Float32Array(n), ux = new Float32Array(n), uy = new Float32Array(n), sd = new Float32Array(n), up = new Float32Array(n);
   for (let k = c0 / LT_CHUNK; k < c0 / LT_CHUNK + F; k++) {
     const kw = ggWW(k); if (!kw) continue;                     // (stones only in the world's columns)
     const kc0 = k * LT_CHUNK, rT = land.rT[k], rB = land.rB[k];
     for (const j of (land.stoneC && land.stoneC[k]) || []) {
-      const o = land.stones[j], m = Math.min(o.rx, o.ry) / LT_CELL;
+      const o = land.stones[j], m = Math.min(o.rx, o.ry) / LT_CELL; if (keep && !keep(o)) continue;
       const ca = Math.max(kc0, ltCol(o.x - o.rx)), cb = Math.min(kc0 + kw - 1, ltCol(o.x + o.rx)), ra = Math.max(rT, ltRow(o.y - o.ry)), rb = Math.min(rB - 1, ltRow(o.y + o.ry));
       for (let x = Math.max(0, Math.ceil((ca - c0 - h) / F)); x < 64 && c0 + x * F + h <= cb; x++) for (let y = Math.max(0, Math.ceil((ra - r0 - h) / F)); y < 64 && r0 + y * F + h <= rb; y++) {
         const c = c0 + x * F + h, r = r0 + y * F + h;
@@ -63295,13 +63300,13 @@ function ggLvJob(e, pre) {
       if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; }
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (l & 15) << 11;
-        const ug = fr ? -1 : ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
+        const yc = LT_Y0 + (r + 0.5) * LT_CELL, ug = fr ? layUG(c, yc, ggSetLay(wh)) : ugCell(c, yc); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;   // (a layer's: its own shape's - layUG)
         if (sb >= 0 && ltTC(c, r) >= sb) w |= 1 << 21;
       } else if (inner && y >= H && y < H + 64) w |= l << 11;
       u[hpos + y * BW + x] = w >>> 0;
     }
   }
-  const SR = fr ? null : ggStoneLv(c0, r0, F), W1 = new Uint32Array(64);
+  const Lf = ggSetLay(wh), SR = ggStoneLv(c0, r0, F, fr ? o => layStoneIn(o, Lf) : null), W1 = new Uint32Array(64);   // (a layer's: the stones wholly in its own earth - layStoneIn)
   for (let q = 0; q < 64; q++) {
     const c = c0 + q * F + h, x = q + H, Sl = slotOf(c), SE = Sl && Sl.seg && !fr ? Sl.seg[c & 63] : -1e9;
     // depth at the page's first cell: the solid cells straight over it, counted a level's cell at a time
@@ -63368,7 +63373,7 @@ const GG_FILL = { mat: null, lay: null };
 // page i of slot S all dark: no page, the table's BLACK (drawn the ground's dark)
 function ggPageBlack(S, i) { if (S.pages[i] >= 0) GG.free.push(S.pages[i]); S.pages[i] = -1; GG.ptab[ggPti(S, i)] = GG_BLACK; S.stale[i] = 0; }
 function ggPageJob(S, i, pre) {
-  const which = ggWhOf(S, i), k = S.k, c0 = k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, cap = Math.ceil(ugReach() / LT_CELL) + 2, H = Math.min(64, Math.max(cap, 30)), BW = 64 + 2 * H;
+  const which = ggWhOf(S, i), fr = which >= 2, Lf = ggSetLay(which), k = S.k, c0 = k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, cap = Math.ceil(ugReach() / LT_CELL) + 2, H = Math.min(64, Math.max(cap, 30)), BW = 64 + 2 * H;
   const N = BW * BW; if (!GG_FILL.mat || GG_FILL.mat.length < N) { GG_FILL.mat = new Uint8Array(N); GG_FILL.lay = new Uint8Array(N); }
   const mat = GG_FILL.mat, lay = GG_FILL.lay, colM = new Uint8Array(BW), colL = new Uint8Array(BW);
   // the block's cells, a column at a time
@@ -63376,8 +63381,8 @@ function ggPageJob(S, i, pre) {
   // all in the dark (no open air within the light's reach, nothing seen in): no page at all
   const yIn = y => r0 - H + y;
   let open = false;
-  for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x, U = land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null; for (let y = 0; y < BW; y++) if (mat[y * BW + x] === M_AIR && !(U && ugInBody(c, LT_Y0 + (yIn(y) + 0.5) * LT_CELL))) { open = true; break; } }
-  if (!open && land.ugSee) for (let q = 0; q < 64 && !open; q++) { const c = c0 + q; if (c < land.cols && land.ugSee[c]) for (let j = 0; j < 64; j++) if (ugCell(c, LT_Y0 + (r0 + j + 0.5) * LT_CELL) === 0) { open = true; break; } }
+  for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x, U = !fr && land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null; for (let y = 0; y < BW; y++) if (mat[y * BW + x] === M_AIR && !(U && ugInBody(c, LT_Y0 + (yIn(y) + 0.5) * LT_CELL))) { open = true; break; } }
+  if (!open && (fr || land.ugSee)) for (let q = 0; q < 64 && !open; q++) { const c = c0 + q; if (c < land.cols && (fr ? layColHas(c, Lf) : land.ugSee[c])) for (let j = 0; j < 64; j++) { const y = LT_Y0 + (r0 + j + 0.5) * LT_CELL; if ((fr ? layUG(c, y, Lf) : ugCell(c, y)) === 0) { open = true; break; } } }   // (seen into: a layer's by its own shapes - layUG)
   if (!open) { ggPageBlack(S, i); GG.stats.black++; return 'black'; }
   const p = S.pages[i] >= 0 ? S.pages[i] : ggPageGet(pre); if (p < 0) return null;
   S.pages[i] = p; GG.ptab[ggPti(S, i)] = p; S.stale[i] = 0;
@@ -63391,7 +63396,7 @@ function ggPageJob(S, i, pre) {
   const hpos = 20, ipos = 20 + N, npos = ipos + 4096, wpos = npos + 4096, gpos = wpos + 4096;
   // (a layer's set - which >= 2: its own cells only - none of the shapes' overhangs, bodies under the water or HIDE INTERIOR, no stones: those are the
   // back ground's)
-  const fr = which >= 2, gapC = fr ? null : land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;
+  const gapC = fr ? null : land.gapC, yWrow = Math.floor((WATER_Y - LT_Y0) / LT_CELL), seam = land.seam;
   for (let x = 0; x < BW; x++) {
     const c = c0 - H + x, inC = c >= 0 && c < land.cols, G = inC && gapC ? gapC[c] : null, U = !fr && inC && land.ugBody ? land.ugBody[c] : null, q = x - H, inner = q >= 0 && q < 64;
     const sTop = inner && S.top ? S.top[which][q] : -1e9, sb = inner && inC && seam ? seam[c] : -1;
@@ -63401,7 +63406,7 @@ function ggPageJob(S, i, pre) {
       if (m === M_AIR) { if (U && ugInBody(c, LT_Y0 + (r + 0.5) * LT_CELL)) w |= 1 << 18; if (inner && r < sTop) w |= 1 << 19; }
       else if (inner && y >= H && y < H + 64 && inC && ltIn(c, r)) {
         const j = ltIdx(c, r); w |= (land.scorch[j] & 255) << 3 | (lay[y * BW + x] & 15) << 11;
-        const ug = fr ? -1 : ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;
+        const yc = LT_Y0 + (r + 0.5) * LT_CELL, ug = fr ? layUG(c, yc, Lf) : ugCell(c, yc); if (ug === 0) w |= 1 << 15; else if (ug === 1) w |= 2 << 15;   // (a layer's: its own shape's - layUG)
         if (sb >= 0 && ltTC(c, r) >= sb) w |= 1 << 21;
       } else if (inner && y >= H && y < H + 64) w |= lay[y * BW + x] << 11;
       u[hpos + y * BW + x] = w >>> 0;
@@ -63410,7 +63415,7 @@ function ggPageJob(S, i, pre) {
   // the page's columns: depth, rows to the ground under the air, the smooth edge's neighbours' tops; its noise
   // the page's stones (stoneRaster - the processor's, in doubles): each cell's stone, its place in the slice's list
   // (stones only in the world's columns - its first sw)
-  const sw = ggWW(k), ra = sw ? Math.max(land.rT[k], r0) : 0, rb = sw ? Math.min(land.rB[k], r0 + 64) : 0, SR = rb > ra && !fr ? stoneRaster(k, sw, ra, rb) : null;
+  const sw = ggWW(k), ra = sw ? Math.max(land.rT[k], r0) : 0, rb = sw ? Math.min(land.rB[k], r0 + 64) : 0, SR = rb > ra ? stoneRaster(k, sw, ra, rb, fr ? o => layStoneIn(o, Lf) : null) : null;   // (a layer's: the stones wholly in its own earth - layStoneIn)
   const runStart = (c, r) => ggRun(c, r, which)[0];   // (the run holding r - the slices' runs, ggRun)
   const splitRow = c => { if (c < 0 || c >= land.cols) return -1e9; const kk = (c / LT_CHUNK) | 0, e = islSplitEnd(kk, c - kk * LT_CHUNK); return e > 0 ? e - 4 + land.rT[kk] : -1e9; };
   for (let q = 0; q < 64; q++) {
@@ -63750,7 +63755,7 @@ function ggDarkCheck() {
     if (!ggDark(S, i)) continue; n++;
     const which = ggWhOf(S, i), c0 = S.k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, H = Math.min(64, Math.max(Math.ceil(ugReach() / LT_CELL) + 2, 30)), BW = 64 + 2 * H;
     const cm = new Uint8Array(BW), cl = new Uint8Array(BW); let open = false;
-    for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x; ggColCells(c, r0 - H, r0 - H + BW, cm, cl, 0, which); const U = land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null;
+    for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x; ggColCells(c, r0 - H, r0 - H + BW, cm, cl, 0, which); const U = which < 2 && land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null;
       for (let y = 0; y < BW; y++) if (cm[y] === M_AIR && !(U && ugInBody(c, LT_Y0 + (r0 - H + y + 0.5) * LT_CELL))) { open = true; break; } }
     if (open) bad++;
   }
@@ -63903,8 +63908,23 @@ function layColHas(c, L) { if (L == null) { for (const k of SHP.layList) if (lay
 const layHas = (x, L) => layColHas(ltCol(x), L);
 // layer L's shapes' spans in column c, merged ([top, bottom) pairs, world y), or null
 function laySpans(c, L) { let A = null; for (const n of SHP.lays.get(L) || []) { const v = shpIv(n, c); if (v && v.length) (A || (A = [])).push(...v); } return A ? ivMerge(A) : null; }
-// (ltFillCol, after the holes are cut) column c's cells of every layer: the material each would be from its own layer's span's top - m | its
-// TERRAIN SURFACE layer << 3 (ltMatAt, LT_LAY); a layer with no shape there keeps nothing for the column
+// the shape of layer L standing at (c, y) - the first of its shapes there (-1: none)
+function layShapeAt(c, y, L) { for (const n of SHP.lays.get(L) || []) if (shpIn(shpIv(n, c), y)) return n; return -1; }
+// (its stones - the user Nov 9 08:43: "nothing should ever get that 'simple picture' it should always use the biome") a stone of the slices' own list (the one
+// seeded rule over the ground, the layers' with it) shown on layer L where it lies wholly in the layer's own earth - stoneFits' test on its cells: its
+// middle and points round its rim in dirt or rock (a tropical column's sand too) - so a stone is whole on it or not on it, never cut at its top
+function layStoneIn(o, L) {
+  for (let k = -1; k < 14; k++) {
+    const px = k < 0 ? o.x : o.x + SFIT_C[k] * (o.rx + 1), py = k < 0 ? o.y : o.y + SFIT_S[k] * (o.ry + 1), c = ltCol(px);
+    const m = layCell(c, ltRow(py), L); if (m !== M_DIRT && m !== M_ROCK && !(m === M_SAND && tropCol(c))) return false;
+  }
+  return true;
+}
+// (HIDE INTERIOR) layer L's cell at (c, y) as its own shape has it, as ugCell answers the back ground: 0 seen all the way in, 1 dark inside, -1 unset
+function layUG(c, y, L) { const n = layShapeAt(c, y, L); if (n < 0) return -1; const u = shpUG(islandsUsed()[n]); return u === true ? 1 : u === false ? 0 : -1; }
+// (ltFillCol, after the holes are cut) column c's cells of every layer: the material each would be from its own layer's span's top by its own shape's
+// kind - an ISLAND's by the one island rule and the layer's own skin (islMatAt, islSkinAt's lay), a SOLID's by the ground's (ltColP / ltMatAt) -
+// m | its TERRAIN SURFACE layer << 3 (LT_LAY); a layer with no shape there keeps nothing for the column
 function layFillCol(c) {
   if (!layOn()) return;
   if (!land.ls) land.ls = [];
@@ -63913,11 +63933,15 @@ function layFillCol(c) {
     const A = land.ls[L] || (land.ls[L] = []), v = laySpans(c, L);
     if (!v) { A[c] = undefined; continue; }
     const col = A[c] && A[c].length === r1 - r0 ? A[c].fill(0) : (A[c] = new Uint8Array(r1 - r0));
+    let ik = -1, sandy = -1;                                        // (an ISLAND layer's skin - its own shape's, ISK; the ground's sandiness: once a column)
     for (let i = 0; i + 1 < v.length; i += 2) {
-      const tp = v[i], P = ltColP(c, x, tp, land.R);
+      const tp = v[i]; let P = null;
       for (let r = Math.max(r0, Math.ceil((v[i] - LT_Y0) / LT_CELL)); r < r1; r++) {
         const y = LT_Y0 + r * LT_CELL; if (y >= v[i + 1]) break;
-        col[r - r0] = ltMatAt(c, r, y, tp, P) | LT_LAY << 3;
+        const n = layShapeAt(c, y, L); let m;
+        if (n >= 0 && SHP.cols[n].k === 'I') { if (ik < 0) { ik = ISK[islSkinAt(x, L)] || 0; sandy = ltSandy(x); } m = islMatAt(c, x, tp, y, sandy, ik); }
+        else m = ltMatAt(c, r, y, tp, P || (P = ltColP(c, x, tp, land.R)));
+        col[r - r0] = m | LT_LAY << 3;
       }
     }
   }
