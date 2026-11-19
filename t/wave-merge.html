@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1104, build: 'NOV 19 10:20', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1104, build: 'NOV 19 10:19', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1243,10 +1243,12 @@ function gpuTrash(o) { GPU_TRASH.push(o); }
 
 /* ---- the arena: memory for one submit ---- */
 const ARENA = { chunks: [], cur: 0, off: 0, CH: 4 << 20, gen: 0 };
-function arenaChunk(i) {
+// chunk i, at least need bytes (CH; a piece bigger than CH gets a chunk its own size, kept at its place for the next frames - no piece too big)
+function arenaChunk(i, need) {
   let c = ARENA.chunks[i];
-  if (!c || c.ep !== GPU.ep) {
-    const size = ARENA.CH;
+  if (!c || c.ep !== GPU.ep || c.size < (need || 0)) {
+    if (c && c.ep === GPU.ep) { gpuTrash(c.gb); GPU_MEM.arena -= c.size; gpuMemAdd('arena', -c.size); }   // (not yet used this submit: the pieces only move on)
+    const size = Math.max(ARENA.CH, Math.ceil((need || 0) / 65536) * 65536);
     c = ARENA.chunks[i] = { id: i, ep: GPU.ep, gb: GPU.dev.createBuffer({ size, usage: BUFU() }), cpu: new Uint8Array(size), hi: 0, size };
     GPU_MEM.arena += size; gpuMemAdd('arena', size);
   }
@@ -1255,9 +1257,8 @@ function arenaChunk(i) {
 // room for n bytes (aligned to al): [chunk, offset]; the bytes are written into chunk.cpu at offset
 function arenaAlloc(n, al) {
   al = al || 256;
-  if (n > ARENA.CH) throw new Error('GPU arena: ' + n + ' bytes in one piece');
   let c = arenaChunk(ARENA.cur), o = Math.ceil(ARENA.off / al) * al;
-  if (o + n > c.size) { ARENA.cur++; c = arenaChunk(ARENA.cur); o = 0; }
+  if (o + n > c.size) { ARENA.cur++; c = arenaChunk(ARENA.cur, n); o = 0; }
   ARENA.off = o + n; c.hi = Math.max(c.hi, o + n);
   return [c, o];
 }
@@ -13166,7 +13167,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1104;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 10:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 19 10:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -42686,7 +42687,7 @@ function distortWater(sx, wpx) {
       each water, drawn into a layer of its own, laid over what the world drew as 'source-atop' would). What was the tint copy
       (wglTintCopy) and, with fog, the canvas's tint fills, fogObjects on the world's layer and its copy to the screen.
    2. THE LIGHT TABLE: one row a light (LPASS.ROW floats: a, b, c - the kind's numbers, c.w the kind; d - the box it lights on the
-      screen, device px), gathered each frame for the view into this submit's arena, at most LPASS.CAP rows (a constant), drawn
+      screen, device px), gathered each frame for the view into this submit's arena, as many rows as there are lights (the table grows), drawn
       instanced - one quad a row, laid premultiplied (a light that adds leaves alpha 0). Row kinds:
         0 BEAM - a lamp's light on what it falls on: the world's own colour (before the dark) times its beam (lampBeamAt's shape:
           its cone, its fall along its reach) x LAMP_K, on its own side of the water's surface (subLamps: subs, minisubs,
@@ -42732,8 +42733,8 @@ function distortWater(sx, wpx) {
    () => tex) / frameShare('shadow.clouds', () => tex) (src/gpu/50-frame.js). Nothing shared: a 1x1 white - no shadow.
    The light's inputs are the frame's (frameLight, src/gpu/50-frame.js): its scalars are bound (binding 4).
    ================================================================ */
-const LPASS = { ROW: 16, CAP: 1024, GLOWS: 32, RAYS: 96, WINS: 16, LAKES: 256, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), white: null, clear: null, art1: null, fog: null, fogOn: false, rows: new Float32Array(16 * 1024), n: 0, glow: null, ng: 0, ox: 0, oy: 0, data: new Float32Array(32768), nd: 0, lit: null, litFrame: -1, snap: null, look: false, none: null, dusk: [null, null], dh: 0, surf: null };
-LPASS.glow = new Float32Array(LPASS.GLOWS * 4);   // (the glows gathered: each its lamp's x, y, its rays' length (world), px a world unit - lightReach)
+const LPASS = { ROW: 16, RAYS: 96, WINS: 16, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), white: null, clear: null, art1: null, fog: null, fogOn: false, rows: new Float32Array(16 * 1024), n: 0, glow: null, ng: 0, ox: 0, oy: 0, data: new Float32Array(32768), nd: 0, lit: null, litFrame: -1, snap: null, look: false, none: null, dusk: [null, null], dh: 0, surf: null };
+LPASS.glow = new Float32Array(32 * 4);   // (the glows gathered: each its lamp's x, y, its rays' length (world), px a world unit - lightReach; grows as more are in view)
 const LPASS_WGSL = `
 struct LP {
   tgt: vec4f,    // the target's width, height; the view's columns x0, x1 (device px)
@@ -42805,7 +42806,7 @@ fn duskAt(p: vec2f) -> vec4f {
   let L = h + 8u;
   if (n > 0u && x >= data[L]) {
     var lo = 0u; var hi = n;
-    for (var it = 0; it < 9; it++) { if (hi - lo <= 1u) { break; } let m = (lo + hi) / 2u; if (data[L + m * DUSK_LAKE] <= x) { lo = m; } else { hi = m; } }   // (at most LPASS.LAKES (256): 8 halvings)
+    loop { if (hi - lo <= 1u) { break; } let m = (lo + hi) / 2u; if (data[L + m * DUSK_LAKE] <= x) { lo = m; } else { hi = m; } }   // (halving: as many lakes as are in view)
     let b = L + lo * DUSK_LAKE;
     if (x < data[b + 1u] && y >= data[b + 2u] && y < data[b + 4u]) {
       let y0 = data[b + 3u]; let y1 = data[b + 4u];
@@ -43100,7 +43101,7 @@ fn lhHalo(o: vec4f, p: vec2f, x: f32, y: f32, r: f32, q: vec2f, fl: f32, on: f32
   } else if (kind == 15) { // the world as it was before the water's tint where the beams fall: a.x lamps from data a.y, 8 floats each (X, Y, reach, water
     // row, ux, uy, k, near - the near fade's sign its side of the water), their light added, capped at 1, times the copy, laid over
     let n = i32(R.a.x); let off = u32(R.a.y); var l = 0.0;
-    for (var k = 0; k < 16; k++) { if (k >= n) { break; } let b = off + u32(k) * 8u;
+    for (var k = 0; k < n; k++) { let b = off + u32(k) * 8u;
       if (wrongSide(p, data[b + 3u], data[b + 7u])) { continue; }
       l = l + data[b + 6u] * beam(p - vec2f(data[b], data[b + 1u]), vec2f(data[b + 4u], data[b + 5u]), data[b + 2u], data[b + 7u]); }
     if (l <= 0.002) { discard; }
@@ -43162,7 +43163,7 @@ function lpassReady() {
   return true;
 }
 // the glows' rays (lightReach's, LIGHT.glowRays) as the pass reads them
-function lpassReach() { return { buffer: lightReachBuf().gb, offset: 0, size: LPASS.GLOWS * LPASS.RAYS * 4 }; }
+function lpassReach() { const B = lightReachBuf(0); return { buffer: B.gb, offset: 0, size: B.size }; }
 // the art atlas (the windows' pictures - 04-zz-art-atlas.js), or a clear page before there is one; the order layer the world drew this frame (what's in
 // front - 45-zz-things-gpu.js) when it's the target's size, or a clear texel (nothing cut: the LOOK panel, a layer of another size)
 function lpassArt() { const A = artTex(); return A && A.view && A.ep === GPU.ep ? A : LPASS.art1; }
@@ -43189,12 +43190,15 @@ const LPASS_COL = { 1: [255, 60, 50], 2: [255, 214, 140], 3: [70, 255, 120] }, L
 // THE LIGHT TABLE for this view (beginView set it): the rows, in device px (the view's own px + its place and shake), in the order they're laid
 // (ctx: the context drawn into - its transform's offset places the view's px; world: the world's own lights too - the beams, their glows,
 // the lighthouses; without it only the lists the drawing filled: the LOOK panel's)
-// room for k floats of the rows' lists (LPASS.data - a constant size): their first, or -1 when it's full
-function lpassData(k) { const Q = LPASS; if (Q.nd + k > Q.data.length) return -1; const o = Q.nd; Q.nd += k; return o; }
-// a row of the table (its box in the view's px): its first float, or -1 when the table is full (LPASS.CAP)
+// (Nov 19, user: "Lets fix it" - the table and its lists were a fixed size: past 1024 lights in a view, or 32768 floats of lists, the rest weren't drawn.
+// Now they grow (twice the size, what's in them kept) - so a part writes into LPASS.rows / LPASS.data as they are after it asked for room, never a copy
+// of them taken before)
+function lpassGrow(a, need) { if (need <= a.length) return a; const b = new Float32Array(Math.max(need, a.length * 2)); b.set(a); return b; }
+// room for k floats of the rows' lists (LPASS.data): their first
+function lpassData(k) { const Q = LPASS; Q.data = lpassGrow(Q.data, Q.nd + k); const o = Q.nd; Q.nd += k; return o; }
+// a row of the table (its box in the view's px): its first float
 function lpassRow(kind, x0, y0, x1, y1) {
-  const Q = LPASS, R = Q.rows; if (Q.n >= Q.CAP) return -1;
-  const o = Q.n * Q.ROW; R.fill(0, o, o + Q.ROW); R[o + 11] = kind; R[o + 12] = x0 + Q.ox; R[o + 13] = y0 + Q.oy; R[o + 14] = x1 + Q.ox; R[o + 15] = y1 + Q.oy; Q.n++; return o;
+  const Q = LPASS, o = Q.n * Q.ROW, R = Q.rows = lpassGrow(Q.rows, o + Q.ROW); R.fill(0, o, o + Q.ROW); R[o + 11] = kind; R[o + 12] = x0 + Q.ox; R[o + 13] = y0 + Q.oy; R[o + 14] = x1 + Q.ox; R[o + 15] = y1 + Q.oy; Q.n++; return o;
 }
 /* ---- THE LIT WINDOWS AND THE BOATS' LAMPS (slice 5): a thing's lights given as its drawing draws it, each with its order (what's in front - the things'
    pass, 45-zz-things-gpu.js) - no picture made of them, no layer cut for them ---- */
@@ -43220,32 +43224,32 @@ const lpassKind = (kind, ord) => ord > 0 && ord < 262000 ? kind + 64 * ord : kin
 // the windows of the list in the world's light (dark) or not, as rows of kind 21: each placement's head once in the rows' lists, its boxes in groups
 // of LPASS.WINS - a row a group, over the group's box on the screen
 function lpassWins(L, dark) {
-  const Q = LPASS, R = Q.rows, D = Q.data;
+  const Q = LPASS;
   for (const w of L) {
     if (w.dark !== dark) continue;
     const e = w.rule === LW_PANES ? artPut(w.P) : { x: 0, y: 0, l: 0, w: w.P.width, h: w.P.height, ok: true };   // (only the panes read the picture itself)
     if (!e || !e.ok) continue;
-    const h = lpassData(WIN_HEAD); if (h < 0) return;
+    const h = lpassData(WIN_HEAD);
     const m = w.m, q = w.q, sr = w.sr, kx = sr[2] / q[2], ky = sr[3] / q[3], B = w.b, nb = B.length >> 2;
-    for (let i = 0; i < 4; i++) D[h + i] = m[i];
-    D[h + 4] = m[4] + Q.ox; D[h + 5] = m[5] + Q.oy;
-    D[h + 6] = q[0]; D[h + 7] = q[1]; D[h + 8] = q[2]; D[h + 9] = q[3]; D[h + 10] = sr[0]; D[h + 11] = sr[1]; D[h + 12] = sr[2]; D[h + 13] = sr[3];
-    D[h + 14] = e.x; D[h + 15] = e.y; D[h + 16] = e.l || 0; D[h + 17] = e.w; D[h + 18] = e.h; D[h + 19] = w.col[0]; D[h + 20] = w.col[1]; D[h + 21] = w.col[2]; D[h + 22] = w.rule; D[h + 23] = dark ? 1 : 0;
+    for (let i = 0; i < 4; i++) Q.data[h + i] = m[i];
+    Q.data[h + 4] = m[4] + Q.ox; Q.data[h + 5] = m[5] + Q.oy;
+    Q.data[h + 6] = q[0]; Q.data[h + 7] = q[1]; Q.data[h + 8] = q[2]; Q.data[h + 9] = q[3]; Q.data[h + 10] = sr[0]; Q.data[h + 11] = sr[1]; Q.data[h + 12] = sr[2]; Q.data[h + 13] = sr[3];
+    Q.data[h + 14] = e.x; Q.data[h + 15] = e.y; Q.data[h + 16] = e.l || 0; Q.data[h + 17] = e.w; Q.data[h + 18] = e.h; Q.data[h + 19] = w.col[0]; Q.data[h + 20] = w.col[1]; Q.data[h + 21] = w.col[2]; Q.data[h + 22] = w.rule; Q.data[h + 23] = dark ? 1 : 0;
     for (let g = 0; g < nb; g += Q.WINS) {
-      const n = Math.min(Q.WINS, nb - g), bo = lpassData(n * 4); if (bo < 0) return;
+      const n = Math.min(Q.WINS, nb - g), bo = lpassData(n * 4);
       let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       // (the blocks: each run's block in the quad's own px, rounded here as rlWinQuads rounded them - at least a pixel each way; the rest: texels)
       const blk = w.rule === LW_BLOCKS, ux = blk ? 1 : 1 / kx, uy = blk ? 1 : 1 / ky, bx = q[2] / sr[2], by = q[3] / sr[3];   // (bx, by: rlWinQuads' own sums)
       for (let j = 0; j < n * 4; j += 4) {
         const b = (g << 2) + j; let a0 = B[b], b0 = B[b + 1], a1 = B[b + 2], b1 = B[b + 3];
         if (blk) { const X = Math.round(a0 * bx), Y = Math.round(b0 * by); a1 = X + Math.max(1, Math.round(a1 * bx) - X); b1 = Y + Math.max(1, Math.round(b1 * by) - Y); a0 = X; b0 = Y; }
-        D[bo + j] = a0; D[bo + j + 1] = b0; D[bo + j + 2] = a1; D[bo + j + 3] = b1; x0 = Math.min(x0, a0); y0 = Math.min(y0, b0); x1 = Math.max(x1, a1); y1 = Math.max(y1, b1);
+        Q.data[bo + j] = a0; Q.data[bo + j + 1] = b0; Q.data[bo + j + 2] = a1; Q.data[bo + j + 3] = b1; x0 = Math.min(x0, a0); y0 = Math.min(y0, b0); x1 = Math.max(x1, a1); y1 = Math.max(y1, b1);
       }
       // (the group's box: its corners in the quad's units, through its transform, with a margin - a tap's texels round it)
       let X0 = 1e9, Y0 = 1e9, X1 = -1e9, Y1 = -1e9;
       for (const u of [q[0] + x0 * ux, q[0] + x1 * ux]) for (const v of [q[1] + y0 * uy, q[1] + y1 * uy]) { const X = m[0] * u + m[2] * v + m[4], Y = m[1] * u + m[3] * v + m[5]; X0 = Math.min(X0, X); X1 = Math.max(X1, X); Y0 = Math.min(Y0, Y); Y1 = Math.max(Y1, Y); }
-      const o = lpassRow(lpassKind(21, w.ord), X0 - 3, Y0 - 3, X1 + 3, Y1 + 3); if (o < 0) return;
-      R[o] = h; R[o + 1] = bo; R[o + 2] = n; R[o + 3] = w.a;
+      const o = lpassRow(lpassKind(21, w.ord), X0 - 3, Y0 - 3, X1 + 3, Y1 + 3);
+      Q.rows[o] = h; Q.rows[o + 1] = bo; Q.rows[o + 2] = n; Q.rows[o + 3] = w.a;
     }
   }
 }
@@ -43254,14 +43258,14 @@ function lpassWins(L, dark) {
 // hidden where something drawn after it is in front - a yacht before a warship). Drawn by lightBoats (renderOverlays: over the smoke, under the fire)
 const boatLamps = [[], []];
 function lpassBoatRows(L) {
-  const R = LPASS.rows;
+  const Q = LPASS;
   for (let i = 0; i < L.length; i += 10) {
     const x = L[i + 1], y = L[i + 2], ord = L[i + 9];
     if (L[i] === 0) { lpassSoft(x, y, L[i + 3], [L[i + 4], L[i + 5], L[i + 6]], L[i + 7], L[i + 8], ord); continue; }
     // (a point: a pixel where the view is small (its place as it falls), else a block of the view's)
     const big = L[i + 3] > 0, X = big ? Math.floor(x / PBV) * PBV : x, Y = big ? Math.floor(y / PBV) * PBV : y, w = big ? PBV : 1;
-    const o = lpassRow(lpassKind(10, ord), Math.floor(X) - 1, Math.floor(Y) - 1, Math.ceil(X + w) + 1, Math.ceil(Y + w) + 1); if (o < 0) return;
-    R[o] = X; R[o + 1] = Y; R[o + 2] = w; R[o + 3] = w; R[o + 4] = L[i + 4]; R[o + 5] = L[i + 5]; R[o + 6] = L[i + 6]; R[o + 7] = L[i + 7];
+    const o = lpassRow(lpassKind(10, ord), Math.floor(X) - 1, Math.floor(Y) - 1, Math.ceil(X + w) + 1, Math.ceil(Y + w) + 1);
+    Q.rows[o] = X; Q.rows[o + 1] = Y; Q.rows[o + 2] = w; Q.rows[o + 3] = w; Q.rows[o + 4] = L[i + 4]; Q.rows[o + 5] = L[i + 5]; Q.rows[o + 6] = L[i + 6]; Q.rows[o + 7] = L[i + 7];
   }
 }
 // (the boats' lamps given so far, drawn and the list emptied - renderOverlays' view, C the screen's)
@@ -43286,14 +43290,14 @@ function lpassDuskHead() {
   const Wt = frameShared('water.levels'); if (!Wt) return 0;
   const x0 = CAMPX / SV, x1 = x0 + VWW, all = Wt.lakes().filter(l => l[1] > x0 && l[0] < x1); if (!all.length) return 0;
   const S = Wt.surf(); if (!S || !S.B) return 0;
-  const L = all.filter(l => PX(l[1]) > -8 && PX(l[0]) < VWP + 8).sort((a, b) => a[0] - b[0]).slice(0, Q.LAKES), h = lpassData(8 + L.length * 6); if (h < 0) return 0;
+  const L = all.filter(l => PX(l[1]) > -8 && PX(l[0]) < VWP + 8).sort((a, b) => a[0] - b[0]), h = lpassData(8 + L.length * 6);
   const d = Q.data; d.set([D.o0, D.o1, E.sunset, L.length, -SHY - 40, S.n, 0, 0], h);
   L.forEach((l, i) => d.set([PX(l[0]), PX(l[1]), PY(l[2] - 30), PY(l[2]), PY(l[2] + 60), 0], h + 8 + i * 6));
   Q.surf = S.B;
   return h + 1;
 }
 function lpassRows(ctx, world) {
-  const Q = LPASS, R = Q.rows, ox = Q.ox, oy = Q.oy, vi = viewIdx, row = lpassRow; let ng = 0;
+  const Q = LPASS, ox = Q.ox, oy = Q.oy, vi = viewIdx, row = lpassRow; let ng = 0;
   // the windows that were part of the world's picture (a ship's cabins): in its light, first - before every light laid over it (a lake's boat's under the
   // low sun's band: the head)
   if (world) Q.dh = lpassDuskHead();
@@ -43302,21 +43306,21 @@ function lpassRows(ctx, world) {
   const V = world ? lampView(LAMP_K) : null;
   // (each over the box its cone lights - beamBox - on its own side of the water)
   if (V) for (const q of V.L) {
-    const air = q[7] < 0, B = beamBox(q[0], q[1], q[4], q[5], q[2]), o = row(0, B[0], air ? B[1] : Math.max(B[1], q[3]), B[2], air ? Math.min(B[3], q[3]) : B[3]); if (o < 0) break;
-    R[o] = q[0] + ox; R[o + 1] = q[1] + oy; R[o + 2] = q[2]; R[o + 3] = q[3] + oy; R[o + 4] = q[4]; R[o + 5] = q[5]; R[o + 6] = q[6]; R[o + 7] = q[7];
+    const air = q[7] < 0, B = beamBox(q[0], q[1], q[4], q[5], q[2]), o = row(0, B[0], air ? B[1] : Math.max(B[1], q[3]), B[2], air ? Math.min(B[3], q[3]) : B[3]);
+    Q.rows[o] = q[0] + ox; Q.rows[o + 1] = q[1] + oy; Q.rows[o + 2] = q[2]; Q.rows[o + 3] = q[3] + oy; Q.rows[o + 4] = q[4]; Q.rows[o + 5] = q[5]; Q.rows[o + 6] = q[6]; Q.rows[o + 7] = q[7];
   }
   // 1. every lamp's beam glowing in the water or the air, held to where its rays get before rock (lightReach: its rays, worked out on the GPU before
   // the pass - Q.glow: each glow's lamp, the rays' length, px a world unit) and to its side of the water
   if (world) {
     const x0 = CAMPX / SV, x1 = x0 + VWP / SV, Lw = MS_BEAM_L + 2;
     for (const l of subLamps()) {
-      if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40 || l.k <= 0.01 || ng >= Q.GLOWS) continue;
+      if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40 || l.k <= 0.01) continue;
       const X = PX(l.x), Y = PY(l.y), L = MS_BEAM_L * SV, wy = Math.round(PY(surfaceY(l.x) + 2)), air = !!l.air, B = beamBox(X, Y, Math.cos(l.a), Math.sin(l.a), L + 1);   // (the box its cone lights)
-      const o = row(1, B[0], air ? B[1] : Math.max(B[1], wy), B[2], air ? Math.min(B[3], wy) : B[3]); if (o < 0) break;
-      Q.glow.set([l.x, l.y, Lw, SV], ng * 4); const ro = ng * Q.RAYS;
-      R[o] = X + ox; R[o + 1] = Y + oy; R[o + 2] = L; R[o + 3] = wy + oy; R[o + 4] = Math.cos(l.a); R[o + 5] = Math.sin(l.a); R[o + 6] = MS_BEAM_A * l.k; R[o + 7] = air ? -1 : 1;
-      R[o + 8] = ro; R[o + 10] = 5 * L / (230 * SUB_BEAM_K); Q.ng = ++ng;   // (the sprite's near fade: 5 of its 230 x SUB_BEAM_K pixels along the beam)
-      if (l.ms) { const r = 7 * SV, x0 = Math.round(X - r), y0 = Math.round(Y - r), w = Math.round(2 * r), q = row(6, x0, y0, x0 + w, y0 + w); if (q < 0) break; R[q] = X + ox; R[q + 1] = Y + oy; R[q + 2] = r; R[q + 3] = l.k; }
+      const o = row(1, B[0], air ? B[1] : Math.max(B[1], wy), B[2], air ? Math.min(B[3], wy) : B[3]);
+      Q.glow = lpassGrow(Q.glow, ng * 4 + 4); Q.glow.set([l.x, l.y, Lw, SV], ng * 4); const ro = ng * Q.RAYS;
+      Q.rows[o] = X + ox; Q.rows[o + 1] = Y + oy; Q.rows[o + 2] = L; Q.rows[o + 3] = wy + oy; Q.rows[o + 4] = Math.cos(l.a); Q.rows[o + 5] = Math.sin(l.a); Q.rows[o + 6] = MS_BEAM_A * l.k; Q.rows[o + 7] = air ? -1 : 1;
+      Q.rows[o + 8] = ro; Q.rows[o + 10] = 5 * L / (230 * SUB_BEAM_K); Q.ng = ++ng;   // (the sprite's near fade: 5 of its 230 x SUB_BEAM_K pixels along the beam)
+      if (l.ms) { const r = 7 * SV, x0 = Math.round(X - r), y0 = Math.round(Y - r), w = Math.round(2 * r), q = row(6, x0, y0, x0 + w, y0 + w); Q.rows[q] = X + ox; Q.rows[q + 1] = Y + oy; Q.rows[q + 2] = r; Q.rows[q + 3] = l.k; }
     }
   }
   // 4-5. the lighthouses' halos and beams (each view its own: a beam reaches far past its tower); the halo its lighthouse's lamp - hidden where something
@@ -43325,13 +43329,13 @@ function lpassRows(ctx, world) {
   if (world && on0 > 0.05) for (const b of lhBeams()) {
     const LC = lhCtlId(b.id); if (LC && LC.off) continue;
     const x = PX(b.x), y = PY(b.y), th = lhBeamTh(b), sea = lhBeamSea(b) || 1, s = SV, r = 6 * s, k = Math.abs(Math.cos(th)), kk = 0.55 + 0.45 * k;
-    let o = row(lpassKind(4, thgOrderOf(b.tw || b.o)), x - 5 * r - 1, y - 4 * r - 1, x + 5 * r + 1, y + 4 * r + 1); if (o < 0) break;
-    R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = r; R[o + 3] = on0; R[o + 4] = Math.pow(Math.max(0, Math.sin(th)), 6);
+    let o = row(lpassKind(4, thgOrderOf(b.tw || b.o)), x - 5 * r - 1, y - 4 * r - 1, x + 5 * r + 1, y + 4 * r + 1);
+    Q.rows[o] = x + ox; Q.rows[o + 1] = y + oy; Q.rows[o + 2] = r; Q.rows[o + 3] = on0; Q.rows[o + 4] = Math.pow(Math.max(0, Math.sin(th)), 6);
     // (the beam: always out over the water - the land side never lit - tilted a little up, sweeping gently up and down, breathing as the lamp turns)
     const up = 0.1 + 0.06 * Math.sin(th * 0.5), L = 1900 * s * (0.75 + 0.25 * kk), hw = 0.07 * (1.2 - 0.4 * kk);
     const ex = [Math.cos(up - hw), Math.cos(up + hw)].map(c => x + sea * L * c), ey = [Math.sin(up - hw), Math.sin(up + hw)].map(sn => y - L * sn);
-    o = row(5, Math.min(x, ...ex) - 1, Math.min(y, ...ey) - 1, Math.max(x, ...ex) + 1, Math.max(y, ...ey) + 1); if (o < 0) break;
-    R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = L; R[o + 3] = on0; R[o + 4] = sea; R[o + 5] = up; R[o + 6] = kk;
+    o = row(5, Math.min(x, ...ex) - 1, Math.min(y, ...ey) - 1, Math.max(x, ...ex) + 1, Math.max(y, ...ey) + 1);
+    Q.rows[o] = x + ox; Q.rows[o + 1] = y + oy; Q.rows[o + 2] = L; Q.rows[o + 3] = on0; Q.rows[o + 4] = sea; Q.rows[o + 5] = up; Q.rows[o + 6] = kk;
   }
   // 3. the air lamps (airLamps: x, y, strength, kind in view px, order - kind 0 white, 1 red, 2 a warm lit window, 3 green, 4 a lit point; 10 and up
   // a big warm glow that many px round, below 0 the same -kind px round - lampR; the order its thing's: hidden where something drawn after it is in front)
@@ -43340,21 +43344,21 @@ function lpassRows(ctx, world) {
     const x = G[i], y = G[i + 1], a = G[i + 2], kind = G[i + 3], k3 = lpassKind(3, G[i + 4]);
     if (kind >= 10 || kind < 0) {
       const Rb = Math.abs(kind); if (!(a > 0.01)) continue;
-      const o = row(k3, x - Rb - 1, y - Rb - 1, x + Rb + 1, y + Rb + 1); if (o < 0) break;
-      R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = Rb; R[o + 3] = a; R[o + 7] = clamp(Math.round(2 * Rb / 3) | 1, 15, 81); R[o + 9] = 1; continue;
+      const o = row(k3, x - Rb - 1, y - Rb - 1, x + Rb + 1, y + Rb + 1);
+      Q.rows[o] = x + ox; Q.rows[o + 1] = y + oy; Q.rows[o + 2] = Rb; Q.rows[o + 3] = a; Q.rows[o + 7] = clamp(Math.round(2 * Rb / 3) | 1, 15, 81); Q.rows[o + 9] = 1; continue;
     }
     const col = LPASS_COL[kind] || LPASS_WHITE, r = kind === 2 ? 14 * s : 6 * s, ha = kind === 2 ? 0.5 * a : kind === 4 ? 0 : 0.4 * a;
     const Rh = ha >= 0.01 && r >= 1 ? (r >= 7.5 ? Math.round(r / 7.5) * 7.5 : r) : 0, M = Math.max(Rh, px) + 1;
     if (!Rh && kind === 2) continue;
-    const o = row(k3, x - M, y - M, x + M, y + M); if (o < 0) break;
-    R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = Rh; R[o + 3] = a; R[o + 4] = col[0]; R[o + 5] = col[1]; R[o + 6] = col[2];
-    R[o + 8] = kind === 2 ? 0 : px; R[o + 9] = kind === 4 ? -1 : 0; R[o + 10] = ha;
+    const o = row(k3, x - M, y - M, x + M, y + M);
+    Q.rows[o] = x + ox; Q.rows[o + 1] = y + oy; Q.rows[o + 2] = Rh; Q.rows[o + 3] = a; Q.rows[o + 4] = col[0]; Q.rows[o + 5] = col[1]; Q.rows[o + 6] = col[2];
+    Q.rows[o + 8] = kind === 2 ? 0 : px; Q.rows[o + 9] = kind === 4 ? -1 : 0; Q.rows[o + 10] = ha;
   }
   // 2. the tail lamps (planeLamps: x, y, strength in view px, order - as the air lamps'), over the rest
   const PL = planeLamps[vi], pr = Math.max(1, Math.round(1.2 * SV));
   for (let i = 0; i < PL.length; i += 4) {
-    const x = Math.round(PL[i]), y = Math.round(PL[i + 1]), o = row(lpassKind(2, PL[i + 3]), x - 3 * pr, y - 3 * pr, x + 3 * pr, y + 3 * pr); if (o < 0) break;
-    R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = pr; R[o + 3] = PL[i + 2];
+    const x = Math.round(PL[i]), y = Math.round(PL[i + 1]), o = row(lpassKind(2, PL[i + 3]), x - 3 * pr, y - 3 * pr, x + 3 * pr, y + 3 * pr);
+    Q.rows[o] = x + ox; Q.rows[o + 1] = y + oy; Q.rows[o + 2] = pr; Q.rows[o + 3] = PL[i + 2];
   }
   // the windows lit after the dark (a building's, a jet's): over the rest, where the lit insides were drawn (after the light pass); the LOOK panel's
   // boats' lamps (the world's are drawn over the smoke - lightBoats)
@@ -43370,17 +43374,17 @@ const litGlows = [[], []];
 // fillRect laid it in; pt: its lit point [size px, [r, g, b], alpha] over it (a square at the point, rounded as the canvas placed it) or null
 function lightGlow(x, y, r, stops, pt) { litGlows[viewIdx].push({ x, y, r, stops, pt }); }
 function lpassGlows(L) {
-  const Q = LPASS, R = Q.rows, D = Q.data;
+  const Q = LPASS;
   for (const g of L) {
-    const n = Math.min(4, g.stops.length), d = lpassData(n * 5); if (d < 0) return;
-    for (let k = 0; k < n; k++) { const [off, c, a] = g.stops[k], b = d + k * 5; D[b] = off; D[b + 1] = c[0]; D[b + 2] = c[1]; D[b + 3] = c[2]; D[b + 4] = a; }
+    const n = Math.min(4, g.stops.length), d = lpassData(n * 5);
+    for (let k = 0; k < n; k++) { const [off, c, a] = g.stops[k], b = d + k * 5; Q.data[b] = off; Q.data[b + 1] = c[0]; Q.data[b + 2] = c[1]; Q.data[b + 3] = c[2]; Q.data[b + 4] = a; }
     const x0 = Math.round(g.x - g.r), y0 = Math.round(g.y - g.r), w = Math.round(2 * g.r);
-    let o = lpassRow(22, x0, y0, x0 + w, y0 + w); if (o < 0) return;
-    R[o] = g.x; R[o + 1] = g.y; R[o + 2] = g.r; R[o + 3] = d; R[o + 4] = n;
+    let o = lpassRow(22, x0, y0, x0 + w, y0 + w);
+    Q.rows[o] = g.x; Q.rows[o + 1] = g.y; Q.rows[o + 2] = g.r; Q.rows[o + 3] = d; Q.rows[o + 4] = n;
     if (!g.pt) continue;
     const [p, c, a] = g.pt, px = Math.round(g.x - p / 2), py = Math.round(g.y - p / 2);
-    o = lpassRow(10, px, py, px + p, py + p); if (o < 0) return;
-    R[o] = px; R[o + 1] = py; R[o + 2] = p; R[o + 3] = p; R[o + 4] = c[0]; R[o + 5] = c[1]; R[o + 6] = c[2]; R[o + 7] = Math.min(1, a);
+    o = lpassRow(10, px, py, px + p, py + p);
+    Q.rows[o] = px; Q.rows[o + 1] = py; Q.rows[o + 2] = p; Q.rows[o + 3] = p; Q.rows[o + 4] = c[0]; Q.rows[o + 5] = c[1]; Q.rows[o + 6] = c[2]; Q.rows[o + 7] = Math.min(1, a);
   }
 }
 /* THE FOG (slice 7): the near fog under the clouds' band over the water and the land (a fog band, kind 16 - a dark, cool version of the fog's
@@ -43451,7 +43455,7 @@ function lpassDraw(ctx, full, gather, cx0, cx1, cy1, src) {
   pass.setBindGroup(0, bg); if (ds) pass.setStencilReference(0x80);
   pass.setScissorRect(x0, T.h - y1, x1 - x0, y1 - y0);   // (rows bottom first)
   if (full) { pass.setPipeline(lpassPipe('vsFull', full === true ? 'fsDark' : full, T.tex.fmt, sf)); pass.draw(3); }
-  if (n) { pass.setPipeline(lpassPipe('vsRow', 'fsRow', T.tex.fmt, sf)); pass.draw(6, n); }   // (n: at most LPASS.CAP)
+  if (n) { pass.setPipeline(lpassPipe('vsRow', 'fsRow', T.tex.fmt, sf)); pass.draw(6, n); }
   gpuPassEnd();
 }
 /* ---- UNDER THE WATER'S TINT (renderObjects, 27-sub-light.js lampSnapshot / lampUncover - slice 6): what the beams fall on seen in its own
@@ -43475,9 +43479,9 @@ function lpassSnap(x0, x1, y0, y1) {
 function lpassUncover(V) {
   if (!LPASS.snap) return;
   lpassDraw(C, false, () => {
-    const Q = LPASS, n = Math.min(16, V.L.length), d = lpassData(n * 8); if (d < 0) return;
+    const Q = LPASS, n = V.L.length, d = lpassData(n * 8);
     for (let k = 0; k < n; k++) { const q = V.L[k], b = d + k * 8; Q.data.set([q[0] + Q.ox, q[1] + Q.oy, q[2], q[3] + Q.oy, q[4], q[5], q[6], q[7]], b); }
-    const o = lpassRow(15, V.bx0, V.by0, V.bx1, V.by1); if (o < 0) return; Q.rows[o] = n; Q.rows[o + 1] = d;
+    const o = lpassRow(15, V.bx0, V.by0, V.bx1, V.by1); Q.rows[o] = n; Q.rows[o + 1] = d;
   }, VSX, VSX + VWP, bh, LPASS.snap);
 }
 /* ---- THE LIGHTS OVER THE SMOKE (engine part 7, slice 3): the same table drawn at two more points of the 'overlays' layer
@@ -43487,18 +43491,18 @@ function lpassUncover(V) {
 // a soft stepped glow (softGlow, 44-shadows-seafloor.js): rings of blocks round the block at (cx, cy), added
 function lpassSoft(cx, cy, R, col, a, rings = 6, ord = 0) {
   rings = Math.max(rings, Math.min(18, Math.round(R / (PB * 4))));
-  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(lpassKind(7, ord), bx - M, by - M, bx + M, by + M); if (o < 0) return;
+  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(lpassKind(7, ord), bx - M, by - M, bx + M, by + M);
   const r = LPASS.rows; r[o] = bx; r[o + 1] = by; r[o + 2] = R; r[o + 3] = rings; r[o + 4] = col[0]; r[o + 5] = col[1]; r[o + 6] = col[2]; r[o + 7] = a; r[o + 8] = PB;
 }
 // a three-step light pool (glowDisc): its size in steps (four blocks when big), added at a
 function lpassDisc(cx, cy, R, col, a, ord = 0) {
   if (a < 0.004) return;
   const q = R > 16 * PB ? 4 * PB : PB; R = Math.max(PB, Math.round(R / q) * q);
-  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(lpassKind(8, ord), bx - M, by - M, bx + M, by + M); if (o < 0) return;
+  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(lpassKind(8, ord), bx - M, by - M, bx + M, by + M);
   const r = LPASS.rows; r[o] = bx; r[o + 1] = by; r[o + 2] = R; r[o + 3] = Math.min(1, a); r[o + 4] = col[0]; r[o + 5] = col[1]; r[o + 6] = col[2]; r[o + 8] = PB;
 }
 function lpassOverSmoke() {
-  const x0 = CAMPX / SV, x1 = x0 + VWW, R = LPASS.rows;
+  const x0 = CAMPX / SV, x1 = x0 + VWW, Q = LPASS;
   if (E.lampsOn > 0.02) {
     // dock lamps: warm sodium, nudged toward the colour of the air (rose at sunset, teal in night fog); faint by day, full at night
     const lampCol = mix3(mix3([255, 206, 140], [255, 170, 120], E.dusk * 0.5), E.fogCol.map(v => Math.min(255, v * 1.25)), 0.3 * E.fog);
@@ -43510,16 +43514,16 @@ function lpassOverSmoke() {
       // a wide, faint halo that grows in fog, and a small hot core; a faint cone down to its deck, a soft pool where it lands, a long broken reflection
       lpassSoft(px, py, (22 + 60 * E.fog) * GS, lampCol, (0.2 + 0.18 * E.fog) * LA, 7, od);
       lpassSoft(px, py, 7 * GS, lampCol, 0.3 * LA, 3, od);
-      const sy = PY(surfaceY(lx) + 3), w = 32 * SV + 4 * PB, o = lpassRow(lpassKind(9, od), px - w, Math.min(py, sy) - PB, px + w, Math.max(dy, sy + 50 * SV) + PB); if (o < 0) break;
-      R[o] = px; R[o + 1] = py; R[o + 2] = dy; R[o + 3] = SV; R[o + 4] = lampCol[0]; R[o + 5] = lampCol[1]; R[o + 6] = lampCol[2]; R[o + 7] = LA; R[o + 8] = PB; R[o + 9] = E.fog; R[o + 10] = sy;
+      const sy = PY(surfaceY(lx) + 3), w = 32 * SV + 4 * PB, o = lpassRow(lpassKind(9, od), px - w, Math.min(py, sy) - PB, px + w, Math.max(dy, sy + 50 * SV) + PB);
+      Q.rows[o] = px; Q.rows[o + 1] = py; Q.rows[o + 2] = dy; Q.rows[o + 3] = SV; Q.rows[o + 4] = lampCol[0]; Q.rows[o + 5] = lampCol[1]; Q.rows[o + 6] = lampCol[2]; Q.rows[o + 7] = LA; Q.rows[o + 8] = PB; Q.rows[o + 9] = E.fog; Q.rows[o + 10] = sy;
     }
     // harbour buoys flash at night: a glow and its hot pixel
     for (const b of buoys) {
       if (b.state !== 'float' || offViewR(b.x, 22 * Math.min(SV, 2.2) / SV, x0, x1) || (time + b.ph) % 2.2 > 0.45) continue;
       const by = PY(surfaceY(b.x) + 2.5 - 32 * BUOY_K), bx = PX(b.x);
       lpassSoft(bx, by, 22 * Math.min(SV, 2.2), b.col === 'red' ? [255, 70, 50] : [255, 196, 90], 0.55 * E.lampsOn, 5);
-      const X = Math.floor((bx - PB / 2) / PBV) * PBV, Y = Math.floor(by / PBV) * PBV, o = lpassRow(10, X, Y, X + PBV, Y + PBV); if (o < 0) break;
-      R[o] = X; R[o + 1] = Y; R[o + 2] = PBV; R[o + 3] = PBV; R[o + 4] = 255; R[o + 5] = 242; R[o + 6] = 192; R[o + 7] = 1;
+      const X = Math.floor((bx - PB / 2) / PBV) * PBV, Y = Math.floor(by / PBV) * PBV, o = lpassRow(10, X, Y, X + PBV, Y + PBV);
+      Q.rows[o] = X; Q.rows[o + 1] = Y; Q.rows[o + 2] = PBV; Q.rows[o + 3] = PBV; Q.rows[o + 4] = 255; Q.rows[o + 5] = 242; Q.rows[o + 6] = 192; Q.rows[o + 7] = 1;
     }
     // tower beacons (hidden where something drawn after the tower is in front)
     for (const tw of towers) {
@@ -43547,18 +43551,18 @@ function lpassOverFire() {
    where it leaves it and the sea under the strike, with a spread of bright broken light on the water; its jagged channel and forks in
    blocks; and the whole storm flickers, strongest under the clouds. Drawn under the smoke, where drawLightning drew it ---- */
 function lpassLightning() {
-  const R = LPASS.rows, Q = LPASS;
+  const Q = LPASS;
   for (const b of storm.bolts) {
     const vis = b.t < 0.08 ? 1 : b.t < 0.16 ? 0.25 : b.t < 0.26 ? 0.85 : b.t < 0.32 ? 0 : 0.5 * (1 - (b.t - 0.32) / 0.18);
     if (vis <= 0.02) continue;
     // (out of the inside of the deck; an aircraft up among the clouds is struck from just above it - stormTargets)
     const bot = PY(b.y), top = Math.min(deckYs[viewIdx] - Math.round(28 * S), bot - Math.round(90 * S)), YY = t => top + (bot - top) * t;
     const gx = PX(b.x0), gR = Math.round(230 * S * vis), sx = PX(b.x);
-    let o = lpassRow(11, Math.min(gx - gR, sx - 150 * S) - 2, Math.min(top - gR, bot - 6 * S) - 2, Math.max(gx + gR, sx + 150 * S) + 2, Math.max(top + 0.4 * gR, bot + 30 * S) + 2); if (o < 0) return;
-    R[o] = gx; R[o + 1] = top; R[o + 2] = gR; R[o + 3] = vis; R[o + 4] = sx; R[o + 5] = bot; R[o + 6] = S; R[o + 8] = PB;
+    let o = lpassRow(11, Math.min(gx - gR, sx - 150 * S) - 2, Math.min(top - gR, bot - 6 * S) - 2, Math.max(gx + gR, sx + 150 * S) + 2, Math.max(top + 0.4 * gR, bot + 30 * S) + 2);
+    Q.rows[o] = gx; Q.rows[o + 1] = top; Q.rows[o + 2] = gR; Q.rows[o + 3] = vis; Q.rows[o + 4] = sx; Q.rows[o + 5] = bot; Q.rows[o + 6] = S; Q.rows[o + 8] = PB;
     // the sea's broken light: a block a column, at the surface, a hash of the column and the clock deciding which
     const C0 = Math.round(180 * S), nc = Math.floor(2 * C0 / PB) + 1, d = lpassData(nc * 2), tick = Math.floor(time * 20);
-    if (d >= 0) {
+    {
       let X0 = null, y0 = 1e9, y1 = -1e9;
       for (let i = 0, c = -C0; i < nc; i++, c += PB) {
         const X = Math.floor((sx + c) / PB) * PB, f = 1 - Math.abs(c) / (180 * S), h = hash(X * 0.37 + tick * 0.71); if (X0 == null) X0 = X;
@@ -43566,17 +43570,17 @@ function lpassLightning() {
         const Y = Math.floor(PY(surfaceY((X + PB / 2 + CAMPX) / SV)) / PB) * PB + PB * Math.floor(h * 4);
         Q.data[d + 2 * i] = Y; Q.data[d + 2 * i + 1] = vis * f * 0.9 * (h < 0.3 ? -1 : 1); y0 = Math.min(y0, Y); y1 = Math.max(y1, Y + PB);
       }
-      if (y1 > y0) { o = lpassRow(12, X0, y0, X0 + (nc + 3) * PB, y1); if (o < 0) return; R[o] = X0; R[o + 1] = nc; R[o + 2] = d; R[o + 8] = PB; }
+      if (y1 > y0) { o = lpassRow(12, X0, y0, X0 + (nc + 3) * PB, y1); Q.rows[o] = X0; Q.rows[o + 1] = nc; Q.rows[o + 2] = d; Q.rows[o + 8] = PB; }
     }
     // its channel (a soft line each side, the bright core) and its forks, in the view's blocks for small things (PBV - blkLine's)
     // (a row holds 32 points: a longer line goes as rows of 32 sharing their ends - each point drawn twice, as blkLine's segments do)
     const line = (pts, dx, col, a) => {
       for (let s0 = 0; s0 < pts.length - 1; s0 += 31) {
-        const np = Math.min(32, pts.length - s0), d2 = lpassData(np * 2); if (d2 < 0) return;
+        const np = Math.min(32, pts.length - s0), d2 = lpassData(np * 2);
         let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
         for (let i = 0; i < np; i++) { const x = PX(pts[s0 + i][0]), y = YY(pts[s0 + i][1]); Q.data[d2 + 2 * i] = x; Q.data[d2 + 2 * i + 1] = y; x0 = Math.min(x0, x + dx); x1 = Math.max(x1, x + dx); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-        const q = lpassRow(13, x0 - 2 * PBV, y0 - 2 * PBV, x1 + 2 * PBV, y1 + 2 * PBV); if (q < 0) return;
-        R[q] = d2; R[q + 1] = np; R[q + 2] = dx; R[q + 4] = col[0]; R[q + 5] = col[1]; R[q + 6] = col[2]; R[q + 7] = a; R[q + 8] = PBV;
+        const q = lpassRow(13, x0 - 2 * PBV, y0 - 2 * PBV, x1 + 2 * PBV, y1 + 2 * PBV);
+        Q.rows[q] = d2; Q.rows[q + 1] = np; Q.rows[q + 2] = dx; Q.rows[q + 4] = col[0]; Q.rows[q + 5] = col[1]; Q.rows[q + 6] = col[2]; Q.rows[q + 7] = a; Q.rows[q + 8] = PBV;
       }
     };
     line(b.pts, -PB, [170, 190, 255], 0.55 * vis); line(b.pts, PB, [170, 190, 255], 0.55 * vis);
@@ -43584,8 +43588,8 @@ function lpassLightning() {
     for (const f of b.forks) line(f, 0, [214, 224, 255], 0.7 * vis);
   }
   if (storm.flash > 0) {
-    const dy = deckYs[viewIdx], o = lpassRow(14, -SHX - 2, -SHY - 2, VWP - SHX + 2, bh - SHY + 2); if (o < 0) return;
-    R[o] = dy - 120 * S; R[o + 1] = dy + 20 * S; R[o + 2] = 0.32 * storm.flash * storm.flash; R[o + 8] = PB;
+    const dy = deckYs[viewIdx], o = lpassRow(14, -SHX - 2, -SHY - 2, VWP - SHX + 2, bh - SHY + 2);
+    Q.rows[o] = dy - 120 * S; Q.rows[o + 1] = dy + 20 * S; Q.rows[o + 2] = 0.32 * storm.flash * storm.flash; Q.rows[o + 8] = PB;
   }
 }
 // (renderOverlays, its view: C the screen's context) stage 0 under the smoke (lightning), 1 over the smoke, 2 over the fire
@@ -43595,17 +43599,17 @@ function lightOverlay(stage) { lpassDraw(C, false, stage === 0 ? lpassLightning 
    the view dimmer (a rectangle laid over, kind 10), each light blooming warm round itself (19, added), and a gentle vignette (20) - drawn after
    the caves, a view at a time, into the screen (its px: g's transform is none here) ---- */
 function lpassGrade(G, i, sx, w) {
-  const L = brightLights[i], R = LPASS.rows; let k = 0;
+  const L = brightLights[i], Q = LPASS; let k = 0;
   for (let j = 0; j < L.length; j += 4) k += L[j + 2];
   for (const f of flashes.rows()) k += 0.6 * (1 - f.life / f.max);
   k = clamp(k, 0, 1.2);
-  if (k > 0.02) { const o = lpassRow(10, sx, 0, sx + w, bh); if (o < 0) return; R[o] = sx; R[o + 2] = w; R[o + 3] = bh; R[o + 4] = 6; R[o + 5] = 8; R[o + 6] = 16; R[o + 7] = 0.22 * k * G; }   // (the eye's adapting: all else darker)
+  if (k > 0.02) { const o = lpassRow(10, sx, 0, sx + w, bh); Q.rows[o] = sx; Q.rows[o + 2] = w; Q.rows[o + 3] = bh; Q.rows[o + 4] = 6; Q.rows[o + 5] = 8; Q.rows[o + 6] = 16; Q.rows[o + 7] = 0.22 * k * G; }   // (the eye's adapting: all else darker)
   for (let j = 0; j < L.length; j += 4) {
-    const x = L[j], y = L[j + 1], r = L[j + 3], o = lpassRow(19, x - r, y - r, x + r, y + r); if (o < 0) return;
-    R[o] = x; R[o + 1] = y; R[o + 2] = r; R[o + 3] = 0.35 * L[j + 2] * G;
+    const x = L[j], y = L[j + 1], r = L[j + 3], o = lpassRow(19, x - r, y - r, x + r, y + r);
+    Q.rows[o] = x; Q.rows[o + 1] = y; Q.rows[o + 2] = r; Q.rows[o + 3] = 0.35 * L[j + 2] * G;
   }
-  const cx = sx + w / 2, cy = bh / 2, o = lpassRow(20, sx, 0, sx + w, bh); if (o < 0) return;
-  R[o] = cx; R[o + 1] = cy; R[o + 2] = Math.min(w, bh) * 0.35; R[o + 3] = Math.max(w, bh) * 0.75; R[o + 4] = 4; R[o + 5] = 6; R[o + 6] = 14; R[o + 7] = 0.28 * G;
+  const cx = sx + w / 2, cy = bh / 2, o = lpassRow(20, sx, 0, sx + w, bh);
+  Q.rows[o] = cx; Q.rows[o + 1] = cy; Q.rows[o + 2] = Math.min(w, bh) * 0.35; Q.rows[o + 3] = Math.max(w, bh) * 0.75; Q.rows[o + 4] = 4; Q.rows[o + 5] = 6; Q.rows[o + 6] = 14; Q.rows[o + 7] = 0.28 * G;
 }
 // (the tint layer's last step, 48-render.js; F.views: the frame's views)
 function lightGrade(views) {
@@ -43616,11 +43620,11 @@ function lightGrade(views) {
    surfaceLine's outline (42-render-sky.js): the view's surface row (ys, renderObjects') every other column from -3, a straight line between.
    The fog over the water in the overlays (lightFogBand, renderOverlays - 47-render-overlays.js); the near fog in the fog layer (lightFog) ---- */
 function lpassFogBand(col, a, y0, y1, yOff) {
-  const Q = LPASS, n = Math.ceil((VWP + 6) / 2), d = lpassData(n); if (d < 0) return;
+  const Q = LPASS, n = Math.ceil((VWP + 6) / 2), d = lpassData(n);
   let s1 = -1e9; for (let k = 0; k < n; k++) { const s = ys[2 * k] + yOff; Q.data[d + k] = s; s1 = Math.max(s1, s); }
   if (s1 <= y0) return;
-  const o = lpassRow(16, -3, y0, VWP + 3, s1); if (o < 0) return;
-  const R = Q.rows; R[o] = y0; R[o + 1] = y1; R[o + 2] = d; R[o + 3] = n; R[o + 4] = col[0]; R[o + 5] = col[1]; R[o + 6] = col[2]; R[o + 7] = a;
+  const o = lpassRow(16, -3, y0, VWP + 3, s1);
+  Q.rows[o] = y0; Q.rows[o + 1] = y1; Q.rows[o + 2] = d; Q.rows[o + 3] = n; Q.rows[o + 4] = col[0]; Q.rows[o + 5] = col[1]; Q.rows[o + 6] = col[2]; Q.rows[o + 7] = a;
 }
 // (renderOverlays, its view - C the screen's context: the fog's colour from clear round the clouds' deck to a fifth of the fog under it)
 function lightFogBand() {
@@ -43643,13 +43647,13 @@ function lpassSurface() {
   for (let p = 0; p < 2; p++) if (crew[p].mode === 'boat') spans.push([crew[p].x - 8, crew[p].x + 8]);
   const ns = spans.length, shaded = wx => { for (let k = 0; k < ns; k++) { const sp = spans[k]; if (wx > sp[0] - 2 && wx < sp[1] + 2) return true; } return false; };
   const tick = Math.floor(time * 6), lw = SV > 1.6 ? 3 : 2, step = PB, c0 = Math.floor(-SHX / step) * step - step, nc = Math.ceil((VWP + step - c0) / step);
-  const Q = LPASS, D = Q.data, d = lpassData(nc * 2); if (d < 0) return;
+  const Q = LPASS, d = lpassData(nc * 2);
   const b8 = a => Math.max(0, Math.min(255, Math.round(a * 255)));
   const mx = moonXs[viewIdx], mwid = Math.max(60, VWP * 0.22), sx = sunXs[viewIdx], swid = Math.max(50, VWP * 0.16) * (1 + E.sunset);
   let y0 = 1e9, y1 = -1e9;
   for (let i = 0, c = c0; i < nc; i++, c += step) {
     const wx = (c + step / 2 + CAMPX) / SV; let k = 0;
-    D[d + 2 * i] = 0; D[d + 2 * i + 1] = 0;
+    Q.data[d + 2 * i] = 0; Q.data[d + 2 * i + 1] = 0;
     if (shaded(wx)) continue;
     const h = hash(Math.floor(wx / 3) * 1.37 + Math.floor((tick + (c & 7)) / 2) * 0.71);
     if (moonOn) {   // (the whole line lit, the stretch under the moon much more; glints - bright dashes riding the top of the water - thicker under it, flickering)
@@ -43658,10 +43662,10 @@ function lpassSurface() {
     }
     if (sunOn) { const near = Math.exp(-(((c - sx) / swid) ** 2)); if (near >= 0.04 && h <= 0.6 * near) k += 65536 * b8(dy * (0.35 + 0.5 * near)); }
     if (!k) continue;
-    const y = PY(surfaceY(wx)); D[d + 2 * i] = y; D[d + 2 * i + 1] = k; y0 = Math.min(y0, y - lw); y1 = Math.max(y1, y + lw);
+    const y = PY(surfaceY(wx)); Q.data[d + 2 * i] = y; Q.data[d + 2 * i + 1] = k; y0 = Math.min(y0, y - lw); y1 = Math.max(y1, y + lw);
   }
   if (y1 <= y0) return;
-  const R = Q.rows, put = (kind, line, glint) => { const o = lpassRow(kind, c0, y0, c0 + nc * step, y1); if (o < 0) return; R[o] = c0; R[o + 1] = step; R[o + 2] = d; R[o + 3] = nc; R.set(line, o + 4); R[o + 7] = lw; R.set(glint, o + 8); };
+  const put = (kind, line, glint) => { const o = lpassRow(kind, c0, y0, c0 + nc * step, y1); Q.rows[o] = c0; Q.rows[o + 1] = step; Q.rows[o + 2] = d; Q.rows[o + 3] = nc; Q.rows.set(line, o + 4); Q.rows[o + 7] = lw; Q.rows.set(glint, o + 8); };
   if (moonOn) { const w = E.moonWarm; put(17, mix3([200, 238, 255], [255, 214, 160], w), mix3([236, 252, 255], [255, 232, 190], w)); }
   if (sunOn) put(18, [0, 0, 0], mix3([255, 252, 236], [255, 214, 150], E.sunset));
 }
@@ -65203,48 +65207,51 @@ function lightDraw() {
    LPASS.RAYS rays round it, each out to the beam's length or the first rock of the world's cells - worked out on the GPU (csReach) from the same
    cells as the dark (the ground's - frameShared('ground.cells')), every frame the pass draws glows (was lampReachCells: 96 rays a lamp marched on the
    processor, a cell at a time, every frame).
-   LIGHT.glowRays: the reaches (px) - glow i's RAYS from i x RAYS; then each glow's numbers (8: its cell's column and row, where it is in them (0..1),
-   its length (world), px a world unit); then the cells' (celAt's n) */
+   LIGHT.glowRays: the reaches (px) - glow i's RAYS from i x RAYS, as many glows as are in view (it grows - user Nov 19: past 32 a beam had no glow);
+   their inputs this frame's (the arena - binding 2): the cells' (celAt's n), then each glow's numbers (8: its cell's column and row, where it is in them
+   (0..1), its length (world), px a world unit) */
 const LIGHT_REACH_WGSL = cel => `
 @group(0) @binding(0) var<storage, read_write> rc: array<f32>;
 @group(0) @binding(1) var<storage, read> cel: array<u32>;
+@group(0) @binding(2) var<storage, read> gin: array<f32>;
 ${cel}
-const RAYS = ${LPASS.RAYS}u; const GO = ${LPASS.GLOWS * LPASS.RAYS}u; const NO = ${LPASS.GLOWS * (LPASS.RAYS + 8)}u; const CELL = ${LT_CELL.toFixed(4)};
+const RAYS = ${LPASS.RAYS}u; const CELL = ${LT_CELL.toFixed(4)};
 @compute @workgroup_size(${LPASS.RAYS}) fn csReach(@builtin(workgroup_id) w: vec3u, @builtin(local_invocation_index) b: u32) {
-  let g = GO + w.x * 8u; let c0 = vec2i(i32(rc[g]), i32(rc[g + 1u])); let f0 = vec2f(rc[g + 2u], rc[g + 3u]); let L = rc[g + 4u];
-  let n = vec4f(rc[NO], rc[NO + 1u], rc[NO + 2u], rc[NO + 3u]);
+  let g = 4u + w.x * 8u; let c0 = vec2i(i32(gin[g]), i32(gin[g + 1u])); let f0 = vec2f(gin[g + 2u], gin[g + 3u]); let L = gin[g + 4u];
+  let n = vec4f(gin[0], gin[1], gin[2], gin[3]);
   let t = (f32(b) + 0.5) / f32(RAYS) * 6.283185307179586; let u = vec2f(cos(t), sin(t)) / CELL;
   var d = 0.0;
   for (var s = 0; s < 1024; s++) { if (d >= L) { break; } d = d + CELL; let q = c0 + vec2i(floor(f0 + u * d)); if (celAt(q.x, q.y, n).x > 0.5) { break; } }
-  rc[w.x * RAYS + b] = min(d, L) * rc[g + 5u];
+  rc[w.x * RAYS + b] = min(d, L) * gin[g + 5u];
 }`;
-// LIGHT.glowRays on this device (not LIGHT.reach - that's the sun's reach in cells, a number) (and what csReach reads where there are no cells: an empty world - every ray its whole length)
-// (the accessor: the ground's - its share's wgsl; with no share, one of no rock anywhere over the empty stand-in cel0)
-function lightReachBuf() {
-  const Q = LIGHT; if (Q.glowRays && Q.glowRays.ep === GPU.ep) return Q.glowRays;
-  const G = lightCells();
-  Q.glowRays = gpuBuf((LPASS.GLOWS * (LPASS.RAYS + 8) + 4) * 4, 'light'); Q.cel0 = gpuBuf(16, 'light');
-  Q.rmod = gpuModule(LIGHT_REACH_WGSL(G ? G.wgsl : LIGHT_NO_CELLS_WGSL), 'light reach');
-  const C_ = GPUShaderStage.COMPUTE;
-  Q.rbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: { type: 'storage' } }, { binding: 1, visibility: C_, buffer: { type: 'read-only-storage' } }], 'light reach');
-  Q.rpipe = gpuComputePipe({ layout: gpuPipeLayout([Q.rbl], 'light reach'), compute: { module: Q.rmod, entryPoint: 'csReach' }, label: 'light reach' });
+// LIGHT.glowRays on this device, room for n glows' reaches at least (not LIGHT.reach - that's the sun's reach in cells, a number) (and what csReach reads
+// where there are no cells: an empty world - every ray its whole length) (the accessor: the ground's - its share's wgsl; with no share, one of no rock
+// anywhere over the empty stand-in cel0)
+function lightReachBuf(n) {
+  const Q = LIGHT, need = Math.max(32, n || 0) * LPASS.RAYS * 4;
+  if (!Q.glowRays || Q.glowRays.ep !== GPU.ep) {
+    const G = lightCells();
+    Q.glowRays = null; Q.cel0 = gpuBuf(16, 'light');
+    Q.rmod = gpuModule(LIGHT_REACH_WGSL(G ? G.wgsl : LIGHT_NO_CELLS_WGSL), 'light reach');
+    const C_ = GPUShaderStage.COMPUTE;
+    Q.rbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: { type: 'storage' } }, { binding: 1, visibility: C_, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: C_, buffer: { type: 'read-only-storage' } }], 'light reach');
+    Q.rpipe = gpuComputePipe({ layout: gpuPipeLayout([Q.rbl], 'light reach'), compute: { module: Q.rmod, entryPoint: 'csReach' }, label: 'light reach' });
+  }
+  if (!Q.glowRays || Q.glowRays.size < need) { gpuBufFree(Q.glowRays); Q.glowRays = gpuBuf(Math.max(need, Q.glowRays ? Q.glowRays.size * 2 : 0), 'light'); }   // (more glows in view: twice the room)
   return Q.glowRays;
 }
-const LIGHT_RG = new Float32Array(LPASS.GLOWS * 8 + 4);
 // the n glows' reaches into LIGHT.glowRays before the pass that reads them (G: each [x, y, length (world), px a world unit]); the cells they reach there first
 function lightReach(G, n) {
   if (!n || !gpuAlive()) return;
-  const Q = LIGHT, B = lightReachBuf(), F = LIGHT_RG, GC = lightCells(), cb = GC && GC.buf(), has = !!cb;
-  F.fill(0);
+  const Q = LIGHT, B = lightReachBuf(n), GC = lightCells(), cb = GC && GC.buf(), has = !!cb;
+  const nb = (4 + n * 8) * 4, [ac, ao] = arenaAlloc(nb, 256), F = new Float32Array(ac.cpu.buffer, ao, 4 + n * 8);
+  F.set(has ? GC.n() : [0, 1 << 30, 0, 0], 0);   // (no world: no rock anywhere)
   for (let i = 0; i < n; i++) {
-    const x = G[i * 4], y = G[i * 4 + 1], L = G[i * 4 + 2], cx = x / LT_CELL, cy = (y - LT_Y0) / LT_CELL, ix = Math.floor(cx), iy = Math.floor(cy);
+    const x = G[i * 4], y = G[i * 4 + 1], L = G[i * 4 + 2], cx = x / LT_CELL, cy = (y - LT_Y0) / LT_CELL, ix = Math.floor(cx), iy = Math.floor(cy), o = 4 + i * 8;
     if (has) GC.need(Math.floor((x - L) / LT_CELL) - 1, Math.ceil((x + L) / LT_CELL) + 2);
-    F.set([ix, iy, cx - ix, cy - iy, L, G[i * 4 + 3]], i * 8);
+    F[o] = ix; F[o + 1] = iy; F[o + 2] = cx - ix; F[o + 3] = cy - iy; F[o + 4] = L; F[o + 5] = G[i * 4 + 3]; F[o + 6] = 0; F[o + 7] = 0;
   }
-  F.set(has ? GC.n() : [0, 1 << 30, 0, 0], LPASS.GLOWS * 8);   // (no world: no rock anywhere)
-  const nb = F.byteLength, [ac, ao] = arenaAlloc(nb, 256); ac.cpu.set(new Uint8Array(F.buffer), ao);
-  gpuCopyBuf(ac, ao, B, LPASS.GLOWS * LPASS.RAYS * 4, nb);
-  const bg = gpuBindGroup(Q.rbl, [{ binding: 0, resource: { buffer: B.gb } }, { binding: 1, resource: { buffer: (has ? cb : Q.cel0).gb } }], 'light reach');
+  const bg = gpuBindGroup(Q.rbl, [{ binding: 0, resource: { buffer: B.gb } }, { binding: 1, resource: { buffer: (has ? cb : Q.cel0).gb } }, { binding: 2, resource: { buffer: ac.gb, offset: ao, size: nb } }], 'light reach');
   const cp = gpuComputeBegin([B], 'light reach');
   cp.setPipeline(Q.rpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(n); cp.end();
 }
