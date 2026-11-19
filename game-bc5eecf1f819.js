@@ -4252,8 +4252,10 @@ const VTUNE_DEF = {
   // what a market pays for each kind of CARGO, coins apiece (50-zz-cargo.js; a fish 1/20 of a coin - user Nov 2 10:53)
   cargo: { fish: 0.05, gold: 5 },
   // the Story cars' drive (user Nov 2 15:48 - 50-story-cars.js carDrive): the tyres' grip (all the grounds' grip times this), and each
-  // kind's driven wheels (Drive: 0 the rear, 1 the front, 2 all four) and engine power at the wheels (Kw - the game's gravity is 2.5 times the real)
-  car: { grip: 1, taxiDrive: 0, taxiKw: 220, suvDrive: 2, suvKw: 260, vanDrive: 0, vanKw: 200, motorcycleDrive: 0, motorcycleKw: 90, tractorDrive: 2, tractorKw: 160,
+  // kind's driven wheels (Drive: 0 the rear, 1 the front, 2 all four) and engine power at the wheels (Kw - the game's gravity is 2.5 times the real);
+  // crash: her body (not her wheels) striking the ground faster than this, m/s, and she's destroyed (user Nov 19 10:20 - landBody's crash); fall: coming
+  // down on her wheels as hard as a fall from higher than this, m, and she's destroyed (user Nov 19 10:33: "it should get wrecked after a certain height")
+  car: { grip: 1, crash: 8, fall: 6, taxiDrive: 0, taxiKw: 220, suvDrive: 2, suvKw: 260, vanDrive: 0, vanKw: 200, motorcycleDrive: 0, motorcycleKw: 90, tractorDrive: 2, tractorKw: 160,
     ambulanceDrive: 0, ambulanceKw: 320, fire_engineDrive: 0, fire_engineKw: 480, box_truckDrive: 0, box_truckKw: 320, dump_truckDrive: 0, dump_truckKw: 480,
     city_busDrive: 0, city_busKw: 380, school_busDrive: 0, school_busKw: 320 },
   // the air (29-zz-flight.js airAt): the storm layer's top over the sea (m) - over it the air is calm -, and how hard its gusts are
@@ -13000,8 +13002,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1112;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 11:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1113;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 11:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54460,10 +54462,9 @@ function stepArmyWreck(w, dt) {
     if (w.still && !landWoke(w.x, half)) return;
     w.x = clamp(w.x + (w.vx || 0) * dt, PLAY_L() + half, PLAY_R() - half);
     const air0 = w.air;
-    landBody(w, dt, body);
+    landBody(w, dt, body, false);                                   // (a wreck's tracks roll no more: it slides on them as on any face, held by what it bears)
     layStep(w, LB.on, !!air0 && LB.on, half, 1, 0);           // (its terrain layer: off the front's ground onto the back's - 50-story-cars.js)
     if (LB.hit > 60) restLanded(w.x, w.y + oy, LB.hit, 1);
-    if (LB.on) w.vx = (w.vx || 0) * Math.exp(-dt * 6);              // (its own weight on the ground stops it sliding)
     w.air = !LB.on; w.still = LB.on && Math.abs(w.vy) < 2 && Math.abs(w.av) < 0.05 && Math.abs(w.vx || 0) < 1 ? 1 : 0;
     return;
   }
@@ -68582,16 +68583,17 @@ function stepStoryCars(dt) {
     // (user Nov 1 22:37: a car on a rock formation "if that rock is destroyed (e.g. sub missile) it should fall down lower") one
     // lying on the bottom: the floor under her ends and middle looked at again - gone from under her (rockBlast), she sinks on
     if (c.state === 'sunk') { const h = storyCarSize(c)[0] * 0.36, F = c.fl || []; if (floorUnder(c.x - h, c.y - 4) > (F[0] ?? 1e9) + 1 || floorUnder(c.x, c.y - 4) > (F[1] ?? 1e9) + 1 || floorUnder(c.x + h, c.y - 4) > (F[2] ?? 1e9) + 1) c.state = 'sink'; else continue; }
-    if (c.state === 'run' && !(c.hp <= 0)) { const H = vehHitBy(c, dt); if (H) carWreck(c, H.s); }   // (one hit: destroyed - as a boat, user Nov 2 11:56)
+    if (c.state === 'run' && !(c.hp <= 0)) { const H = vehHitBy(c, dt); if (H) carWreck(c, H.s.x, H.s.y, H.s); }   // (one hit: destroyed - as a boat, user Nov 2 11:56)
     if (c.hp <= 0 && c.burnT > 0) { c.burnT -= dt; c.smT = (c.smT || 0) - dt; if (c.smT <= 0 && !SIM_ONLY) { const [L, H] = storyCarSize(c); c.smT = 0.18; spawnSmoke(c.x + (storyR() - 0.5) * L * 0.5, c.y - H * 0.8, { kind: 'trail', dark: 0.35, r: 0.4 * UPM, grow: 0.5 * UPM, lift: 18, vx: 0, life: 3 + storyR() * 2, alpha: 0.55, chain: smStream(c) }); } }   // (the wreck smoulders)
     if (c.state === 'run' || c.state === 'sink') storyCarBody(c, dt);
   }
 }
-// a car destroyed: a blast, bits of her, she's a charred wreck where she stopped (the things' pass draws her so) - smouldering a while
-function carWreck(c, s) {
+// a car destroyed - hit at (x, y) by shot s, or (s null) crashed into the ground there: a blast, bits of her, she's a charred wreck where she stops (the
+// things' pass draws her so) - smouldering a while
+function carWreck(c, x, y, s) {
   if (netGuestHold()) return;
   c.hp = 0; c.vDrive = 0; c.drv = 0; c.npcV = 0; c.burnT = 25; c.rest = 0;
-  harmed(c, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120);
+  harmed(c, x, y, s); spawnSparks(x, y, 4, 120);
   const H = storyCarSize(c)[1]; sectionBlast(c.x, c.y - H * 0.5, 0.4, 0); spawnDebris(c.x, c.y - H * 0.5, 6, (c.vx || 0) * 0.2); sound('impact', c.x);
 }
 // (user Nov 18 19:30 / 19:45, a land vehicle on its roof: "Knocked out", every one) at rest on her roof she's a wreck where she lies - no blast
@@ -68717,26 +68719,48 @@ function driveStep(v, dt, want, deep, way, K) {
 // coming down onto its ground from above is on it - one that swung in beside a wall, a cliff's face, is beside it.
 // B, its make (bodyMake: tankBodyOf, turretBodyOf, carBodyOf): p [u, v, drives] x n - each point from o's own (x, y), along it (+ to the world's right
 // at a = 0) and up (-); cu / cv where it turns about, the same way; I its turning weight over its mass (units squared); g its gravity; step what it climbs.
-// LB: what came of the step - hit (how fast it was falling as it came down), on (any point on its ground), roof (at rest on its roof)
-const LB = { hit: 0, on: false, roof: false }, LB_GAP = new Float64Array(64), LB_OK = new Uint8Array(64), LB_R = new Float64Array(64);
-function landBody(o, dt, B) {
-  const P = B.p, n = P.length / 3, I = B.I, gap = LB_GAP, ok = LB_OK, R = LB_R, was = o.gnd;
+// (user Nov 19 10:20, bug-20261119-102001-v1108: an SUV off a cliff onto a dock, nose first - "it started sliding along the dock with the hood, like if
+// there was no friction or if it still had wheels") whatever part of it is on its ground and doesn't roll there holds against the ground as anything
+// lying on it does: its slide along the ground is stopped by up to LB_MU times what that point bears (each point's own push this step - its share of the
+// weight, the blow of coming down), the body slowed and turned by it about its middle as the push up turns it. What rolls: its driving points (wheels,
+// tracks) while roll is set - the drive owns their speed along the ground (driveStep: tyres, brakes, parked); a wreck's (roll unset) slide like the rest.
+// LB: what came of the step - hit (how fast it was falling as it came down), on (any point on its ground), roof (at rest on its roof), crash (how fast a
+// part of it that doesn't roll - its body, not its wheels - was going into its ground as it struck it; cx, cy: where), land (how fast its wheels or
+// tracks went into the ground as they came down onto it from the air) - both across the ground's own lie where they struck
+const LB = { hit: 0, on: false, roof: false, crash: 0, cx: 0, cy: 0, land: 0 }, LB_GAP = new Float64Array(64), LB_OK = new Uint8Array(64), LB_R = new Float64Array(64), LB_RY = new Float64Array(64), LB_JN = new Float64Array(64), LB_JT = new Float64Array(64);
+const LB_MU = 0.6;                                                    // (a body sliding on the ground - metal on earth, stone, timber: what it holds, as a share of what it bears)
+function landBody(o, dt, B, roll = true) {
+  const P = B.p, n = P.length / 3, I = B.I, gap = LB_GAP, ok = LB_OK, R = LB_R, RY = LB_RY, JN = LB_JN, JT = LB_JT, was = o.gnd;
   let a = o.a || 0, ca = Math.cos(a), sa = Math.sin(a), av = o.av || 0;
   const cx = o.x + B.cu * ca - B.cv * sa; let cy = o.y + B.cu * sa + B.cv * ca;
-  o.vy = Math.min(600, (o.vy || 0) + B.g * dt);
+  o.vy = Math.min(600, (o.vy || 0) + B.g * dt); o.vx = o.vx || 0;
   for (let k = 0; k < n; k++) {
     const du = P[3 * k] - B.cu, dv = P[3 * k + 1] - B.cv, px = cx + du * ca - dv * sa, py = cy + du * sa + dv * ca;
-    gap[k] = wheelPt(px, py - B.step - 2, o.lay).y - py; ok[k] = gap[k] >= (was ? -B.step : -4) ? 1 : 0; R[k] = px - cx;
+    gap[k] = wheelPt(px, py - B.step - 2, o.lay).y - py; ok[k] = gap[k] >= (was ? -B.step : -4) ? 1 : 0; R[k] = px - cx; RY[k] = py - cy; JN[k] = 0; JT[k] = 0;
   }
   // its speed: no point near its ground goes into it this step (the gap it has left it may close)
-  let hit = 0; const vy0 = o.vy;
+  let hit = 0, crash = 0, land = 0; const vy0 = o.vy;
   for (let it = 0; it < 8; it++) for (let k = 0; k < n; k++) {
     if (!ok[k] || gap[k] > 4) continue;
     const over = o.vy + av * R[k] - Math.max(0, gap[k]) / dt;
     if (over <= 0) continue;
+    if (!it && (!P[3 * k + 2] || !was)) {                          // (struck: how fast it went into the ground there - across the ground's own lie; a wheel only coming down from the air)
+      const px = cx + R[k], py = cy + RY[k], sy = py - B.step - 2, sl = (wheelPt(px + 2, sy, o.lay).y - wheelPt(px - 2, sy, o.lay).y) / 4;
+      const vin = ((o.vy + av * R[k]) - sl * (o.vx - av * RY[k])) / Math.sqrt(1 + sl * sl);
+      if (P[3 * k + 2]) land = Math.max(land, vin); else if (vin > crash) { crash = vin; LB.cx = px; LB.cy = py; }
+    }
     hit = vy0;
-    const J = over / (1 + R[k] * R[k] / I); o.vy -= J; av -= J * R[k] / I;
+    const J = over / (1 + R[k] * R[k] / I); o.vy -= J; av -= J * R[k] / I; JN[k] += J;
   }
+  // its slide: each point pressed on its ground that doesn't roll held by what it bears (sweeps, each point's hold kept within LB_MU of its push)
+  let held = 0;
+  for (let it = 0; it < 4; it++) { held = 0; for (let k = 0; k < n; k++) {
+    if (JN[k] <= 0 || (roll && P[3 * k + 2])) continue;
+    const vp = o.vx - av * RY[k], lim = LB_MU * JN[k], j0 = JT[k], j = j0 - vp / (1 + RY[k] * RY[k] / I);
+    JT[k] = clamp(j, -lim, lim); held = held >= 0 && Math.abs(j) <= lim ? 1 : -1;
+    const dj = JT[k] - j0; o.vx += dj; av -= dj * RY[k] / I;
+  } }
+  if (held > 0 && Math.abs(o.vx) < 0.01) o.vx = 0;                   // (held by every point it lies on - not sliding: it stands, as anything at rest)
   cy += o.vy * dt; a += av * dt;
   for (let k = 0; k < n; k++) gap[k] -= o.vy * dt + av * dt * R[k];
   a = Math.atan2(Math.sin(a), Math.cos(a)); ca = Math.cos(a); sa = Math.sin(a);
@@ -68754,7 +68778,7 @@ function landBody(o, dt, B) {
   o.a = a; o.av = av; o.x = cx - (B.cu * ca - B.cv * sa); o.y = cy - (B.cu * sa + B.cv * ca);
   let on = false, drv = false; for (let k = 0; k < n; k++) if (ok[k] && gap[k] <= 1.5) { on = true; if (P[3 * k + 2]) drv = true; }
   o.gnd = drv && ca > 0 ? 1 : 0;
-  LB.hit = hit; LB.on = on; LB.roof = on && ca < 0 && Math.abs(av) < 0.5 && Math.abs(o.vy) < 20;
+  LB.hit = hit; LB.on = on; LB.crash = crash; LB.land = land; LB.roof = on && ca < 0 && Math.abs(av) < 0.5 && Math.abs(o.vy) < 20;
 }
 /* TERRAIN LAYERS (user Nov 18 20:59-21:15, a lighthouse's hill with a road in front of it down to a dock - terrain-layers-plan-nov18.md): what drives or
    stands is on a layer (o.lay: 0 the back - today's ground; 1, 2 ... each in front of the one it was added to). It meets its own layer's ground and every
@@ -68904,6 +68928,8 @@ function storyCarBody(c, dt) {
   layStep(c, c.gnd, !was && !!c.gnd, L * 0.5, c.dir || 1, run && c.driven != null ? civStick(c.driven) : 0);   // (its terrain layer - at a junction, by its driver's up / down)
   if (!was && LB.on && LB.hit > 30) { susKick(c, LB.hit * 0.6); if (!(SIM_ONLY || c.quiet)) { const gy = c.y, s = carSurf(c.x, gy); if (s) for (let i = 0; i < 4; i++) carThrow(c, c.x + carRnd(-half, half), gy, s, 1); } }   // (down on her wheels: her springs take it)
   if (LB.roof && run && !(c.hp <= 0)) carRoofed(c);
+  else if (LB.crash > (VTUNE.car.crash ?? 8) * UPM && run && !(c.hp <= 0)) carWreck(c, LB.cx, LB.cy, null);   // (struck the ground hard with her body, not her wheels: destroyed)
+  else if (LB.land > Math.sqrt(2 * CAR_G * (VTUNE.car.fall ?? 6) * UPM) && run && !(c.hp <= 0)) carWreck(c, c.x, c.y, null);   // (user Nov 19 10:33: "it should get wrecked after a certain height" - down on her wheels harder than a fall from FALL HEIGHT)
   susStep(c, dt);
   // her body on its springs: back as she speeds up, forward as she slows
   const acc = !c.gnd ? 0 : (c.vx - v0) / Math.max(dt, 1e-3) * c.dir, P = CAR_PIT, tp = clamp(acc * P[2], -P[3], P[3]);
@@ -71866,7 +71892,7 @@ const VEH_TUNE = {
   BOATS: () => [['BATTLESHIP'], ['ENGINE THRUST', 'ship', 'thrust', 180, 1, '', 'Engine push: sets her top speed'], ['CANNON RELOAD', 'ship', 'reload', 20, 0.05, 's', 'Seconds between cannon shots'], ['SHELLS', 'ship', 'shells', 80, 1, '', 'Cannon shells carried'],
     ['DEPTH CHARGES', 'ship', 'dc', 30, 1, '', 'Depth charges carried'], ['GUN RATE', 'mg', 'shipRate', 0.5, 0.005, 's', 'Seconds between machine-gun rounds'], ['HEALTH', null, 'BY HULL SECTION']],
   HELIS: () => [['ARMY HELICOPTER'], ['TOP SPEED', 'heli', 'kmh', 500, 5, 'km/h', 'Top speed'], ['HEALTH', 'heli', 'hp', 20, 0.5, '', 'Hits it takes to destroy'], ['ROCKETS', 'heli', 'rockets', 40, 1, '', 'Rockets carried'], ['ROCKET RELOAD', 'heli', 'reload', 5, 0.05, 's', 'Seconds between rockets']],
-  CARS: () => [['ALL CARS'], ['TYRE GRIP', 'car', 'grip', 3, 0.05, 'x', 'Tyre grip, times the standard']].concat(...Object.values(STR_VEHS).filter(D => D.fam === 'car' && VTUNE.car[D.art + 'Drive'] !== undefined).map(D =>
+  CARS: () => [['ALL CARS'], ['TYRE GRIP', 'car', 'grip', 3, 0.05, 'x', 'Tyre grip, times the standard'], ['CRASH SPEED', 'car', 'crash', 30, 0.5, 'm/s', 'Body hits the ground faster than this: destroyed'], ['FALL HEIGHT', 'car', 'fall', 50, 0.5, 'm', 'Lands on its wheels from higher than this: destroyed']].concat(...Object.values(STR_VEHS).filter(D => D.fam === 'car' && VTUNE.car[D.art + 'Drive'] !== undefined).map(D =>
     [[D.lab], ['DRIVEN WHEELS', 'car', D.art + 'Drive', 2, 1, '', '0 rear, 1 front, 2 all-wheel drive'], ['ENGINE POWER', 'car', D.art + 'Kw', 1500, 10, 'kW', 'Engine power at the wheels']])),
   SPACE: () => [],
   // (user Nov 17 19:54, the Wave Lab) the one water's numbers - the lab's sliders are these (01-z-vehicle-tune.js WATER_PROPS)
