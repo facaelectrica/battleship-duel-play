@@ -4164,59 +4164,56 @@ const SRC = {
   sub: __ART[17],
   subTurn: __ART[18],
   hudAtlas: __ART[19],
-  captains: __ART[20],
-  hats: __ART[21],
-  padXb: __ART[22],
-  padPs: __ART[23],
-  bands: __ART[24],
-  spitfire: __ART[25],    // (the user's Spitfire renders, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
-  p51: __ART[26],    // (the user's P-51 pixel-art sheet, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
-  c172: __ART[27],    // (the user's Cessna 172 pixel-art sheet, Nov 3: gen/warplanes.py - 50-land-traffic.js)
-  b747: __ART[28],    // (the user's Boeing 747-8 renders made pixel art, Nov 3: gen/warplanes.py - 50-land-traffic.js)
-  seaplane: __ART[29],    // (the user's seaplane renders made pixel art, Nov 3: gen/warplanes.py - 50-land-seaplanes.js)
-  bBase: __ART[30],
-  bLever: __ART[31],
-  sailR: __ART[32],
-  sailB: __ART[33],
-  sailC: __ART[34],
-  sailRD: __ART[35],
-  sailBD: __ART[36],
-  sailCD: __ART[37],
-  flags: __ART[38],
-  heli: __ART[39],              // (LAND TEST's helicopter, three damage levels: gen/land/units2.py)
-  tank2: __ART[40],            // (LAND TEST's tank, three damage levels: gen/land/units2.py)
+  padXb: __ART[20],
+  padPs: __ART[21],
+  spitfire: __ART[22],    // (the user's Spitfire renders, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
+  p51: __ART[23],    // (the user's P-51 pixel-art sheet, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
+  c172: __ART[24],    // (the user's Cessna 172 pixel-art sheet, Nov 3: gen/warplanes.py - 50-land-traffic.js)
+  b747: __ART[25],    // (the user's Boeing 747-8 renders made pixel art, Nov 3: gen/warplanes.py - 50-land-traffic.js)
+  seaplane: __ART[26],    // (the user's seaplane renders made pixel art, Nov 3: gen/warplanes.py - 50-land-seaplanes.js)
+  bBase: __ART[27],
+  bLever: __ART[28],
+  sailR: __ART[29],
+  sailB: __ART[30],
+  sailC: __ART[31],
+  sailRD: __ART[32],
+  sailBD: __ART[33],
+  sailCD: __ART[34],
+  flags: __ART[35],
+  heli: __ART[36],              // (LAND TEST's helicopter, three damage levels: gen/land/units2.py)
+  tank2: __ART[37],            // (LAND TEST's tank, three damage levels: gen/land/units2.py)
   // (OPEN WORLD's big ships, from the user's pictures, Oct 25 late: bow right)
-  liner: __ART[41],
-  space: __ART[42],          // (gen/open/space.py: the user's satellite, orbiter, tank and booster, launch pad)
-  civicons: __ART[43],
-  dockart: __ART[44],
-  containerEmpty: __ART[45],
-  lighthouseL: __ART[46],
-  forestMtn: __ART[47],     // (gen/open/forest.py: from the user's Nature Art Kit, Oct 26)
-  forestFar: __ART[48],
-  forestNear: __ART[49],
-  desertMtn: __ART[50],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
-  desertDunes: __ART[51],
-  desertCity: __ART[52],     // (the user's own city, Oct 27, 16:55)
-  hangar2: __ART[53],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
-  wrecks: __ART[54],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
-  linerBare: __ART[55],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
-  linerParts: __ART[56],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
-  shuttles: __ART[57],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
-  cessna: __ART[58],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
-  jet747: __ART[59],          // (its colour band red: each country's colour goes on it, as on the army's)
-  cruise2: __ART[60],
-  container: __ART[61],
-  tanker: __ART[62],
+  liner: __ART[38],
+  space: __ART[39],          // (gen/open/space.py: the user's satellite, orbiter, tank and booster, launch pad)
+  civicons: __ART[40],
+  dockart: __ART[41],
+  containerEmpty: __ART[42],
+  lighthouseL: __ART[43],
+  forestMtn: __ART[44],     // (gen/open/forest.py: from the user's Nature Art Kit, Oct 26)
+  forestFar: __ART[45],
+  forestNear: __ART[46],
+  desertMtn: __ART[47],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
+  desertDunes: __ART[48],
+  desertCity: __ART[49],     // (the user's own city, Oct 27, 16:55)
+  hangar2: __ART[50],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
+  wrecks: __ART[51],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
+  linerBare: __ART[52],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
+  linerParts: __ART[53],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
+  shuttles: __ART[54],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
+  cessna: __ART[55],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
+  jet747: __ART[56],          // (its colour band red: each country's colour goes on it, as on the army's)
+  cruise2: __ART[57],
+  container: __ART[58],
+  tanker: __ART[59],
   // (the user's sheets, Oct 25 late, cut by gen/open/sheets.py: rows of sprites - see the JSONs)
-  balloons: __ART[63],   // (14 balloons: whole, popped, falling)
-  civhelis: __ART[64],   // (12 helicopters: clean, hit, wrecked; nose left)
-  airport: __ART[65],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
-  research: __ART[66],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
-  minisub: __ART[67],
-  caveBack: __ART[68],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
-  seaKit: __ART[69],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
-  caveStal: __ART[70],     // (the exploration sub: side, three-quarter, front; nose left)
+  balloons: __ART[60],   // (14 balloons: whole, popped, falling)
+  civhelis: __ART[61],   // (12 helicopters: clean, hit, wrecked; nose left)
+  airport: __ART[62],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
+  research: __ART[63],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
+  minisub: __ART[64],
+  caveBack: __ART[65],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
+  seaKit: __ART[66],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
+  caveStal: __ART[67],     // (the exploration sub: side, three-quarter, front; nose left)
 };
 
 //@src 01-z-vehicle-tune.js:1
@@ -4736,7 +4733,7 @@ function prepShip(src, eraseGuns, n = 1) {   // (n: a big drawing n times the si
   x.fillStyle = 'rgba(20,10,30,0.22)';
   x.fillRect(0, WL, W, UN);
   x.globalCompositeOperation = 'source-over';
-  // take the painted ensign off the mast; each captain flies their own flag
+  // take the painted ensign off the mast; each side flies its own flag
   const [x0, y0, x1, y1] = FLAG_HOLE;
   x.clearRect(x0 * n, (y0 + 1) * n, (x1 - x0) * n, (y1 - y0 - 4) * n);
   if (eraseGuns) for (const t of TURRETS) { const [a, b, c2, d] = t.erase; x.clearRect(a * n, b * n, (c2 - a) * n, (d - b) * n); }
@@ -5109,7 +5106,7 @@ function artStep() {
    pixels); scaled() draws the big one in its place, and whatever is made from a picture (mirrored, team colours,
    charred, cut, darkened) makes the same from its big one (hiPass, 04-art-prep.js).
    ================================================================ */
-const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[71],0,0],[__ART[72],630,0],[__ART[73],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[74],0,0],[__ART[75],480,0],[__ART[76],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[77],0,0],[__ART[78],840,0],[__ART[79],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[80],0,0],[__ART[81],600,0],[__ART[82],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[83],0,0],[__ART[84],1048,0],[__ART[85],2096,0]]}};
+const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[68],0,0],[__ART[69],630,0],[__ART[70],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[71],0,0],[__ART[72],480,0],[__ART[73],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[74],0,0],[__ART[75],840,0],[__ART[76],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[77],0,0],[__ART[78],600,0],[__ART[79],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[80],0,0],[__ART[81],1048,0],[__ART[82],2096,0]]}};
 async function loadBigArt() {
   for (const [key, B] of Object.entries(BIGART)) {
     const old = img[key];
@@ -5828,8 +5825,8 @@ const vehRec = (...L) => { const seen = new Set(); return ColTable.rec(...L.map(
 const VEH_REC = ['num: lost _hu _orph'];
 // a battleship: her side (id, fac), where and how she moves, her helm and engine (throttle, input), docked, berthed, moored, away from
 // home, her sections' state (lvl, fire, chip, dead, emit, fireAcc, dent - SECTIONS each), her burns, her guns' recoil, going down
-// (sinkT), mended (repairing, weld, fixIdx), her captain (cap), her harbour (dock) and its gate, the autopilot, her smoke screen (smk)
-const ships = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy a w facing throttle throttleRate input docked bubbleAcc foamAcc bowAcc wakeAcc sinkT muzzle repairing weld dx tilt berthed moored away x0 cap fixIdx scareT',
+// (sinkT), mended (repairing, weld, fixIdx), her harbour (dock) and its gate, the autopilot, her smoke screen (smk)
+const ships = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy a w facing throttle throttleRate input docked bubbleAcc foamAcc bowAcc wakeAcc sinkT muzzle repairing weld dx tilt berthed moored away x0 fixIdx scareT',
   'txt: state', 'val: dock lvl fire chip dead emit fireAcc dent scorch recoil gate auto smk turn dir gun recoilT recoilDir wet smokeAcc darkT breakAt zap kind', ...CIV_REC));
 // each side's own hull of each family: a row a side (0, 1), its row of each family's table (0: none)
 const sideOwn = new ColTable({ sd: 'id', ship: 'ref ships', sub: 'ref subs', plane: 'ref planes', tank: 'ref tanks', heli: 'ref helis' });
@@ -6263,7 +6260,7 @@ function smokeReach(x0, x1) {
   SG.near = [-nx - 1, -nx, -nx + 1, -1, 0, 1, nx - 1, nx, nx + 1];
 }
 
-//@src 06-fleet-captains.js:1
+//@src 06-fleet.js:1
 function makeShip(id, x, facing, dock) {
   const sh = {
     id, fac: id, x, y: waterLv(x) - ambient(x, time),   // (her own water's level - waterLv, user Nov 3)
@@ -6631,95 +6628,38 @@ function collapsePier(d) {
   pierAfterFall(d, x => onPier(d, x));
   rebuildCalm();                          // (user Oct 27: the sheltered water under the old pier is open sea again)
 }
-// Each captain's fleet: three battleships and two submarines (one of each on the water at a time) and the tower.
+// Each side's fleet: its battleships and submarines (one of each on the water at a time) and the tower.
 // fleet[p] counts the hulls left, the one in play included; when one goes down the next is waiting behind its
 // gate a few seconds later (the wreck goes on sinking, and a sub's broken halves stay on the bottom).
-const FLEET = { ship: 99, sub: 99, plane: 99 };       // (hulls without end: it's the captains that run out)
+const FLEET = { ship: 99, sub: 99, plane: 99 };       // (hulls without end: it's the lives that run out)
 const fleet = [{ ship: FLEET.ship, sub: FLEET.sub, plane: FLEET.plane }, { ship: FLEET.ship, sub: FLEET.sub, plane: FLEET.plane }];
 const fleetWait = [{ ship: 0, sub: 0 }, { ship: 0, sub: 0 }];
-/* ---------------- The captains: each player has eight (picked at random from the 32 faces in assets10) ----------------
-   Every battleship, sub or plane that leaves the harbour takes a captain: the one picked on the row of heads under
-   the vehicle buttons (tap a head), or the next one free. Home again, the captain steps ashore; lost with the vehicle,
-   the captain dies: their head turns to the wounded one, and when the next one dies it becomes a skull. The tower
-   (and the yacht) need no captain. With all eight dead, the round is lost. */
-const CAPTAINS = 8, CAPT_FACES = 32;
-const captains = [[], []];          // { face, state: 'free' | 'out' | 'dead' | 'bones', veh }
-const captSel = [0, 0];             // the one who goes next
-// PEACE: no war - nobody wins, no captains, forces never run out (STORY, user Oct 31)
+/* ---------------- Lives (user Nov 19 15:47: "completely remove the concept of captains and the skeletons. You have 6 lives and it appears
+   as hearts, just like in tank mode") ----------------
+   Each side has LIVES. Every battleship, sub, plane, tank or helicopter of theirs that's lost (sunk, blown up, crashed, eaten) costs one: a
+   heart goes dark (drawLives, 17-hud.js - the hearts TANK VS TANK shows). With none left, the round is lost. The tower and the yacht cost
+   none (the tower down is the round anyway). Online, a team's lives are shared. */
+const LIVES = 6;
+const lives = [LIVES, LIVES];
+const livesHeard = [LIVES, LIVES];  // (the lives last heard: a heart lost rings once, on the host and a guest alike - stepLives)
+// PEACE: no war - nobody wins, no lives, forces never run out (STORY, user Oct 31)
 const PEACE = () => STORY;
-const useCaptains = () => !PEACE() && !TVT;   // (TANK VS TANK: a lost tank is a lost round - 50-zzzz-tvt.js)
-// the faces that aren't light-skinned (from the art): each team is at most half light faces, and nobody appears twice
-const CAPT_DARKER = [1, 4, 8, 9, 12, 18, 20, 27, 30];
-// (engine stage 3) the captains' own random source (buildCaptains' faces), made on first use: this file is read before the
-// tables; their table in 36-zz-vehicles.js (each captain's side, p, so the two lists can be one table)
-let vehCaptR_ = null;
-function vehCaptR() { return (vehCaptR_ || (vehCaptR_ = sysRng('vehCaptains')))(); }
-function buildCaptains() {
-  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(vehCaptR() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const dark = shuffle(CAPT_DARKER.slice()), light = shuffle(Array.from({ length: CAPT_FACES }, (_, i) => i).filter(i => !CAPT_DARKER.includes(i)));
-  const nd = Math.floor(dark.length / 2);                     // (each team gets half the darker faces: four or more)
-  for (let p = 0; p < 2; p++) {
-    const mine = dark.splice(0, p ? dark.length : nd);
-    while (mine.length < CAPTAINS) mine.push(light.shift());
-    captains[p] = shuffle(mine.slice(0, CAPTAINS)).map(face => ({ p, face, state: 'free', veh: null, t: 0, blood: 0, band: 0 }));
-  }
-  captSel[0] = captSel[1] = 0;
-}
-// (user, Oct 24: captains are crews again - each vehicle that goes out takes the next captain, left to right,
-// wearing that vehicle's hat; the vehicle lost, its captain dies; home again, they step ashore)
-const capFree = p => captains[p].findIndex(c => c.state === 'free');
-const capsLeft = p => captains[p].filter(c => c.state === 'free' || c.state === 'out').length;
-// the next to go out: the least bandaged of those ashore, left to right among equals (user Oct 24: a captain
-// patched up after a trip waits while the others take their turn, so they're all worn down together)
-function nextCaptain(p) {
-  let best = -1;
-  captains[p].forEach((c, i) => { if (c.state === 'free' && (best < 0 || (c.band || 0) < (captains[p][best].band || 0))) best = i; });
-  return best;
-}
-// a vehicle that needs a captain to go out: is there one?
-function boardCaptain(p, v, k) {
-  if (!useCaptains() || !v || v.cap != null || p > 1) return;
-  const i = nextCaptain(p);
-  if (i < 0) return;
-  v.cap = i; Object.assign(captains[p][i], { state: 'out', veh: k, t: time, h0: capHurt(p, k) });   // (h0: the damage she already had)
-  if (captSel[p] === i) { const n = capFree(p); captSel[p] = n >= 0 ? n : i; }
-}
-function captainHome(v) {
-  if (!v || v.cap == null) return;
-  const c = captains[v.id] && captains[v.id][v.cap];
-  if (c && c.state === 'out') {
-    c.state = 'free'; c.veh = null;
-    // hurt on the trip: patched up ashore - the blood's gone, another layer of bandages on (three at most)
-    if ((c.blood || 0) > 0.04) { c.band = Math.min(3, (c.band || 0) + 1); c.blood = 0; }
-  }
-  v.cap = null;
-}
-// a vehicle lost: its captain dies (one with nobody aboard costs the next captain in line)
-function captainDies(v) {
+const useLives = () => !PEACE() && !TVT;   // (TANK VS TANK: a lost tank is a lost round - 50-zzzz-tvt.js)
+function buildLives() { for (let p = 0; p < 2; p++) lives[p] = livesHeard[p] = LIVES; }
+// a vehicle lost: its side loses a life; the last one, the round
+function loseLife(v) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
-  if (!useCaptains() || !v || v.raid || v.id > 1 || (PLAYERS === 1 && v.id === 1)) return;
-  const p = v.id, i = v.cap != null && captains[p][v.cap] && captains[p][v.cap].state === 'out' ? v.cap : nextCaptain(p), c = captains[p][i];
-  v.cap = null;
-  if (!c) return;
-  c.state = 'bones'; c.veh = null; c.t = time;                                 // (straight to the skull, with a red X)
-  if (!capsLeft(p) && !crew[p].dead) killCaptain(p);                            // the last of them: the round is lost
+  if (!useLives() || !v || v.raid || v.id > 1 || (PLAYERS === 1 && v.id === 1)) return;
+  const p = v.id;
+  if (lives[p] <= 0) return;
+  lives[p]--;
+  if (!lives[p] && !crew[p].dead) sideLost(p);              // the last of them: the round is lost
 }
 // (engine stage 3) 'lost' {kind: ship|sub|plane|tank|heli, o}: a vehicle sunk, blown up or crashed (36-zz-events.js)
-on('lost', e => captainDies(e.o), 'captains', 10);
-// home again (berthed, docked, in the hangar): the captain steps ashore
-function stepCaptains() {
-  if (!useCaptains()) return;
-  for (let p = 0; p < 2; p++) {
-    for (const c of captains[p]) if (c.state === 'bones' && !c.xed && time - c.t > 0.35) { c.xed = true; if (p < HUMANS()) sound('marker'); }
-    // out in a vehicle: the more it's been knocked about, the more blood on the face (it never goes back down
-    // until they're patched up at home)
-    // (only the damage done on this trip: a captain taking out a boat still being patched up starts clean)
-    if (!netGuestHold()) for (const c of captains[p]) if (c.state === 'out' && c.veh) c.blood = Math.max(c.blood || 0, capHurt(p, c.veh) - (c.h0 || 0));
-    const sh = shipOf(p), sb = subOf(p), pl = planeOf(p);
-    if (sh && sh.cap != null && sh.moored === true && !sh.gate) captainHome(sh);
-    if (sb && sb.cap != null && sb.state === 'docked' && !sb.gate) captainHome(sb);
-    if (pl && pl.cap != null && pl.state === 'hangar') captainHome(pl);
-  }
+on('lost', e => loseLife(e.o), 'lives', 10);
+function stepLives() {
+  if (!useLives()) return;
+  for (let p = 0; p < 2; p++) { if (lives[p] < livesHeard[p] && p < HUMANS()) sound('marker'); livesHeard[p] = lives[p]; }
 }
 const freshMagazine = p => { if (guns[p]) Object.assign(guns[p], { ammo: VTUNE.ship.shells, dcAmmo: VTUNE.ship.dc, reload: 0, dk: 0, resupT: 0 }); };
 function spareReady(p, k) {
@@ -6740,7 +6680,7 @@ function spareReady(p, k) {
   }
 }
 function stepFleet(dt) {
-  stepCaptains();
+  stepLives();
   for (let i = ships.length - 1; i >= 0; i--) { const sh = ships.hAt(i); if (sh.lost && sh.state === 'gone') ships.cut(i); }   // (a lost one down: let go)
   for (let p = 0; p < PLAYERS; p++) for (const k of ['ship', 'sub']) {
     const v = k === 'ship' ? shipOf(p) : subOf(p);
@@ -6806,7 +6746,7 @@ function buildWorld0(restore) {
   for (const arr of [weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, shotPass, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, duds, leaves, earthGrains]) arr.length = 0;   // (and the land's bits - a leaf torn off, the earth a blast threw, a leaf falling: user Nov 8 19:42, the Biome Editor's RESET left them)
   dwReset();   // (the designed waves, their foam, the swashes and the wet ground - 09-zy-dwaves.js)
   for (let p = 0; p < 2; p++) {
-    Object.assign(crew[p], freshCrew());               // the round opens with the captain in his hangar, choosing
+    Object.assign(crew[p], freshCrew());               // the round opens with each player in their tower, choosing
     Object.assign(guns[p], { reload: 0, rk: [0, 0], pk: [0, 0], press: 0, ammo: VTUNE.ship.shells, dcAmmo: VTUNE.ship.dc, dk: 0, resupT: 0 });   // (the smoke: on each vehicle now, smokeSupply)
     Object.assign(tguns[p], { reload: 0, press: 0, mg: 0 });
     runCtl[p].v = 0; runCtl[p].drag = false;
@@ -6821,7 +6761,7 @@ function buildWorld0(restore) {
   for (const t of telegraphs) setOrder(t, 3);
   cpuReset();
   storyReset();
-  buildCaptains();
+  buildLives();
   // LAND TEST: the ground, both sides' tank and helicopter on it, and you in your tank
   // (user Oct 25: nothing stands on the land at the start - a tank drives in from the world's end, a helicopter flies in)
   btMark('crew'); buildTraffic(); btMark('traffic');   // (the built-in airports as structures first - 50-zz-struct.js, Nov 1)                                     // (OPEN WORLD's planes, jet boats, cruise ship; none elsewhere)
@@ -6900,7 +6840,7 @@ function harbourShores(left, right) {
 // the harbours laid out from their parts (harbourFromStrs): the docks, each side's home and the coasts', the harbour towers and their guns - the
 // world's build's, and an edit's (liveWorld, 50-zzzz-live-edit.js: a drag's on every move) -> the two coasts' docks
 function harbourLayout() {
-  // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet-captains)
+  // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet)
   // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
   // harbour still exists for the bookkeeping, but far past the edge of the world, where nothing ever reaches it
   const mkDock = (R, far) => R ? dockAt(LAYOUT_R + (far ? 50000 : 0), 1) : dockAt(far ? -50000 : LAYOUT_L, -1);
@@ -12253,7 +12193,7 @@ function drawText(c, str, x, y, col, scale = 1, align = 'left') {
    In a row: EN is the line exactly as drawn (11-pixel-text.js trText), # a number, * a name translated on its own; capitals only (the
    pixel font's), accents fine, German SS for the sharp s. An empty cell: that language shows the English.
    ================================================================ */
-const I18N_ROWS = [["BATTLE", "BATAILLE", "BATTAGLIA", "SCHLACHT", "BATALLA", "BATALHA"], ["OPEN WORLD", "MONDE OUVERT", "MONDO APERTO", "OFFENE WELT", "MUNDO ABIERTO", "MUNDO ABERTO"], ["STORY", "HISTOIRE", "STORIA", "GESCHICHTE", "HISTORIA", "HISTÓRIA"], ["JOIN", "REJOINDRE", "UNISCITI", "BEITRETEN", "UNIRSE", "ENTRAR"], ["LEAVE", "QUITTER", "ESCI", "VERLASSEN", "SALIR", "SAIR"], ["TEAM", "ÉQUIPE", "SQUADRA", "TEAM", "EQUIPO", "EQUIPA"], ["ENEMY", "ENNEMI", "NEMICO", "FEIND", "ENEMIGO", "INIMIGO"], ["YOU", "VOUS", "TU", "DU", "TÚ", "TU"], ["NEW GAME", "NOUVELLE PARTIE", "NUOVA PARTITA", "NEUES SPIEL", "NUEVA PARTIDA", "NOVO JOGO"], ["PLAY", "JOUER", "GIOCA", "SPIELEN", "JUGAR", "JOGAR"], ["RESUME", "REPRENDRE", "RIPRENDI", "FORTSETZEN", "CONTINUAR", "CONTINUAR"], ["OPTIONS", "OPTIONS", "OPZIONI", "OPTIONEN", "OPCIONES", "OPÇÕES"], ["PRESS TO JOIN", "APPUYEZ POUR REJOINDRE", "PREMI PER UNIRTI", "DRÜCKEN ZUM BEITRETEN", "PULSA PARA UNIRTE", "PRIME PARA ENTRAR"], ["PRESS A KEY OR BUTTON TO JOIN", "APPUYEZ SUR UNE TOUCHE OU UN BOUTON POUR REJOINDRE", "PREMI UN TASTO O UN PULSANTE PER UNIRTI", "TASTE ODER KNOPF DRÜCKEN ZUM BEITRETEN", "PULSA UNA TECLA O UN BOTÓN PARA UNIRTE", "PRIME UMA TECLA OU UM BOTÃO PARA ENTRAR"], ["PRESS ANY KEY OR BUTTON TO JOIN - THEN LEFT OR RIGHT FOR A TEAM - + CPU TO PLAY THE COMPUTER", "UNE TOUCHE OU UN BOUTON POUR REJOINDRE - PUIS GAUCHE OU DROITE POUR UNE ÉQUIPE - + CPU POUR JOUER CONTRE L'ORDINATEUR", "UN TASTO O PULSANTE PER UNIRTI - POI SINISTRA O DESTRA PER UNA SQUADRA - + CPU PER GIOCARE CONTRO IL COMPUTER", "EINE TASTE ODER EIN KNOPF ZUM BEITRETEN - DANN LINKS ODER RECHTS FÜR EIN TEAM - + CPU GEGEN DEN COMPUTER", "UNA TECLA O BOTÓN PARA UNIRTE - LUEGO IZQUIERDA O DERECHA PARA UN EQUIPO - + CPU PARA JUGAR CONTRA EL ORDENADOR", "UMA TECLA OU BOTÃO PARA ENTRAR - DEPOIS ESQUERDA OU DIREITA PARA UMA EQUIPA - + CPU PARA JOGAR CONTRA O COMPUTADOR"], ["PRESS ANY KEY OR BUTTON TO JOIN - B OR BACKSPACE TO LEAVE", "UNE TOUCHE OU UN BOUTON POUR REJOINDRE - B OU RETOUR ARRIÈRE POUR QUITTER", "UN TASTO O PULSANTE PER UNIRTI - B O BACKSPACE PER USCIRE", "EINE TASTE ODER EIN KNOPF ZUM BEITRETEN - B ODER RÜCKTASTE ZUM VERLASSEN", "UNA TECLA O BOTÓN PARA UNIRTE - B O RETROCESO PARA SALIR", "UMA TECLA OU BOTÃO PARA ENTRAR - B OU RETROCESSO PARA SAIR"], ["LEFT OR RIGHT TO PICK A SIDE", "GAUCHE OU DROITE POUR CHOISIR UN CAMP", "SINISTRA O DESTRA PER SCEGLIERE UN LATO", "LINKS ODER RECHTS FÜR EINE SEITE", "IZQUIERDA O DERECHA PARA ELEGIR BANDO", "ESQUERDA OU DIREITA PARA ESCOLHER UM LADO"], ["PICK A SIDE TO JUMP IN", "CHOISISSEZ UN CAMP POUR ENTRER", "SCEGLI UN LATO PER ENTRARE", "WÄHLE EINE SEITE ZUM EINSTEIGEN", "ELIGE UN BANDO PARA ENTRAR", "ESCOLHE UM LADO PARA ENTRAR"], ["THE HOST STARTS THE GAME", "L'HÔTE LANCE LA PARTIE", "L'HOST AVVIA LA PARTITA", "DER GASTGEBER STARTET DAS SPIEL", "EL ANFITRIÓN INICIA LA PARTIDA", "O ANFITRIÃO INICIA O JOGO"], ["ONE PLAYER ON A PHONE", "UN JOUEUR SUR UN TÉLÉPHONE", "UN GIOCATORE SU UN TELEFONO", "EIN SPIELER AM HANDY", "UN JUGADOR EN UN MÓVIL", "UM JOGADOR NUM TELEMÓVEL"], ["TWO PLAYERS AT ONE SCREEN AT MOST", "DEUX JOUEURS PAR ÉCRAN AU MAXIMUM", "AL MASSIMO DUE GIOCATORI PER SCHERMO", "HÖCHSTENS ZWEI SPIELER AN EINEM BILDSCHIRM", "COMO MÁXIMO DOS JUGADORES POR PANTALLA", "NO MÁXIMO DOIS JOGADORES POR ECRÃ"], ["SESSION CODE *", "CODE DE SESSION *", "CODICE SESSIONE *", "SITZUNGSCODE *", "CÓDIGO DE SESIÓN *", "CÓDIGO DA SESSÃO *"], ["JOIN A SESSION", "REJOINDRE UNE SESSION", "UNISCITI A UNA SESSIONE", "EINER SITZUNG BEITRETEN", "UNIRSE A UNA SESIÓN", "ENTRAR NUMA SESSÃO"], ["TYPE OR PASTE ITS SESSION CODE", "TAPEZ OU COLLEZ SON CODE DE SESSION", "SCRIVI O INCOLLA IL CODICE SESSIONE", "SITZUNGSCODE EINGEBEN ODER EINFÜGEN", "ESCRIBE O PEGA SU CÓDIGO DE SESIÓN", "ESCREVE OU COLA O CÓDIGO DA SESSÃO"], ["CODE", "CODE", "CODICE", "CODE", "CÓDIGO", "CÓDIGO"], ["OK", "OK", "OK", "OK", "OK", "OK"], ["CANCEL", "ANNULER", "ANNULLA", "ABBRECHEN", "CANCELAR", "CANCELAR"], ["LOADING...", "CHARGEMENT...", "CARICAMENTO...", "LADEN...", "CARGANDO...", "A CARREGAR..."], ["BUILD *", "VERSION *", "VERSIONE *", "VERSION *", "VERSIÓN *", "VERSÃO *"], ["OPEN WORLD LOADED", "MONDE OUVERT CHARGÉ", "MONDO APERTO CARICATO", "OFFENE WELT GELADEN", "MUNDO ABIERTO CARGADO", "MUNDO ABERTO CARREGADO"], ["STORY WORLD LOADED", "MONDE HISTOIRE CHARGÉ", "MONDO STORIA CARICATO", "GESCHICHTSWELT GELADEN", "MUNDO HISTORIA CARGADO", "MUNDO HISTÓRIA CARREGADO"], ["FULL SCREEN NOT AVAILABLE HERE", "PLEIN ÉCRAN INDISPONIBLE ICI", "SCHERMO INTERO NON DISPONIBILE QUI", "VOLLBILD HIER NICHT VERFÜGBAR", "PANTALLA COMPLETA NO DISPONIBLE AQUÍ", "ECRÃ INTEIRO INDISPONÍVEL AQUI"], ["PLAYER #", "JOUEUR #", "GIOCATORE #", "SPIELER #", "JUGADOR #", "JOGADOR #"], ["PLAYER # FLAG", "DRAPEAU DU JOUEUR #", "BANDIERA GIOCATORE #", "FLAGGE SPIELER #", "BANDERA DEL JUGADOR #", "BANDEIRA DO JOGADOR #"], ["CONTROLLER #", "MANETTE #", "CONTROLLER #", "CONTROLLER #", "MANDO #", "COMANDO #"], ["ARROW KEYS", "FLÈCHES", "FRECCE", "PFEILTASTEN", "FLECHAS", "SETAS"], ["KEYBOARD", "CLAVIER", "TASTIERA", "TASTATUR", "TECLADO", "TECLADO"], ["TOUCH", "TACTILE", "TOUCH", "TOUCH", "TÁCTIL", "TÁTIL"], ["TOUCH #", "TACTILE #", "TOUCH #", "TOUCH #", "TÁCTIL #", "TÁTIL #"], ["RULES", "RÈGLES", "REGOLE", "REGELN", "REGLAS", "REGRAS"], ["SINK THE ENEMY'S HARBOUR TOWER BEFORE THEY SINK YOURS. EVERY VEHICLE YOU LOSE COSTS A CAPTAIN, AND LOSING ALL 8 ALSO LOSES THE GAME. CONTROLS ARE IN OPTIONS.", "COULEZ LA TOUR DU PORT ENNEMI AVANT QU'IL NE COULE LA VÔTRE. CHAQUE VÉHICULE PERDU COÛTE UN CAPITAINE, ET LES PERDRE TOUS LES 8 FAIT AUSSI PERDRE LA PARTIE. LES COMMANDES SONT DANS OPTIONS.", "AFFONDA LA TORRE DEL PORTO NEMICO PRIMA CHE AFFONDI LA TUA. OGNI VEICOLO PERSO COSTA UN CAPITANO, E PERDERLI TUTTI E 8 FA PERDERE ANCHE LA PARTITA. I COMANDI SONO IN OPZIONI.", "VERSENKE DEN HAFENTURM DES FEINDES, BEVOR ER DEINEN VERSENKT. JEDES VERLORENE FAHRZEUG KOSTET EINEN KAPITÄN, UND WER ALLE 8 VERLIERT, VERLIERT AUCH DAS SPIEL. DIE STEUERUNG FINDEST DU IN OPTIONEN.", "HUNDE LA TORRE DEL PUERTO ENEMIGO ANTES DE QUE HUNDA LA TUYA. CADA VEHÍCULO QUE PIERDES CUESTA UN CAPITÁN, Y PERDER LOS 8 TAMBIÉN PIERDE LA PARTIDA. LOS CONTROLES ESTÁN EN OPCIONES.", "AFUNDA A TORRE DO PORTO INIMIGO ANTES QUE ELE AFUNDE A TUA. CADA VEÍCULO QUE PERDES CUSTA UM CAPITÃO, E PERDER OS 8 TAMBÉM PERDE O JOGO. OS CONTROLOS ESTÃO EM OPÇÕES."], ["YOU WIN", "VOUS GAGNEZ", "HAI VINTO", "DU GEWINNST", "HAS GANADO", "GANHASTE"], ["YOU LOSE", "VOUS PERDEZ", "HAI PERSO", "DU VERLIERST", "HAS PERDIDO", "PERDESTE"], ["GAME OVER", "PARTIE TERMINÉE", "PARTITA FINITA", "SPIEL VORBEI", "FIN DE LA PARTIDA", "FIM DO JOGO"], ["THE CPU WINS", "LE CPU GAGNE", "VINCE LA CPU", "DIE CPU GEWINNT", "GANA LA CPU", "A CPU GANHA"], ["* WINS", "* GAGNE", "VINCE *", "* GEWINNT", "GANA *", "* GANHA"], ["PLAY AGAIN", "REJOUER", "GIOCA ANCORA", "NOCHMAL SPIELEN", "JUGAR OTRA VEZ", "JOGAR OUTRA VEZ"], ["GAME PAUSED", "PARTIE EN PAUSE", "PARTITA IN PAUSA", "SPIEL PAUSIERT", "PARTIDA EN PAUSA", "JOGO EM PAUSA"], ["INVITE LINK COPIED", "LIEN D'INVITATION COPIÉ", "LINK DI INVITO COPIATO", "EINLADUNGSLINK KOPIERT", "ENLACE DE INVITACIÓN COPIADO", "LIGAÇÃO DE CONVITE COPIADA"], ["ONLINE PLAY IS NOT AVAILABLE HERE", "LE JEU EN LIGNE N'EST PAS DISPONIBLE ICI", "IL GIOCO ONLINE NON È DISPONIBILE QUI", "ONLINE-SPIEL IST HIER NICHT VERFÜGBAR", "EL JUEGO EN LÍNEA NO ESTÁ DISPONIBLE AQUÍ", "O JOGO ONLINE NÃO ESTÁ DISPONÍVEL AQUI"], ["THAT IS THIS SCREEN", "C'EST CET ÉCRAN", "È QUESTO SCHERMO", "DAS IST DIESER BILDSCHIRM", "ES ESTA PANTALLA", "É ESTE ECRÃ"], ["COULD NOT CONNECT", "CONNEXION IMPOSSIBLE", "IMPOSSIBILE CONNETTERSI", "VERBINDUNG FEHLGESCHLAGEN", "NO SE PUDO CONECTAR", "NÃO FOI POSSÍVEL LIGAR"], ["JOINING *", "CONNEXION À *", "CONNESSIONE A *", "BEITRITT ZU *", "UNIÉNDOSE A *", "A ENTRAR EM *"], ["LINKING TO *", "LIAISON À *", "COLLEGAMENTO A *", "VERBINDE MIT *", "CONECTANDO CON *", "A LIGAR A *"], ["NO SESSION *", "AUCUNE SESSION *", "NESSUNA SESSIONE *", "KEINE SITZUNG *", "NO HAY SESIÓN *", "SEM SESSÃO *"], ["YOU PLAY WITH *", "VOUS JOUEZ AVEC *", "GIOCHI CON *", "DU SPIELST MIT *", "JUEGAS CON *", "JOGAS COM *"], ["* LEFT - + CPU OR WAIT FOR THEM", "* EST PARTI - + CPU OU ATTENDEZ", "* È USCITO - + CPU O ASPETTA", "* IST GEGANGEN - + CPU ODER WARTEN", "* SE FUE - + CPU O ESPERA", "* SAIU - + CPU OU ESPERA"], ["* JOINED THE SESSION", "* A REJOINT LA SESSION", "* È ENTRATO NELLA SESSIONE", "* IST DER SITZUNG BEIGETRETEN", "* SE UNIÓ A LA SESIÓN", "* ENTROU NA SESSÃO"], ["* PAUSED", "* A MIS EN PAUSE", "* HA MESSO IN PAUSA", "* HAT PAUSIERT", "* PAUSÓ", "* PAUSOU"], ["* LEFT", "* EST PARTI", "* È USCITO", "* IST GEGANGEN", "* SE FUE", "* SAIU"], ["STORY CANNOT BE PLAYED ONLINE YET", "LE MODE HISTOIRE NE SE JOUE PAS ENCORE EN LIGNE", "LA STORIA NON SI PUÒ ANCORA GIOCARE ONLINE", "GESCHICHTE GEHT NOCH NICHT ONLINE", "LA HISTORIA AÚN NO SE PUEDE JUGAR EN LÍNEA", "A HISTÓRIA AINDA NÃO SE PODE JOGAR ONLINE"], ["THAT SIDE IS NOT IN THIS GAME", "CE CAMP N'EST PAS DANS CETTE PARTIE", "QUEL LATO NON È IN QUESTA PARTITA", "DIESE SEITE IST NICHT IM SPIEL", "ESE BANDO NO ESTÁ EN ESTA PARTIDA", "ESSE LADO NÃO ESTÁ NESTE JOGO"], ["THAT SIDE IS FULL", "CE CAMP EST COMPLET", "QUEL LATO È PIENO", "DIESE SEITE IST VOLL", "ESE BANDO ESTÁ LLENO", "ESSE LADO ESTÁ CHEIO"], ["YOUR TEAMMATE IS IN IT: WATCHING", "VOTRE COÉQUIPIER EST DEDANS : VOUS REGARDEZ", "C'È IL TUO COMPAGNO: GUARDI", "DEIN MITSPIELER SITZT DRIN: DU SCHAUST ZU", "TU COMPAÑERO ESTÁ DENTRO: MIRANDO", "O TEU COLEGA ESTÁ LÁ: A VER"], ["WATCHING YOUR TEAMMATE - PICK A FREE VEHICLE TO PLAY", "VOUS REGARDEZ VOTRE COÉQUIPIER - CHOISISSEZ UN VÉHICULE LIBRE", "GUARDI IL TUO COMPAGNO - SCEGLI UN VEICOLO LIBERO", "DU SIEHST DEINEM MITSPIELER ZU - WÄHLE EIN FREIES FAHRZEUG", "MIRAS A TU COMPAÑERO - ELIGE UN VEHÍCULO LIBRE", "A VER O TEU COLEGA - ESCOLHE UM VEÍCULO LIVRE"], ["PRESS A", "APPUYEZ SUR A", "PREMI A", "DRÜCKE A", "PULSA A", "PRIME A"], ["TO WATCH", "POUR REGARDER", "PER GUARDARE", "ZUM ZUSEHEN", "PARA MIRAR", "PARA VER"], ["FOR NEXT", "POUR LE SUIVANT", "PER IL PROSSIMO", "FÜR DAS NÄCHSTE", "PARA EL SIGUIENTE", "PARA O SEGUINTE"], ["TO BOARD", "POUR MONTER", "PER SALIRE", "ZUM EINSTEIGEN", "PARA SUBIR", "PARA ENTRAR"], ["TO SWITCH", "POUR CHANGER", "PER CAMBIARE", "ZUM WECHSELN", "PARA CAMBIAR", "PARA TROCAR"], ["TO LAUNCH", "POUR LANCER", "PER LANCIARE", "ZUM STARTEN", "PARA LANZAR", "PARA LANÇAR"], ["VOLUME", "VOLUME", "VOLUME", "LAUTSTÄRKE", "VOLUMEN", "VOLUME"], ["MUTE", "MUET", "MUTO", "STUMM", "SILENCIO", "SEM SOM"], ["CONTROLS", "COMMANDES", "COMANDI", "STEUERUNG", "CONTROLES", "CONTROLOS"], ["STATS: ON", "STATS : OUI", "STATISTICHE: SÌ", "STATISTIK: AN", "ESTADÍSTICAS: SÍ", "ESTATÍSTICAS: SIM"], ["STATS: OFF", "STATS : NON", "STATISTICHE: NO", "STATISTIK: AUS", "ESTADÍSTICAS: NO", "ESTATÍSTICAS: NÃO"], ["EASY", "FACILE", "FACILE", "LEICHT", "FÁCIL", "FÁCIL"], ["MEDIUM", "MOYEN", "MEDIO", "MITTEL", "MEDIO", "MÉDIO"], ["HARD", "DIFFICILE", "DIFFICILE", "SCHWER", "DIFÍCIL", "DIFÍCIL"], ["LANGUAGE", "LANGUE", "LINGUA", "SPRACHE", "IDIOMA", "IDIOMA"], ["BACK", "RETOUR", "INDIETRO", "ZURÜCK", "VOLVER", "VOLTAR"], ["CLOSE", "FERMER", "CHIUDI", "SCHLIESSEN", "CERRAR", "FECHAR"], ["REPORT", "SIGNALER", "SEGNALA", "MELDEN", "INFORMAR", "REPORTAR"], ["SAVING...", "ENREGISTREMENT...", "SALVATAGGIO...", "SPEICHERN...", "GUARDANDO...", "A GUARDAR..."], ["INPUT", "ENTRÉE", "INGRESSO", "EINGABE", "ENTRADA", "ENTRADA"], ["PLAYSTATION CONTROLLER", "MANETTE PLAYSTATION", "CONTROLLER PLAYSTATION", "PLAYSTATION-CONTROLLER", "MANDO DE PLAYSTATION", "COMANDO PLAYSTATION"], ["XBOX CONTROLLER", "MANETTE XBOX", "CONTROLLER XBOX", "XBOX-CONTROLLER", "MANDO DE XBOX", "COMANDO XBOX"], ["MOUSE AND TOUCH", "SOURIS ET TACTILE", "MOUSE E TOUCH", "MAUS UND TOUCH", "RATÓN Y TÁCTIL", "RATO E TÁTIL"], ["MENU", "MENU", "MENU", "MENÜ", "MENÚ", "MENU"], ["SPACE", "ESPACE", "SPAZIO", "LEERTASTE", "ESPACIO", "ESPAÇO"], ["ENTER", "ENTRÉE", "INVIO", "EINGABE", "INTRO", "ENTER"], ["RIGHT SHIFT", "MAJ DROITE", "SHIFT DESTRO", "SHIFT RECHTS", "MAYÚS DERECHA", "SHIFT DIREITO"], ["/ OR CTRL", "/ OU CTRL", "/ O CTRL", "/ ODER STRG", "/ O CTRL", "/ OU CTRL"], ["TOWER SHIP SUB PLANE", "TOUR NAVIRE SOUS-MARIN AVION", "TORRE NAVE SOTTOMARINO AEREO", "TURM SCHIFF U-BOOT FLUGZEUG", "TORRE BARCO SUBMARINO AVIÓN", "TORRE NAVIO SUBMARINO AVIÃO"], ["OPEN WORLD: TANK HELICOPTER", "MONDE OUVERT : CHAR HÉLICOPTÈRE", "MONDO APERTO: CARRO ARMATO ELICOTTERO", "OFFENE WELT: PANZER HUBSCHRAUBER", "MUNDO ABIERTO: TANQUE HELICÓPTERO", "MUNDO ABERTO: TANQUE HELICÓPTERO"], ["OPEN WORLD: ARMY - CIVILIAN", "MONDE OUVERT : ARMÉE - CIVIL", "MONDO APERTO: ESERCITO - CIVILE", "OFFENE WELT: ARMEE - ZIVIL", "MUNDO ABIERTO: EJÉRCITO - CIVIL", "MUNDO ABERTO: EXÉRCITO - CIVIL"], ["DRIVE LEFT - RIGHT: HOLD - LET GO TO STOP", "CONDUIRE GAUCHE - DROITE : MAINTENIR - RELÂCHER POUR S'ARRÊTER", "GUIDA SINISTRA - DESTRA: TIENI - RILASCIA PER FERMARTI", "FAHREN LINKS - RECHTS: HALTEN - LOSLASSEN ZUM ANHALTEN", "CONDUCIR IZQUIERDA - DERECHA: MANTÉN - SUELTA PARA PARAR", "CONDUZIR ESQUERDA - DIREITA: MANTÉM - LARGA PARA PARAR"], ["LEFT RIGHT", "GAUCHE DROITE", "SINISTRA DESTRA", "LINKS RECHTS", "IZQUIERDA DERECHA", "ESQUERDA DIREITA"], ["PLANE: STOP - IT CIRCLES", "AVION : STOP - IL TOURNE EN ROND", "AEREO: STOP - GIRA IN TONDO", "FLUGZEUG: STOP - ES KREIST", "AVIÓN: STOP - DA VUELTAS", "AVIÃO: STOP - ANDA ÀS VOLTAS"], ["PLANE: STOP", "AVION : STOP", "AEREO: STOP", "FLUGZEUG: STOP", "AVIÓN: STOP", "AVIÃO: STOP"], ["AIM - CLIMB - DIVE", "VISER - MONTER - PIQUER", "MIRA - SALI - PICCHIATA", "ZIELEN - STEIGEN - SINKEN", "APUNTAR - SUBIR - PICAR", "APONTAR - SUBIR - PICAR"], ["UP DOWN", "HAUT BAS", "SU GIÙ", "HOCH RUNTER", "ARRIBA ABAJO", "CIMA BAIXO"], ["ZOOM OUT - IN", "ZOOM ARRIÈRE - AVANT", "ZOOM INDIETRO - AVANTI", "ZOOM RAUS - REIN", "ALEJAR - ACERCAR", "AFASTAR - APROXIMAR"], ["POWER - HELICOPTER GUN UP DOWN", "PUISSANCE - CANON D'HÉLICOPTÈRE HAUT BAS", "POTENZA - CANNONE ELICOTTERO SU GIÙ", "KRAFT - HUBSCHRAUBERKANONE HOCH RUNTER", "POTENCIA - CAÑÓN DEL HELICÓPTERO ARRIBA ABAJO", "POTÊNCIA - CANHÃO DO HELICÓPTERO CIMA BAIXO"], ["FIRE - MISSILE - TORPEDO", "TIR - MISSILE - TORPILLE", "FUOCO - MISSILE - SILURO", "FEUER - RAKETE - TORPEDO", "FUEGO - MISIL - TORPEDO", "FOGO - MÍSSIL - TORPEDO"], ["DEPTH CHARGE - BOMB - UP TORPEDO - MAGNET", "GRENADE ANTI-SOUS-MARINE - BOMBE - TORPILLE VERS LE HAUT - AIMANT", "CARICA DI PROFONDITÀ - BOMBA - SILURO IN SU - MAGNETE", "WASSERBOMBE - BOMBE - TORPEDO NACH OBEN - MAGNET", "CARGA DE PROFUNDIDAD - BOMBA - TORPEDO HACIA ARRIBA - IMÁN", "CARGA DE PROFUNDIDADE - BOMBA - TORPEDO PARA CIMA - ÍMAN"], ["MACHINE GUN - MINE", "MITRAILLEUSE - MINE", "MITRAGLIATRICE - MINA", "MASCHINENGEWEHR - MINE", "AMETRALLADORA - MINA", "METRALHADORA - MINA"], ["SMOKE SCREEN", "ÉCRAN DE FUMÉE", "CORTINA DI FUMO", "NEBELWAND", "CORTINA DE HUMO", "CORTINA DE FUMO"], ["A CIVILIAN VEHICLE: ITS BUTTONS 1 2 3 4", "UN VÉHICULE CIVIL : SES BOUTONS 1 2 3 4", "UN VEICOLO CIVILE: I SUOI PULSANTI 1 2 3 4", "EIN ZIVILFAHRZEUG: SEINE KNÖPFE 1 2 3 4", "UN VEHÍCULO CIVIL: SUS BOTONES 1 2 3 4", "UM VEÍCULO CIVIL: OS SEUS BOTÕES 1 2 3 4"], ["ALONE AT THE KEYBOARD: EITHER SET WORKS  -  OPEN WORLD: THE NUMBERS PICK ALONG THE ROW OF VEHICLE BUTTONS", "SEUL AU CLAVIER : LES DEUX JEUX DE TOUCHES MARCHENT  -  MONDE OUVERT : LES CHIFFRES CHOISISSENT DANS LA RANGÉE DE VÉHICULES", "DA SOLO ALLA TASTIERA: VANNO BENE ENTRAMBI  -  MONDO APERTO: I NUMERI SCELGONO NELLA FILA DEI VEICOLI", "ALLEIN AN DER TASTATUR: BEIDE TASTENSÄTZE GEHEN  -  OFFENE WELT: DIE ZAHLEN WÄHLEN IN DER FAHRZEUGREIHE", "SOLO EN EL TECLADO: SIRVEN AMBOS  -  MUNDO ABIERTO: LOS NÚMEROS ELIGEN EN LA FILA DE VEHÍCULOS", "SOZINHO NO TECLADO: SERVEM OS DOIS  -  MUNDO ABERTO: OS NÚMEROS ESCOLHEM NA FILA DE VEÍCULOS"], ["PHOTO MODE: ARROWS LOOK, + - ZOOM, ESC BACK  -  MOUSE OR TOUCH: SEE THE TOUCH PAGE", "MODE PHOTO : FLÈCHES POUR REGARDER, + - ZOOM, ESC RETOUR  -  SOURIS OU TACTILE : VOIR LA PAGE TACTILE", "MODALITÀ FOTO: FRECCE GUARDA, + - ZOOM, ESC INDIETRO  -  MOUSE O TOUCH: VEDI LA PAGINA TOUCH", "FOTOMODUS: PFEILE SCHAUEN, + - ZOOM, ESC ZURÜCK  -  MAUS ODER TOUCH: SIEHE TOUCH-SEITE", "MODO FOTO: FLECHAS MIRAN, + - ZOOM, ESC VOLVER  -  RATÓN O TÁCTIL: VER LA PÁGINA TÁCTIL", "MODO FOTO: SETAS OLHAM, + - ZOOM, ESC VOLTAR  -  RATO OU TÁTIL: VER A PÁGINA TÁTIL"], ["CANNON - MISSILE - UP TORPEDO", "CANON - MISSILE - TORPILLE VERS LE HAUT", "CANNONE - MISSILE - SILURO IN SU", "KANONE - RAKETE - TORPEDO NACH OBEN", "CAÑÓN - MISIL - TORPEDO HACIA ARRIBA", "CANHÃO - MÍSSIL - TORPEDO PARA CIMA"], ["CANNON - MISSILE", "CANON - MISSILE", "CANNONE - MISSILE", "KANONE - RAKETE", "CAÑÓN - MISIL", "CANHÃO - MÍSSIL"], ["PREVIOUS VEHICLE", "VÉHICULE PRÉCÉDENT", "VEICOLO PRECEDENTE", "VORHERIGES FAHRZEUG", "VEHÍCULO ANTERIOR", "VEÍCULO ANTERIOR"], ["NEXT VEHICLE", "VÉHICULE SUIVANT", "VEICOLO SUCCESSIVO", "NÄCHSTES FAHRZEUG", "VEHÍCULO SIGUIENTE", "VEÍCULO SEGUINTE"], ["ZOOM: UP IN - DOWN OUT", "ZOOM : HAUT AVANT - BAS ARRIÈRE", "ZOOM: SU AVANTI - GIÙ INDIETRO", "ZOOM: HOCH REIN - RUNTER RAUS", "ZOOM: ARRIBA ACERCA - ABAJO ALEJA", "ZOOM: CIMA APROXIMA - BAIXO AFASTA"], ["HOLD TO DRIVE - CLIMB - DIVE", "MAINTENIR POUR CONDUIRE - MONTER - PIQUER", "TIENI PER GUIDARE - SALIRE - PICCHIARE", "HALTEN ZUM FAHREN - STEIGEN - SINKEN", "MANTÉN PARA CONDUCIR - SUBIR - PICAR", "MANTÉM PARA CONDUZIR - SUBIR - PICAR"], ["HOLD TO DRIVE - CLIMB", "MAINTENIR POUR CONDUIRE - MONTER", "TIENI PER GUIDARE - SALIRE", "HALTEN ZUM FAHREN - STEIGEN", "MANTÉN PARA CONDUCIR - SUBIR", "MANTÉM PARA CONDUZIR - SUBIR"], ["MACHINE GUN", "MITRAILLEUSE", "MITRAGLIATRICE", "MASCHINENGEWEHR", "AMETRALLADORA", "METRALHADORA"], ["DEPTH CHARGE - MINE - BOMB - MAGNET - TANK SMOKE", "GRENADE - MINE - BOMBE - AIMANT - FUMÉE DU CHAR", "CARICA - MINA - BOMBA - MAGNETE - FUMO DEL CARRO", "WASSERBOMBE - MINE - BOMBE - MAGNET - PANZERNEBEL", "CARGA - MINA - BOMBA - IMÁN - HUMO DEL TANQUE", "CARGA - MINA - BOMBA - ÍMAN - FUMO DO TANQUE"], ["DEPTH CHARGE - MINE - BOMB - MAGNET", "GRENADE - MINE - BOMBE - AIMANT", "CARICA - MINA - BOMBA - MAGNETE", "WASSERBOMBE - MINE - BOMBE - MAGNET", "CARGA - MINA - BOMBA - IMÁN", "CARGA - MINA - BOMBA - ÍMAN"], ["DEPTH CHARGE - MINE - BOMB", "GRENADE - MINE - BOMBE", "CARICA - MINA - BOMBA", "WASSERBOMBE - MINE - BOMBE", "CARGA - MINA - BOMBA", "CARGA - MINA - BOMBA"], ["DEPTH CHARGE - MINE", "GRENADE ANTI-SOUS-MARINE - MINE", "CARICA DI PROFONDITÀ - MINA", "WASSERBOMBE - MINE", "CARGA DE PROFUNDIDAD - MINA", "CARGA DE PROFUNDIDADE - MINA"], ["BOMB - MAGNET", "BOMBE - AIMANT", "BOMBA - MAGNETE", "BOMBE - MAGNET", "BOMBA - IMÁN", "BOMBA - ÍMAN"], ["BOMB - MAGNET - TANK SMOKE", "BOMBE - AIMANT - FUMÉE DU CHAR", "BOMBA - MAGNETE - FUMO DEL CARRO", "BOMBE - MAGNET - PANZERNEBEL", "BOMBA - IMÁN - HUMO DEL TANQUE", "BOMBA - ÍMAN - FUMO DO TANQUE"], ["TANK SMOKE", "FUMÉE DU CHAR", "FUMO DEL CARRO", "PANZERNEBEL", "HUMO DEL TANQUE", "FUMO DO TANQUE"], ["MACHINE GUN - TORPEDO - LAUNCH", "MITRAILLEUSE - TORPILLE - LANCER", "MITRAGLIATRICE - SILURO - LANCIA", "MASCHINENGEWEHR - TORPEDO - STARTEN", "AMETRALLADORA - TORPEDO - LANZAR", "METRALHADORA - TORPEDO - LANÇAR"], ["MACHINE GUN - TORPEDO", "MITRAILLEUSE - TORPILLE", "MITRAGLIATRICE - SILURO", "MASCHINENGEWEHR - TORPEDO", "AMETRALLADORA - TORPEDO", "METRALHADORA - TORPEDO"], ["ANGLE AND POWER", "ANGLE ET PUISSANCE", "ANGOLO E POTENZA", "WINKEL UND KRAFT", "ÁNGULO Y POTENCIA", "ÂNGULO E POTÊNCIA"], ["D-PAD", "CROIX", "CROCE", "STEUERKREUZ", "CRUCETA", "CRUZETA"], ["LEFT STICK", "STICK GAUCHE", "LEVETTA SINISTRA", "LINKER STICK", "PALANCA IZQUIERDA", "ANALÓGICO ESQUERDO"], ["RIGHT STICK", "STICK DROIT", "LEVETTA DESTRA", "RECHTER STICK", "PALANCA DERECHA", "ANALÓGICO DIREITO"], ["PRESS IT IN", "ENFONCEZ-LE", "PREMILA", "REINDRÜCKEN", "PÚLSALA", "CARREGA NELE"], ["TRIANGLE", "TRIANGLE", "TRIANGOLO", "DREIECK", "TRIÁNGULO", "TRIÂNGULO"], ["CIRCLE", "ROND", "CERCHIO", "KREIS", "CÍRCULO", "CÍRCULO"], ["SQUARE", "CARRÉ", "QUADRATO", "QUADRAT", "CUADRADO", "QUADRADO"], ["CROSS", "CROIX", "CROCE", "KREUZ", "EQUIS", "CRUZ"], ["L1 R1 PICK A VEHICLE - CROSS LAUNCHES IT - IN A CIVILIAN ONE CROSS CIRCLE SQUARE TRIANGLE ARE ITS BUTTONS", "L1 R1 CHOISIT UN VÉHICULE - CROIX LE LANCE - DANS UN CIVIL CROIX ROND CARRÉ TRIANGLE SONT SES BOUTONS", "L1 R1 SCEGLIE UN VEICOLO - CROCE LO LANCIA - IN UNO CIVILE CROCE CERCHIO QUADRATO TRIANGOLO SONO I SUOI PULSANTI", "L1 R1 WÄHLEN EIN FAHRZEUG - KREUZ STARTET ES - IN EINEM ZIVILEN SIND KREUZ KREIS QUADRAT DREIECK SEINE KNÖPFE", "L1 R1 ELIGEN UN VEHÍCULO - EQUIS LO LANZA - EN UNO CIVIL EQUIS CÍRCULO CUADRADO TRIÁNGULO SON SUS BOTONES", "L1 R1 ESCOLHEM UM VEÍCULO - CRUZ LANÇA-O - NUM CIVIL CRUZ CÍRCULO QUADRADO TRIÂNGULO SÃO OS SEUS BOTÕES"], ["IN THE TOWER BOTH STICKS AIM - NOT DRIVING: THE LEFT STICK LOOKS AROUND", "DANS LA TOUR LES DEUX STICKS VISENT - SANS CONDUIRE : LE STICK GAUCHE REGARDE AUTOUR", "NELLA TORRE ENTRAMBE LE LEVETTE MIRANO - SENZA GUIDARE: LA LEVETTA SINISTRA GUARDA INTORNO", "IM TURM ZIELEN BEIDE STICKS - OHNE FAHREN: DER LINKE STICK SCHAUT UMHER", "EN LA TORRE AMBAS PALANCAS APUNTAN - SIN CONDUCIR: LA PALANCA IZQUIERDA MIRA ALREDEDOR", "NA TORRE OS DOIS ANALÓGICOS APONTAM - SEM CONDUZIR: O ESQUERDO OLHA À VOLTA"], ["LB RB PICK A VEHICLE - A LAUNCHES IT - IN A CIVILIAN ONE A B X Y ARE ITS BUTTONS", "LB RB CHOISIT UN VÉHICULE - A LE LANCE - DANS UN CIVIL A B X Y SONT SES BOUTONS", "LB RB SCEGLIE UN VEICOLO - A LO LANCIA - IN UNO CIVILE A B X Y SONO I SUOI PULSANTI", "LB RB WÄHLEN EIN FAHRZEUG - A STARTET ES - IN EINEM ZIVILEN SIND A B X Y SEINE KNÖPFE", "LB RB ELIGEN UN VEHÍCULO - A LO LANZA - EN UNO CIVIL A B X Y SON SUS BOTONES", "LB RB ESCOLHEM UM VEÍCULO - A LANÇA-O - NUM CIVIL A B X Y SÃO OS SEUS BOTÕES"], ["DRIVE LEFT - RIGHT", "CONDUIRE GAUCHE - DROITE", "GUIDA SINISTRA - DESTRA", "FAHREN LINKS - RECHTS", "CONDUCIR IZQUIERDA - DERECHA", "CONDUZIR ESQUERDA - DIREITA"], ["HOLD AN ARROW BUTTON - LET GO TO STOP", "MAINTENEZ UNE FLÈCHE - RELÂCHEZ POUR VOUS ARRÊTER", "TIENI UNA FRECCIA - RILASCIA PER FERMARTI", "PFEILKNOPF HALTEN - LOSLASSEN ZUM ANHALTEN", "MANTÉN UNA FLECHA - SUELTA PARA PARAR", "MANTÉM UMA SETA - LARGA PARA PARAR"], ["THE STOP BUTTON - IT CIRCLES", "LE BOUTON STOP - IL TOURNE EN ROND", "IL PULSANTE STOP - GIRA IN TONDO", "DER STOP-KNOPF - ES KREIST", "EL BOTÓN STOP - DA VUELTAS", "O BOTÃO STOP - ANDA ÀS VOLTAS"], ["CLIMB - DIVE", "MONTER - PIQUER", "SALIRE - PICCHIARE", "STEIGEN - SINKEN", "SUBIR - PICAR", "SUBIR - PICAR"], ["THE UP AND DOWN BUTTONS", "LES BOUTONS HAUT ET BAS", "I PULSANTI SU E GIÙ", "DIE KNÖPFE HOCH UND RUNTER", "LOS BOTONES ARRIBA Y ABAJO", "OS BOTÕES CIMA E BAIXO"], ["FIRE", "TIR", "FUOCO", "FEUER", "FUEGO", "FOGO"], ["THE WEAPON BUTTONS - EACH VEHICLE ITS OWN", "LES BOUTONS D'ARME - PROPRES À CHAQUE VÉHICULE", "I PULSANTI DELLE ARMI - OGNI VEICOLO I SUOI", "DIE WAFFENKNÖPFE - JEDES FAHRZEUG SEINE EIGENEN", "LOS BOTONES DE ARMA - CADA VEHÍCULO LOS SUYOS", "OS BOTÕES DAS ARMAS - CADA VEÍCULO OS SEUS"], ["AIM", "VISER", "MIRA", "ZIELEN", "APUNTAR", "APONTAR"], ["SLIDE THE ANGLE TAPE", "GLISSEZ LA RÈGLE D'ANGLE", "SCORRI IL NASTRO DELL'ANGOLO", "DAS WINKELBAND SCHIEBEN", "DESLIZA LA CINTA DEL ÁNGULO", "DESLIZA A FITA DO ÂNGULO"], ["POWER", "PUISSANCE", "POTENZA", "KRAFT", "POTENCIA", "POTÊNCIA"], ["DRAG THE POWER SLIDER", "FAITES GLISSER LA PUISSANCE", "TRASCINA IL CURSORE DELLA POTENZA", "DEN KRAFTREGLER ZIEHEN", "ARRASTRA EL CONTROL DE POTENCIA", "ARRASTA O CONTROLO DE POTÊNCIA"], ["TAKE A VEHICLE", "PRENDRE UN VÉHICULE", "PRENDI UN VEICOLO", "EIN FAHRZEUG NEHMEN", "TOMAR UN VEHÍCULO", "PEGAR NUM VEÍCULO"], ["TAP IT IN THE ROW OF VEHICLE BUTTONS", "TOUCHEZ-LE DANS LA RANGÉE DE VÉHICULES", "TOCCALO NELLA FILA DEI VEICOLI", "IN DER FAHRZEUGREIHE ANTIPPEN", "TÓCALO EN LA FILA DE VEHÍCULOS", "TOCA-LHE NA FILA DE VEÍCULOS"], ["ARMY - CIVILIAN", "ARMÉE - CIVIL", "ESERCITO - CIVILE", "ARMEE - ZIVIL", "EJÉRCITO - CIVIL", "EXÉRCITO - CIVIL"], ["OPEN WORLD: THE LAST BUTTON OF THAT ROW", "MONDE OUVERT : LE DERNIER BOUTON DE LA RANGÉE", "MONDO APERTO: L'ULTIMO PULSANTE DELLA FILA", "OFFENE WELT: DER LETZTE KNOPF DER REIHE", "MUNDO ABIERTO: EL ÚLTIMO BOTÓN DE LA FILA", "MUNDO ABERTO: O ÚLTIMO BOTÃO DA FILA"], ["SEND IT HOME", "LE RENVOYER À LA BASE", "MANDALO A CASA", "NACH HAUSE SCHICKEN", "MANDARLO A CASA", "MANDÁ-LO PARA CASA"], ["THE HOME BUTTON", "LE BOUTON MAISON", "IL PULSANTE CASA", "DER HAUS-KNOPF", "EL BOTÓN CASA", "O BOTÃO CASA"], ["LOOK AROUND", "REGARDER AUTOUR", "GUARDARSI INTORNO", "UMSCHAUEN", "MIRAR ALREDEDOR", "OLHAR À VOLTA"], ["NOT DRIVING: DRAG THE WORLD - OR HOLD THE RIGHT MOUSE BUTTON", "SANS CONDUIRE : FAITES GLISSER LE MONDE - OU MAINTENEZ LE CLIC DROIT", "SENZA GUIDARE: TRASCINA IL MONDO - O TIENI IL TASTO DESTRO", "OHNE FAHREN: DIE WELT ZIEHEN - ODER RECHTE MAUSTASTE HALTEN", "SIN CONDUCIR: ARRASTRA EL MUNDO - O MANTÉN EL BOTÓN DERECHO", "SEM CONDUZIR: ARRASTA O MUNDO - OU MANTÉM O BOTÃO DIREITO"], ["ZOOM", "ZOOM", "ZOOM", "ZOOM", "ZOOM", "ZOOM"], ["PINCH - MOUSE WHEEL - DOUBLE TAP: BACK TO NORMAL", "PINCER - MOLETTE - DOUBLE TOUCHE : RETOUR À LA NORMALE", "PIZZICA - ROTELLINA - DOPPIO TOCCO: TORNA NORMALE", "ZWICKEN - MAUSRAD - DOPPELTIPPEN: ZURÜCK ZU NORMAL", "PELLIZCAR - RUEDA - DOBLE TOQUE: VOLVER A NORMAL", "BELISCAR - RODA - TOQUE DUPLO: VOLTAR AO NORMAL"], ["TIME AND WEATHER", "HEURE ET MÉTÉO", "ORA E METEO", "ZEIT UND WETTER", "HORA Y TIEMPO", "HORA E TEMPO"], ["THE WORLD BUTTON: SLIDERS - THE WORLD HOLDS STILL", "LE BOUTON MONDE : CURSEURS - LE MONDE S'ARRÊTE", "IL PULSANTE MONDO: CURSORI - IL MONDO SI FERMA", "DER WELT-KNOPF: REGLER - DIE WELT HÄLT AN", "EL BOTÓN MUNDO: CONTROLES - EL MUNDO SE DETIENE", "O BOTÃO MUNDO: CONTROLOS - O MUNDO PARA"], ["PHOTO MODE", "MODE PHOTO", "MODALITÀ FOTO", "FOTOMODUS", "MODO FOTO", "MODO FOTO"], ["THE EYE BESIDE THE WORLD BUTTON", "L'OEIL À CÔTÉ DU BOUTON MONDE", "L'OCCHIO ACCANTO AL PULSANTE MONDO", "DAS AUGE NEBEN DEM WELT-KNOPF", "EL OJO JUNTO AL BOTÓN MUNDO", "O OLHO AO LADO DO BOTÃO MUNDO"], ["THE MENU BUTTON", "LE BOUTON MENU", "IL PULSANTE MENU", "DER MENÜ-KNOPF", "EL BOTÓN MENÚ", "O BOTÃO MENU"], ["HIT WHAT YOU CLICK", "TOUCHER CE QUE VOUS CLIQUEZ", "COLPISCI CIÒ CHE CLICCHI", "TREFFEN, WAS DU KLICKST", "ACERTAR LO QUE PULSAS", "ACERTAR NO QUE CLICAS"], ["OPEN WORLD: CLICK IT", "MONDE OUVERT : CLIQUEZ DESSUS", "MONDO APERTO: CLICCALO", "OFFENE WELT: ANKLICKEN", "MUNDO ABIERTO: PÚLSALO", "MUNDO ABERTO: CLICA NELE"], ["TAKE A CIVILIAN", "PRENDRE UN CIVIL", "PRENDI UN CIVILE", "EIN ZIVILES NEHMEN", "TOMAR UNO CIVIL", "PEGAR NUM CIVIL"], ["OPEN WORLD: SHIFT + CLICK IT", "MONDE OUVERT : MAJ + CLIC DESSUS", "MONDO APERTO: SHIFT + CLIC", "OFFENE WELT: SHIFT + KLICK", "MUNDO ABIERTO: MAYÚS + CLIC", "MUNDO ABERTO: SHIFT + CLIQUE"], ["OFF LINE THE CLICKS WORK ON THE WORLD ONLY WHEN NOTHING ON THE SCREEN IS UNDER THE MOUSE", "HORS LIGNE LES CLICS AGISSENT SUR LE MONDE SEULEMENT SI RIEN À L'ÉCRAN N'EST SOUS LA SOURIS", "OFFLINE I CLIC AGISCONO SUL MONDO SOLO SE NIENTE SULLO SCHERMO È SOTTO IL MOUSE", "OFFLINE WIRKEN KLICKS NUR AUF DIE WELT, WENN NICHTS AM BILDSCHIRM UNTER DER MAUS IST", "SIN CONEXIÓN LOS CLICS ACTÚAN EN EL MUNDO SOLO SI NADA EN PANTALLA ESTÁ BAJO EL RATÓN", "OFFLINE OS CLIQUES SÓ AGEM NO MUNDO SE NADA NO ECRÃ ESTIVER SOB O RATO"], ["TIME", "HEURE", "ORA", "ZEIT", "HORA", "HORA"], ["SKY", "CIEL", "CIELO", "HIMMEL", "CIELO", "CÉU"], ["CLOUDS", "NUAGES", "NUVOLE", "WOLKEN", "NUBES", "NUVENS"], ["FOG", "BROUILLARD", "NEBBIA", "NEBEL", "NIEBLA", "NEVOEIRO"], ["NONE", "AUCUN", "NESSUNO", "KEINER", "NINGUNO", "NENHUM"], ["RAIN", "PLUIE", "PIOGGIA", "REGEN", "LLUVIA", "CHUVA"], ["SEA", "MER", "MARE", "MEER", "MAR", "MAR"], ["CALM", "CALME", "CALMO", "RUHIG", "CALMA", "CALMO"], ["WIND", "VENT", "VENTO", "WIND", "VIENTO", "VENTO"], ["CLEAR", "DÉGAGÉ", "SERENO", "KLAR", "DESPEJADO", "LIMPO"], ["CLOUDY", "NUAGEUX", "NUVOLOSO", "BEWÖLKT", "NUBLADO", "NUBLADO"], ["OVERCAST", "COUVERT", "COPERTO", "BEDECKT", "CUBIERTO", "ENCOBERTO"], ["MIST", "BRUME", "FOSCHIA", "DUNST", "NEBLINA", "NEBLINA"], ["THICK", "ÉPAIS", "FITTA", "DICHT", "DENSA", "CERRADO"], ["DRIZZLE", "BRUINE", "PIOVIGGINE", "NIESELN", "LLOVIZNA", "CHUVISCO"], ["DOWNPOUR", "AVERSE", "ACQUAZZONE", "WOLKENBRUCH", "AGUACERO", "AGUACEIRO"], ["STORM", "TEMPÊTE", "TEMPESTA", "STURM", "TORMENTA", "TEMPESTADE"], ["THUNDER", "ORAGE", "TUONI", "GEWITTER", "TRUENOS", "TROVOADA"], ["ROUGH", "AGITÉE", "MOSSO", "RAU", "AGITADO", "AGITADO"], ["ON", "OUI", "SÌ", "AN", "SÍ", "SIM"], ["OFF", "NON", "NO", "AUS", "NO", "NÃO"], ["STORY - PICK A SLOT", "HISTOIRE - CHOISISSEZ UN EMPLACEMENT", "STORIA - SCEGLI UNO SLOT", "GESCHICHTE - WÄHLE EINEN PLATZ", "HISTORIA - ELIGE UNA RANURA", "HISTÓRIA - ESCOLHE UM ESPAÇO"], ["EMPTY", "VIDE", "VUOTO", "LEER", "VACÍO", "VAZIO"], ["NEW", "NOUVEAU", "NUOVO", "NEU", "NUEVO", "NOVO"], ["LOAD", "CHARGER", "CARICA", "LADEN", "CARGAR", "CARREGAR"], ["SAVED", "ENREGISTRÉ", "SALVATO", "GESPEICHERT", "GUARDADO", "GUARDADO"], ["SAVED *", "ENREGISTRÉ *", "SALVATO *", "GESPEICHERT *", "GUARDADO *", "GUARDADO *"], ["COULD NOT SAVE", "ENREGISTREMENT IMPOSSIBLE", "IMPOSSIBILE SALVARE", "SPEICHERN FEHLGESCHLAGEN", "NO SE PUDO GUARDAR", "NÃO FOI POSSÍVEL GUARDAR"], ["COULD NOT LOAD", "CHARGEMENT IMPOSSIBLE", "IMPOSSIBILE CARICARE", "LADEN FEHLGESCHLAGEN", "NO SE PUDO CARGAR", "NÃO FOI POSSÍVEL CARREGAR"], ["NOTHING SAVED IN SLOT #", "RIEN D'ENREGISTRÉ DANS L'EMPLACEMENT #", "NIENTE SALVATO NELLO SLOT #", "NICHTS GESPEICHERT IN PLATZ #", "NADA GUARDADO EN LA RANURA #", "NADA GUARDADO NO ESPAÇO #"], ["SLOT #", "EMPLACEMENT #", "SLOT #", "PLATZ #", "RANURA #", "ESPAÇO #"], ["ARE YOU SURE?", "ÊTES-VOUS SÛR ?", "SEI SICURO?", "BIST DU SICHER?", "ESTÁS SEGURO?", "TENS A CERTEZA?"], ["YES", "OUI", "SÌ", "JA", "SÍ", "SIM"], ["NO", "NON", "NO", "NEIN", "NO", "NÃO"], ["DAY #", "JOUR #", "GIORNO #", "TAG #", "DÍA #", "DIA #"], ["HOME", "MAISON", "CASA", "ZUHAUSE", "CASA", "CASA"], ["VEHICLE", "VÉHICULE", "VEICOLO", "FAHRZEUG", "VEHÍCULO", "VEÍCULO"], ["YOURS", "À VOUS", "TUO", "DEINS", "TUYO", "TEU"], ["SLEEPING...", "SOMMEIL...", "DORMI...", "SCHLAFEN...", "DURMIENDO...", "A DORMIR..."], ["DAMAGED", "ENDOMMAGÉ", "DANNEGGIATO", "BESCHÄDIGT", "DAÑADO", "DANIFICADO"], ["FUEL", "CARBURANT", "CARBURANTE", "TREIBSTOFF", "COMBUSTIBLE", "COMBUSTÍVEL"], ["GIVE", "DONNER", "DAI", "GEBEN", "DAR", "DAR"], ["NO FUNDS", "PAS ASSEZ D'ARGENT", "FONDI INSUFFICIENTI", "NICHT GENUG GELD", "SIN FONDOS", "SEM FUNDOS"], ["BUY", "ACHETER", "COMPRA", "KAUFEN", "COMPRAR", "COMPRAR"], ["RENT", "LOUER", "NOLEGGIA", "MIETEN", "ALQUILAR", "ALUGAR"], ["# PER # M", "# PAR # M", "# OGNI # M", "# PRO # M", "# CADA # M", "# POR # M"], ["BUY *", "ACHETER *", "COMPRA *", "* KAUFEN", "COMPRAR *", "COMPRAR *"], ["# COIN", "# PIÈCES", "# MONETE", "# MÜNZEN", "# MONEDAS", "# MOEDAS"], ["* #", "* #", "* #", "* #", "* #", "* #"], ["# *", "# *", "# *", "# *", "# *", "# *"], ["TAP TO BUY FOR # COIN", "TOUCHEZ POUR ACHETER # PIÈCES", "TOCCA PER COMPRARE A # MONETE", "TIPPEN ZUM KAUFEN FÜR # MÜNZEN", "TOCA PARA COMPRAR POR # MONEDAS", "TOCA PARA COMPRAR POR # MOEDAS"], ["TAP TO SELL FOR # COIN", "TOUCHEZ POUR VENDRE # PIÈCES", "TOCCA PER VENDERE A # MONETE", "TIPPEN ZUM VERKAUFEN FÜR # MÜNZEN", "TOCA PARA VENDER POR # MONEDAS", "TOCA PARA VENDER POR # MOEDAS"], ["PRESS * TO BUY FOR # COIN", "APPUYEZ SUR * POUR ACHETER # PIÈCES", "PREMI * PER COMPRARE A # MONETE", "* DRÜCKEN ZUM KAUFEN FÜR # MÜNZEN", "PULSA * PARA COMPRAR POR # MONEDAS", "PRIME * PARA COMPRAR POR # MOEDAS"], ["PRESS * TO SELL FOR # COIN", "APPUYEZ SUR * POUR VENDRE # PIÈCES", "PREMI * PER VENDERE A # MONETE", "* DRÜCKEN ZUM VERKAUFEN FÜR # MÜNZEN", "PULSA * PARA VENDER POR # MONEDAS", "PRIME * PARA VENDER POR # MOEDAS"], ["TAP TO PURCHASE", "TOUCHEZ POUR ACHETER", "TOCCA PER ACQUISTARE", "TIPPEN ZUM KAUFEN", "TOCA PARA COMPRAR", "TOCA PARA COMPRAR"], ["PRESS A TO PURCHASE", "APPUYEZ SUR A POUR ACHETER", "PREMI A PER ACQUISTARE", "A DRÜCKEN ZUM KAUFEN", "PULSA A PARA COMPRAR", "PRIME A PARA COMPRAR"], ["PRESS SPACE TO PURCHASE", "APPUYEZ SUR ESPACE POUR ACHETER", "PREMI SPAZIO PER ACQUISTARE", "LEERTASTE ZUM KAUFEN", "PULSA ESPACIO PARA COMPRAR", "PRIME ESPAÇO PARA COMPRAR"], ["TAP TO TAKE OUT", "TOUCHEZ POUR SORTIR", "TOCCA PER USCIRE", "TIPPEN ZUM AUSFAHREN", "TOCA PARA SACARLO", "TOCA PARA SAIR"], ["PRESS * TO TAKE OUT", "APPUYEZ SUR * POUR SORTIR", "PREMI * PER USCIRE", "* DRÜCKEN ZUM AUSFAHREN", "PULSA * PARA SACARLO", "PRIME * PARA SAIR"], ["PRESS * TO PURCHASE", "APPUYEZ SUR * POUR ACHETER", "PREMI * PER ACQUISTARE", "* DRÜCKEN ZUM KAUFEN", "PULSA * PARA COMPRAR", "PRIME * PARA COMPRAR"], ["SELL GOODS", "VENDRE DES MARCHANDISES", "VENDI MERCI", "WAREN VERKAUFEN", "VENDER MERCANCÍA", "VENDER MERCADORIAS"], ["CLOSED: OPENS AT *", "FERMÉ : OUVRE À *", "CHIUSO: APRE ALLE *", "GESCHLOSSEN: ÖFFNET UM *", "CERRADO: ABRE A LAS *", "FECHADO: ABRE ÀS *"], ["COOK", "CUISINER", "CUCINA", "KOCHEN", "COCINAR", "COZINHAR"], ["LIGHT", "LUMIÈRE", "LUCE", "LICHT", "LUZ", "LUZ"], ["HORN", "KLAXON", "CLACSON", "HUPE", "CLAXON", "BUZINA"], ["BEAM", "FAISCEAU", "FASCIO", "LEUCHTFEUER", "HAZ", "FEIXE"], ["FOG HORN", "CORNE DE BRUME", "SIRENA DA NEBBIA", "NEBELHORN", "SIRENA DE NIEBLA", "BUZINA DE NEVOEIRO"], ["ANGLE LEFT", "ANGLE GAUCHE", "ANGOLO SINISTRA", "WINKEL LINKS", "ÁNGULO IZQUIERDA", "ÂNGULO ESQUERDA"], ["ANGLE RIGHT", "ANGLE DROITE", "ANGOLO DESTRA", "WINKEL RECHTS", "ÁNGULO DERECHA", "ÂNGULO DIREITA"], ["ANGLE FRONT", "ANGLE AVANT", "ANGOLO DAVANTI", "WINKEL VORNE", "ÁNGULO FRENTE", "ÂNGULO FRENTE"], ["FISH", "POISSON", "PESCE", "FISCH", "PESCADO", "PEIXE"], ["GOLD", "OR", "ORO", "GOLD", "ORO", "OURO"], ["MEDICINE", "MÉDICAMENTS", "MEDICINE", "MEDIZIN", "MEDICINA", "MEDICAMENTOS"], ["CARGO", "CARGAISON", "CARICO", "FRACHT", "CARGA", "CARGA"], ["MARKET", "MARCHÉ", "MERCATO", "MARKT", "MERCADO", "MERCADO"], ["HANGAR", "HANGAR", "HANGAR", "HANGAR", "HANGAR", "HANGAR"], ["RESIDENTIAL", "RÉSIDENTIEL", "RESIDENZIALE", "WOHNHAUS", "RESIDENCIAL", "RESIDENCIAL"], ["DOCK", "QUAI", "MOLO", "ANLEGESTEG", "MUELLE", "CAIS"], ["TAXI", "TAXI", "TAXI", "TAXI", "TAXI", "TÁXI"], ["TAXI SHELTER", "ABRI DE TAXIS", "PENSILINA TAXI", "TAXISTAND", "PARADA DE TAXIS", "PRAÇA DE TÁXIS"], ["FISHING BOAT", "BATEAU DE PÊCHE", "PESCHERECCIO", "FISCHERBOOT", "BARCO DE PESCA", "BARCO DE PESCA"], ["JET BOAT", "JET-BOAT", "MOTOSCAFO A IDROGETTO", "JETBOOT", "LANCHA JET", "LANCHA A JATO"], ["MOTOR BOAT", "BATEAU À MOTEUR", "MOTOSCAFO", "MOTORBOOT", "LANCHA MOTORA", "BARCO A MOTOR"], ["SEAPLANE", "HYDRAVION", "IDROVOLANTE", "WASSERFLUGZEUG", "HIDROAVIÓN", "HIDROAVIÃO"], ["VAN", "FOURGONNETTE", "FURGONE", "TRANSPORTER", "FURGONETA", "CARRINHA"], ["MOTORCYCLE", "MOTO", "MOTO", "MOTORRAD", "MOTO", "MOTA"], ["TRACTOR", "TRACTEUR", "TRATTORE", "TRAKTOR", "TRACTOR", "TRATOR"], ["AMBULANCE", "AMBULANCE", "AMBULANZA", "KRANKENWAGEN", "AMBULANCIA", "AMBULÂNCIA"], ["FIRE ENGINE", "CAMION DE POMPIERS", "AUTOPOMPA", "FEUERWEHRAUTO", "CAMIÓN DE BOMBEROS", "CARRO DE BOMBEIROS"], ["BOX TRUCK", "CAMION FOURGON", "FURGONE CASSONATO", "KOFFER-LKW", "CAMIÓN DE CAJA", "CAMIÃO DE CAIXA"], ["DUMP TRUCK", "CAMION BENNE", "AUTOCARRO RIBALTABILE", "KIPPER", "VOLQUETE", "CAMIÃO BASCULANTE"], ["CITY BUS", "BUS", "AUTOBUS", "STADTBUS", "AUTOBÚS", "AUTOCARRO"], ["SCHOOL BUS", "BUS SCOLAIRE", "SCUOLABUS", "SCHULBUS", "AUTOBÚS ESCOLAR", "AUTOCARRO ESCOLAR"], ["MINISUB", "MINI SOUS-MARIN", "MINISOMMERGIBILE", "MINI-U-BOOT", "MINISUBMARINO", "MINISSUBMARINO"], ["LIGHTHOUSE", "PHARE", "FARO", "LEUCHTTURM", "FARO", "FAROL"], ["FIRE STATION", "CASERNE DE POMPIERS", "CASERMA DEI POMPIERI", "FEUERWACHE", "ESTACIÓN DE BOMBEROS", "QUARTEL DE BOMBEIROS"], ["POLICE STATION", "COMMISSARIAT", "COMMISSARIATO", "POLIZEIWACHE", "COMISARÍA", "ESQUADRA"], ["AIRCRAFT HANGAR", "HANGAR D'AVIONS", "HANGAR AEREI", "FLUGZEUGHANGAR", "HANGAR DE AVIONES", "HANGAR DE AVIÕES"], ["MARINE HANGAR", "HANGAR MARIN", "HANGAR NAUTICO", "BOOTSHANGAR", "HANGAR NÁUTICO", "HANGAR NÁUTICO"], ["LAUNCH PAD", "PAS DE TIR", "RAMPA DI LANCIO", "STARTRAMPE", "PLATAFORMA DE LANZAMIENTO", "PLATAFORMA DE LANÇAMENTO"], ["SLOT #'S SAVED STORY WILL BE LOST", "LA PARTIE DE L'EMPLACEMENT # SERA PERDUE", "LA STORIA SALVATA NELLO SLOT # ANDRÀ PERSA", "DIE GESPEICHERTE GESCHICHTE IN PLATZ # GEHT VERLOREN", "SE PERDERÁ LA HISTORIA GUARDADA EN LA RANURA #", "A HISTÓRIA GUARDADA NO ESPAÇO # PERDE-SE"], ["STORY WORLD *", "MONDE HISTOIRE *", "MONDO STORIA *", "GESCHICHTSWELT *", "MUNDO HISTORIA *", "MUNDO HISTÓRIA *"], ["* LOADED", "* CHARGÉ", "* CARICATO", "* GELADEN", "* CARGADO", "* CARREGADO"], ["PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION"], ["XBOX", "XBOX", "XBOX", "XBOX", "XBOX", "XBOX"], ["CPU", "CPU", "CPU", "CPU", "CPU", "CPU"], ["BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL"], ["LEFT", "GAUCHE", "SINISTRA", "LINKS", "IZQUIERDA", "ESQUERDA"], ["RIGHT", "DROITE", "DESTRA", "RECHTS", "DERECHA", "DIREITA"], ["*  X", "*  X", "*  X", "*  X", "*  X", "*  X"], ["THIS VERSION HAS A NEWER STORY WORLD (*)", "CETTE VERSION A UN MONDE HISTOIRE PLUS RÉCENT (*)", "QUESTA VERSIONE HA UN MONDO STORIA PIÙ RECENTE (*)", "DIESE VERSION HAT EINE NEUERE GESCHICHTSWELT (*)", "ESTA VERSIÓN TIENE UN MUNDO HISTORIA MÁS RECIENTE (*)", "ESTA VERSÃO TEM UM MUNDO HISTÓRIA MAIS RECENTE (*)"], ["THIS VERSION HAS A NEWER OPEN WORLD (*)", "CETTE VERSION A UN MONDE OUVERT PLUS RÉCENT (*)", "QUESTA VERSIONE HA UN MONDO APERTO PIÙ RECENTE (*)", "DIESE VERSION HAT EINE NEUERE OFFENE WELT (*)", "ESTA VERSIÓN TIENE UN MUNDO ABIERTO MÁS RECIENTE (*)", "ESTA VERSÃO TEM UM MUNDO ABERTO MAIS RECENTE (*)"], ["YOUR EDITS ON THIS DEVICE ARE OLDER (*)", "VOS MODIFICATIONS SUR CET APPAREIL SONT PLUS ANCIENNES (*)", "LE TUE MODIFICHE SU QUESTO DISPOSITIVO SONO PIÙ VECCHIE (*)", "DEINE ÄNDERUNGEN AUF DIESEM GERÄT SIND ÄLTER (*)", "TUS CAMBIOS EN ESTE DISPOSITIVO SON MÁS ANTIGUOS (*)", "AS TUAS ALTERAÇÕES NESTE DISPOSITIVO SÃO MAIS ANTIGAS (*)"], ["YOUR EDITS ON THIS DEVICE ARE OLDER", "VOS MODIFICATIONS SUR CET APPAREIL SONT PLUS ANCIENNES", "LE TUE MODIFICHE SU QUESTO DISPOSITIVO SONO PIÙ VECCHIE", "DEINE ÄNDERUNGEN AUF DIESEM GERÄT SIND ÄLTER", "TUS CAMBIOS EN ESTE DISPOSITIVO SON MÁS ANTIGUOS", "AS TUAS ALTERAÇÕES NESTE DISPOSITIVO SÃO MAIS ANTIGAS"], ["USE NEW", "PRENDRE LE NOUVEAU", "USA IL NUOVO", "NEUE NEHMEN", "USAR EL NUEVO", "USAR O NOVO"], ["KEEP MINE", "GARDER LE MIEN", "TIENI IL MIO", "MEINE BEHALTEN", "MANTENER EL MÍO", "MANTER O MEU"], ["GRASS", "", "", "", "", ""], ["SAND", "", "", "", "", ""], ["SNOW", "", "", "", "", ""], ["DIRT", "", "", "", "", ""], ["GRAVEL", "", "", "", "", ""], ["MUD", "", "", "", "", ""], ["CLAY", "", "", "", "", ""], ["ASH", "", "", "", "", ""], ["MOSS", "", "", "", "", ""], ["ROCK", "", "", "", "", ""], ["ICE", "", "", "", "", ""], ["Downloading data", "Téléchargement des données", "Download dei dati", "Daten werden geladen", "Descargando datos", "A transferir dados"], ["Unpacking pictures", "Décompression des images", "Decompressione delle immagini", "Bilder werden entpackt", "Descomprimiendo imágenes", "A descompactar imagens"], ["Preparing art", "Préparation des graphismes", "Preparazione della grafica", "Grafik wird vorbereitet", "Preparando gráficos", "A preparar gráficos"], ["Starting the graphics", "Démarrage des graphismes", "Avvio della grafica", "Grafik wird gestartet", "Iniciando los gráficos", "A iniciar os gráficos"], ["Preparing the graphics card", "Préparation de la carte graphique", "Preparazione della scheda grafica", "Grafikkarte wird vorbereitet", "Preparando la tarjeta gráfica", "A preparar a placa gráfica"], ["Starting the game", "Démarrage du jeu", "Avvio del gioco", "Spiel wird gestartet", "Iniciando el juego", "A iniciar o jogo"], ["Building world", "Construction du monde", "Costruzione del mondo", "Welt wird gebaut", "Construyendo el mundo", "A construir o mundo"], ["Loading", "Chargement", "Caricamento", "Laden", "Cargando", "A carregar"], ["Loading editor", "Chargement de l'éditeur", "Caricamento dell'editor", "Editor wird geladen", "Cargando el editor", "A carregar o editor"], ["Loading Biome Editor", "Chargement du Biome Editor", "Caricamento del Biome Editor", "Biome Editor wird geladen", "Cargando el Biome Editor", "A carregar o Biome Editor"], ["Could not download the game. Check the connection and reload.", "Impossible de télécharger le jeu. Vérifiez la connexion et rechargez.", "Impossibile scaricare il gioco. Controlla la connessione e ricarica.", "Spiel konnte nicht geladen werden. Verbindung prüfen und neu laden.", "No se pudo descargar el juego. Revisa la conexión y recarga.", "Não foi possível transferir o jogo. Verifique a ligação e recarregue."], ["BUG REPORT SAVED", "RAPPORT ENREGISTRÉ", "SEGNALAZIONE SALVATA", "BERICHT GESPEICHERT", "INFORME GUARDADO", "RELATÓRIO GUARDADO"], ["COULD NOT MAKE THE REPORT", "IMPOSSIBLE DE CRÉER LE RAPPORT", "IMPOSSIBILE CREARE LA SEGNALAZIONE", "BERICHT NICHT ERSTELLT", "NO SE PUDO CREAR EL INFORME", "NÃO FOI POSSÍVEL CRIAR O RELATÓRIO"], ["This game needs WebGPU", "Ce jeu nécessite WebGPU", "Questo gioco richiede WebGPU", "Dieses Spiel braucht WebGPU", "Este juego necesita WebGPU", "Este jogo precisa de WebGPU"], ["Use a recent Chrome, Edge, Firefox or Safari", "Utilisez un Chrome, Edge, Firefox ou Safari récent", "Usa un Chrome, Edge, Firefox o Safari recente", "Verwende ein aktuelles Chrome, Edge, Firefox oder Safari", "Usa un Chrome, Edge, Firefox o Safari reciente", "Use um Chrome, Edge, Firefox ou Safari recente"], ["WORLD PLAN", "PLAN DU MONDE", "PIANO DEL MONDO", "WELTPLAN", "PLANO DEL MUNDO", "PLANO DO MUNDO"], ["WORLD SNAPSHOT", "INSTANTANÉ DU MONDE", "ISTANTANEA DEL MONDO", "WELT-SNAPSHOT", "INSTANTÁNEA DEL MUNDO", "INSTANTÂNEO DO MUNDO"], ["TANK VS TANK", "CHAR CONTRE CHAR", "CARRO CONTRO CARRO", "PANZER GEGEN PANZER", "TANQUE CONTRA TANQUE", "TANQUE CONTRA TANQUE"], ["ROUND #", "MANCHE #", "ROUND #", "RUNDE #", "RONDA #", "RONDA #"], ["WIND # KM/H", "VENT # KM/H", "VENTO # KM/H", "WIND # KM/H", "VIENTO # KM/H", "VENTO # KM/H"], ["PLAYER # WINS THE ROUND", "LE JOUEUR # GAGNE LA MANCHE", "IL GIOCATORE # VINCE IL ROUND", "SPIELER # GEWINNT DIE RUNDE", "EL JUGADOR # GANA LA RONDA", "O JOGADOR # GANHA A RONDA"], ["DRAW", "ÉGALITÉ", "PAREGGIO", "UNENTSCHIEDEN", "EMPATE", "EMPATE"], ["TANK VS TANK IS PLAYED AT ONE SCREEN", "CHAR CONTRE CHAR SE JOUE SUR UN SEUL ÉCRAN", "CARRO CONTRO CARRO SI GIOCA SU UNO SCHERMO", "PANZER GEGEN PANZER WIRD AN EINEM BILDSCHIRM GESPIELT", "TANQUE CONTRA TANQUE SE JUEGA EN UNA PANTALLA", "TANQUE CONTRA TANQUE JOGA-SE NUM SÓ ECRÃ"], ["TAP TO CONTINUE", "TOUCHEZ POUR CONTINUER", "TOCCA PER CONTINUARE", "TIPPEN ZUM FORTFAHREN", "TOCA PARA CONTINUAR", "TOCA PARA CONTINUAR"], ["PRESS A TO CONTINUE", "APPUYEZ SUR A POUR CONTINUER", "PREMI A PER CONTINUARE", "A DRÜCKEN ZUM FORTFAHREN", "PULSA A PARA CONTINUAR", "PRIME A PARA CONTINUAR"], ["PRESS SPACE TO CONTINUE", "APPUYEZ SUR ESPACE POUR CONTINUER", "PREMI SPAZIO PER CONTINUARE", "LEERTASTE ZUM FORTFAHREN", "PULSA ESPACIO PARA CONTINUAR", "PRIME ESPAÇO PARA CONTINUAR"], ["TAP TO TALK", "TOUCHEZ POUR PARLER", "TOCCA PER PARLARE", "TIPPEN ZUM SPRECHEN", "TOCA PARA HABLAR", "TOCA PARA FALAR"], ["PRESS A TO TALK", "APPUYEZ SUR A POUR PARLER", "PREMI A PER PARLARE", "A DRÜCKEN ZUM SPRECHEN", "PULSA A PARA HABLAR", "PRIME A PARA FALAR"], ["PRESS SPACE TO TALK", "APPUYEZ SUR ESPACE POUR PARLER", "PREMI SPAZIO PER PARLARE", "LEERTASTE ZUM SPRECHEN", "PULSA ESPACIO PARA HABLAR", "PRIME ESPAÇO PARA FALAR"], ["GO TO", "ALLER À", "VAI A", "GEHE ZU", "IR A", "IR A"], ["BRING *", "APPORTER *", "PORTA *", "* BRINGEN", "LLEVAR *", "LEVAR *"], ["COLLECT *", "RÉCOLTER *", "RACCOGLI *", "* SAMMELN", "RECOGER *", "RECOLHER *"], ["SELL *", "VENDRE *", "VENDI *", "* VERKAUFEN", "VENDER *", "VENDER *"], ["TALK", "PARLER", "PARLA", "SPRECHEN", "HABLAR", "FALAR"], ["CONTINUE", "CONTINUER", "CONTINUA", "WEITER", "CONTINUAR", "CONTINUAR"], ["I NEED *. # DAYS LEFT.", "J'AI BESOIN DE *. IL ME RESTE # JOURS.", "HO BISOGNO DI *. MI RESTANO # GIORNI.", "ICH BRAUCHE *. NOCH # TAGE.", "NECESITO *. ME QUEDAN # DÍAS.", "PRECISO DE *. RESTAM-ME # DIAS."], ["I NEED *. # DAY LEFT.", "J'AI BESOIN DE *. IL ME RESTE # JOUR.", "HO BISOGNO DI *. MI RESTA # GIORNO.", "ICH BRAUCHE *. NOCH # TAG.", "NECESITO *. ME QUEDA # DÍA.", "PRECISO DE *. RESTA-ME # DIA."], ["WE HAVE NO * LEFT.", "NOUS N'AVONS PLUS DE *.", "NON ABBIAMO PIÙ *.", "WIR HABEN KEIN * MEHR.", "NO NOS QUEDA *.", "NÃO NOS RESTA *."], ["WE NEED * TO MAKE *.", "IL NOUS FAUT * POUR FAIRE *.", "CI SERVE * PER FARE *.", "WIR BRAUCHEN *, UM * ZU MACHEN.", "NECESITAMOS * PARA HACER *.", "PRECISAMOS DE * PARA FAZER *."]];
+const I18N_ROWS = [["BATTLE", "BATAILLE", "BATTAGLIA", "SCHLACHT", "BATALLA", "BATALHA"], ["OPEN WORLD", "MONDE OUVERT", "MONDO APERTO", "OFFENE WELT", "MUNDO ABIERTO", "MUNDO ABERTO"], ["STORY", "HISTOIRE", "STORIA", "GESCHICHTE", "HISTORIA", "HISTÓRIA"], ["JOIN", "REJOINDRE", "UNISCITI", "BEITRETEN", "UNIRSE", "ENTRAR"], ["LEAVE", "QUITTER", "ESCI", "VERLASSEN", "SALIR", "SAIR"], ["TEAM", "ÉQUIPE", "SQUADRA", "TEAM", "EQUIPO", "EQUIPA"], ["ENEMY", "ENNEMI", "NEMICO", "FEIND", "ENEMIGO", "INIMIGO"], ["YOU", "VOUS", "TU", "DU", "TÚ", "TU"], ["NEW GAME", "NOUVELLE PARTIE", "NUOVA PARTITA", "NEUES SPIEL", "NUEVA PARTIDA", "NOVO JOGO"], ["PLAY", "JOUER", "GIOCA", "SPIELEN", "JUGAR", "JOGAR"], ["RESUME", "REPRENDRE", "RIPRENDI", "FORTSETZEN", "CONTINUAR", "CONTINUAR"], ["OPTIONS", "OPTIONS", "OPZIONI", "OPTIONEN", "OPCIONES", "OPÇÕES"], ["PRESS TO JOIN", "APPUYEZ POUR REJOINDRE", "PREMI PER UNIRTI", "DRÜCKEN ZUM BEITRETEN", "PULSA PARA UNIRTE", "PRIME PARA ENTRAR"], ["PRESS A KEY OR BUTTON TO JOIN", "APPUYEZ SUR UNE TOUCHE OU UN BOUTON POUR REJOINDRE", "PREMI UN TASTO O UN PULSANTE PER UNIRTI", "TASTE ODER KNOPF DRÜCKEN ZUM BEITRETEN", "PULSA UNA TECLA O UN BOTÓN PARA UNIRTE", "PRIME UMA TECLA OU UM BOTÃO PARA ENTRAR"], ["PRESS ANY KEY OR BUTTON TO JOIN - THEN LEFT OR RIGHT FOR A TEAM - + CPU TO PLAY THE COMPUTER", "UNE TOUCHE OU UN BOUTON POUR REJOINDRE - PUIS GAUCHE OU DROITE POUR UNE ÉQUIPE - + CPU POUR JOUER CONTRE L'ORDINATEUR", "UN TASTO O PULSANTE PER UNIRTI - POI SINISTRA O DESTRA PER UNA SQUADRA - + CPU PER GIOCARE CONTRO IL COMPUTER", "EINE TASTE ODER EIN KNOPF ZUM BEITRETEN - DANN LINKS ODER RECHTS FÜR EIN TEAM - + CPU GEGEN DEN COMPUTER", "UNA TECLA O BOTÓN PARA UNIRTE - LUEGO IZQUIERDA O DERECHA PARA UN EQUIPO - + CPU PARA JUGAR CONTRA EL ORDENADOR", "UMA TECLA OU BOTÃO PARA ENTRAR - DEPOIS ESQUERDA OU DIREITA PARA UMA EQUIPA - + CPU PARA JOGAR CONTRA O COMPUTADOR"], ["PRESS ANY KEY OR BUTTON TO JOIN - B OR BACKSPACE TO LEAVE", "UNE TOUCHE OU UN BOUTON POUR REJOINDRE - B OU RETOUR ARRIÈRE POUR QUITTER", "UN TASTO O PULSANTE PER UNIRTI - B O BACKSPACE PER USCIRE", "EINE TASTE ODER EIN KNOPF ZUM BEITRETEN - B ODER RÜCKTASTE ZUM VERLASSEN", "UNA TECLA O BOTÓN PARA UNIRTE - B O RETROCESO PARA SALIR", "UMA TECLA OU BOTÃO PARA ENTRAR - B OU RETROCESSO PARA SAIR"], ["LEFT OR RIGHT TO PICK A SIDE", "GAUCHE OU DROITE POUR CHOISIR UN CAMP", "SINISTRA O DESTRA PER SCEGLIERE UN LATO", "LINKS ODER RECHTS FÜR EINE SEITE", "IZQUIERDA O DERECHA PARA ELEGIR BANDO", "ESQUERDA OU DIREITA PARA ESCOLHER UM LADO"], ["PICK A SIDE TO JUMP IN", "CHOISISSEZ UN CAMP POUR ENTRER", "SCEGLI UN LATO PER ENTRARE", "WÄHLE EINE SEITE ZUM EINSTEIGEN", "ELIGE UN BANDO PARA ENTRAR", "ESCOLHE UM LADO PARA ENTRAR"], ["THE HOST STARTS THE GAME", "L'HÔTE LANCE LA PARTIE", "L'HOST AVVIA LA PARTITA", "DER GASTGEBER STARTET DAS SPIEL", "EL ANFITRIÓN INICIA LA PARTIDA", "O ANFITRIÃO INICIA O JOGO"], ["ONE PLAYER ON A PHONE", "UN JOUEUR SUR UN TÉLÉPHONE", "UN GIOCATORE SU UN TELEFONO", "EIN SPIELER AM HANDY", "UN JUGADOR EN UN MÓVIL", "UM JOGADOR NUM TELEMÓVEL"], ["TWO PLAYERS AT ONE SCREEN AT MOST", "DEUX JOUEURS PAR ÉCRAN AU MAXIMUM", "AL MASSIMO DUE GIOCATORI PER SCHERMO", "HÖCHSTENS ZWEI SPIELER AN EINEM BILDSCHIRM", "COMO MÁXIMO DOS JUGADORES POR PANTALLA", "NO MÁXIMO DOIS JOGADORES POR ECRÃ"], ["SESSION CODE *", "CODE DE SESSION *", "CODICE SESSIONE *", "SITZUNGSCODE *", "CÓDIGO DE SESIÓN *", "CÓDIGO DA SESSÃO *"], ["JOIN A SESSION", "REJOINDRE UNE SESSION", "UNISCITI A UNA SESSIONE", "EINER SITZUNG BEITRETEN", "UNIRSE A UNA SESIÓN", "ENTRAR NUMA SESSÃO"], ["TYPE OR PASTE ITS SESSION CODE", "TAPEZ OU COLLEZ SON CODE DE SESSION", "SCRIVI O INCOLLA IL CODICE SESSIONE", "SITZUNGSCODE EINGEBEN ODER EINFÜGEN", "ESCRIBE O PEGA SU CÓDIGO DE SESIÓN", "ESCREVE OU COLA O CÓDIGO DA SESSÃO"], ["CODE", "CODE", "CODICE", "CODE", "CÓDIGO", "CÓDIGO"], ["OK", "OK", "OK", "OK", "OK", "OK"], ["CANCEL", "ANNULER", "ANNULLA", "ABBRECHEN", "CANCELAR", "CANCELAR"], ["LOADING...", "CHARGEMENT...", "CARICAMENTO...", "LADEN...", "CARGANDO...", "A CARREGAR..."], ["BUILD *", "VERSION *", "VERSIONE *", "VERSION *", "VERSIÓN *", "VERSÃO *"], ["OPEN WORLD LOADED", "MONDE OUVERT CHARGÉ", "MONDO APERTO CARICATO", "OFFENE WELT GELADEN", "MUNDO ABIERTO CARGADO", "MUNDO ABERTO CARREGADO"], ["STORY WORLD LOADED", "MONDE HISTOIRE CHARGÉ", "MONDO STORIA CARICATO", "GESCHICHTSWELT GELADEN", "MUNDO HISTORIA CARGADO", "MUNDO HISTÓRIA CARREGADO"], ["FULL SCREEN NOT AVAILABLE HERE", "PLEIN ÉCRAN INDISPONIBLE ICI", "SCHERMO INTERO NON DISPONIBILE QUI", "VOLLBILD HIER NICHT VERFÜGBAR", "PANTALLA COMPLETA NO DISPONIBLE AQUÍ", "ECRÃ INTEIRO INDISPONÍVEL AQUI"], ["PLAYER #", "JOUEUR #", "GIOCATORE #", "SPIELER #", "JUGADOR #", "JOGADOR #"], ["PLAYER # FLAG", "DRAPEAU DU JOUEUR #", "BANDIERA GIOCATORE #", "FLAGGE SPIELER #", "BANDERA DEL JUGADOR #", "BANDEIRA DO JOGADOR #"], ["CONTROLLER #", "MANETTE #", "CONTROLLER #", "CONTROLLER #", "MANDO #", "COMANDO #"], ["ARROW KEYS", "FLÈCHES", "FRECCE", "PFEILTASTEN", "FLECHAS", "SETAS"], ["KEYBOARD", "CLAVIER", "TASTIERA", "TASTATUR", "TECLADO", "TECLADO"], ["TOUCH", "TACTILE", "TOUCH", "TOUCH", "TÁCTIL", "TÁTIL"], ["TOUCH #", "TACTILE #", "TOUCH #", "TOUCH #", "TÁCTIL #", "TÁTIL #"], ["RULES", "RÈGLES", "REGOLE", "REGELN", "REGLAS", "REGRAS"], ["SINK THE ENEMY'S HARBOUR TOWER BEFORE THEY SINK YOURS. YOU HAVE # LIVES. EVERY VEHICLE YOU LOSE COSTS ONE, AND LOSING THEM ALL ALSO LOSES THE GAME. CONTROLS ARE IN OPTIONS.", "COULEZ LA TOUR DU PORT ENNEMI AVANT QU'IL NE COULE LA VÔTRE. VOUS AVEZ # VIES. CHAQUE VÉHICULE PERDU EN COÛTE UNE, ET LES PERDRE TOUTES FAIT AUSSI PERDRE LA PARTIE. LES COMMANDES SONT DANS OPTIONS.", "AFFONDA LA TORRE DEL PORTO NEMICO PRIMA CHE AFFONDI LA TUA. HAI # VITE. OGNI VEICOLO PERSO NE COSTA UNA, E PERDERLE TUTTE FA PERDERE ANCHE LA PARTITA. I COMANDI SONO IN OPZIONI.", "VERSENKE DEN HAFENTURM DES FEINDES, BEVOR ER DEINEN VERSENKT. DU HAST # LEBEN. JEDES VERLORENE FAHRZEUG KOSTET EINS, UND WER ALLE VERLIERT, VERLIERT AUCH DAS SPIEL. DIE STEUERUNG FINDEST DU IN OPTIONEN.", "HUNDE LA TORRE DEL PUERTO ENEMIGO ANTES DE QUE HUNDA LA TUYA. TIENES # VIDAS. CADA VEHÍCULO QUE PIERDES CUESTA UNA, Y PERDERLAS TODAS TAMBIÉN PIERDE LA PARTIDA. LOS CONTROLES ESTÁN EN OPCIONES.", "AFUNDA A TORRE DO PORTO INIMIGO ANTES QUE ELE AFUNDE A TUA. TENS # VIDAS. CADA VEÍCULO QUE PERDES CUSTA UMA, E PERDER TODAS TAMBÉM PERDE O JOGO. OS CONTROLOS ESTÃO EM OPÇÕES."], ["YOU WIN", "VOUS GAGNEZ", "HAI VINTO", "DU GEWINNST", "HAS GANADO", "GANHASTE"], ["YOU LOSE", "VOUS PERDEZ", "HAI PERSO", "DU VERLIERST", "HAS PERDIDO", "PERDESTE"], ["GAME OVER", "PARTIE TERMINÉE", "PARTITA FINITA", "SPIEL VORBEI", "FIN DE LA PARTIDA", "FIM DO JOGO"], ["THE CPU WINS", "LE CPU GAGNE", "VINCE LA CPU", "DIE CPU GEWINNT", "GANA LA CPU", "A CPU GANHA"], ["* WINS", "* GAGNE", "VINCE *", "* GEWINNT", "GANA *", "* GANHA"], ["PLAY AGAIN", "REJOUER", "GIOCA ANCORA", "NOCHMAL SPIELEN", "JUGAR OTRA VEZ", "JOGAR OUTRA VEZ"], ["GAME PAUSED", "PARTIE EN PAUSE", "PARTITA IN PAUSA", "SPIEL PAUSIERT", "PARTIDA EN PAUSA", "JOGO EM PAUSA"], ["INVITE LINK COPIED", "LIEN D'INVITATION COPIÉ", "LINK DI INVITO COPIATO", "EINLADUNGSLINK KOPIERT", "ENLACE DE INVITACIÓN COPIADO", "LIGAÇÃO DE CONVITE COPIADA"], ["ONLINE PLAY IS NOT AVAILABLE HERE", "LE JEU EN LIGNE N'EST PAS DISPONIBLE ICI", "IL GIOCO ONLINE NON È DISPONIBILE QUI", "ONLINE-SPIEL IST HIER NICHT VERFÜGBAR", "EL JUEGO EN LÍNEA NO ESTÁ DISPONIBLE AQUÍ", "O JOGO ONLINE NÃO ESTÁ DISPONÍVEL AQUI"], ["THAT IS THIS SCREEN", "C'EST CET ÉCRAN", "È QUESTO SCHERMO", "DAS IST DIESER BILDSCHIRM", "ES ESTA PANTALLA", "É ESTE ECRÃ"], ["COULD NOT CONNECT", "CONNEXION IMPOSSIBLE", "IMPOSSIBILE CONNETTERSI", "VERBINDUNG FEHLGESCHLAGEN", "NO SE PUDO CONECTAR", "NÃO FOI POSSÍVEL LIGAR"], ["JOINING *", "CONNEXION À *", "CONNESSIONE A *", "BEITRITT ZU *", "UNIÉNDOSE A *", "A ENTRAR EM *"], ["LINKING TO *", "LIAISON À *", "COLLEGAMENTO A *", "VERBINDE MIT *", "CONECTANDO CON *", "A LIGAR A *"], ["NO SESSION *", "AUCUNE SESSION *", "NESSUNA SESSIONE *", "KEINE SITZUNG *", "NO HAY SESIÓN *", "SEM SESSÃO *"], ["YOU PLAY WITH *", "VOUS JOUEZ AVEC *", "GIOCHI CON *", "DU SPIELST MIT *", "JUEGAS CON *", "JOGAS COM *"], ["* LEFT - + CPU OR WAIT FOR THEM", "* EST PARTI - + CPU OU ATTENDEZ", "* È USCITO - + CPU O ASPETTA", "* IST GEGANGEN - + CPU ODER WARTEN", "* SE FUE - + CPU O ESPERA", "* SAIU - + CPU OU ESPERA"], ["* JOINED THE SESSION", "* A REJOINT LA SESSION", "* È ENTRATO NELLA SESSIONE", "* IST DER SITZUNG BEIGETRETEN", "* SE UNIÓ A LA SESIÓN", "* ENTROU NA SESSÃO"], ["* PAUSED", "* A MIS EN PAUSE", "* HA MESSO IN PAUSA", "* HAT PAUSIERT", "* PAUSÓ", "* PAUSOU"], ["* LEFT", "* EST PARTI", "* È USCITO", "* IST GEGANGEN", "* SE FUE", "* SAIU"], ["STORY CANNOT BE PLAYED ONLINE YET", "LE MODE HISTOIRE NE SE JOUE PAS ENCORE EN LIGNE", "LA STORIA NON SI PUÒ ANCORA GIOCARE ONLINE", "GESCHICHTE GEHT NOCH NICHT ONLINE", "LA HISTORIA AÚN NO SE PUEDE JUGAR EN LÍNEA", "A HISTÓRIA AINDA NÃO SE PODE JOGAR ONLINE"], ["THAT SIDE IS NOT IN THIS GAME", "CE CAMP N'EST PAS DANS CETTE PARTIE", "QUEL LATO NON È IN QUESTA PARTITA", "DIESE SEITE IST NICHT IM SPIEL", "ESE BANDO NO ESTÁ EN ESTA PARTIDA", "ESSE LADO NÃO ESTÁ NESTE JOGO"], ["THAT SIDE IS FULL", "CE CAMP EST COMPLET", "QUEL LATO È PIENO", "DIESE SEITE IST VOLL", "ESE BANDO ESTÁ LLENO", "ESSE LADO ESTÁ CHEIO"], ["YOUR TEAMMATE IS IN IT: WATCHING", "VOTRE COÉQUIPIER EST DEDANS : VOUS REGARDEZ", "C'È IL TUO COMPAGNO: GUARDI", "DEIN MITSPIELER SITZT DRIN: DU SCHAUST ZU", "TU COMPAÑERO ESTÁ DENTRO: MIRANDO", "O TEU COLEGA ESTÁ LÁ: A VER"], ["WATCHING YOUR TEAMMATE - PICK A FREE VEHICLE TO PLAY", "VOUS REGARDEZ VOTRE COÉQUIPIER - CHOISISSEZ UN VÉHICULE LIBRE", "GUARDI IL TUO COMPAGNO - SCEGLI UN VEICOLO LIBERO", "DU SIEHST DEINEM MITSPIELER ZU - WÄHLE EIN FREIES FAHRZEUG", "MIRAS A TU COMPAÑERO - ELIGE UN VEHÍCULO LIBRE", "A VER O TEU COLEGA - ESCOLHE UM VEÍCULO LIVRE"], ["PRESS A", "APPUYEZ SUR A", "PREMI A", "DRÜCKE A", "PULSA A", "PRIME A"], ["TO WATCH", "POUR REGARDER", "PER GUARDARE", "ZUM ZUSEHEN", "PARA MIRAR", "PARA VER"], ["FOR NEXT", "POUR LE SUIVANT", "PER IL PROSSIMO", "FÜR DAS NÄCHSTE", "PARA EL SIGUIENTE", "PARA O SEGUINTE"], ["TO BOARD", "POUR MONTER", "PER SALIRE", "ZUM EINSTEIGEN", "PARA SUBIR", "PARA ENTRAR"], ["TO SWITCH", "POUR CHANGER", "PER CAMBIARE", "ZUM WECHSELN", "PARA CAMBIAR", "PARA TROCAR"], ["TO LAUNCH", "POUR LANCER", "PER LANCIARE", "ZUM STARTEN", "PARA LANZAR", "PARA LANÇAR"], ["VOLUME", "VOLUME", "VOLUME", "LAUTSTÄRKE", "VOLUMEN", "VOLUME"], ["MUTE", "MUET", "MUTO", "STUMM", "SILENCIO", "SEM SOM"], ["CONTROLS", "COMMANDES", "COMANDI", "STEUERUNG", "CONTROLES", "CONTROLOS"], ["STATS: ON", "STATS : OUI", "STATISTICHE: SÌ", "STATISTIK: AN", "ESTADÍSTICAS: SÍ", "ESTATÍSTICAS: SIM"], ["STATS: OFF", "STATS : NON", "STATISTICHE: NO", "STATISTIK: AUS", "ESTADÍSTICAS: NO", "ESTATÍSTICAS: NÃO"], ["EASY", "FACILE", "FACILE", "LEICHT", "FÁCIL", "FÁCIL"], ["MEDIUM", "MOYEN", "MEDIO", "MITTEL", "MEDIO", "MÉDIO"], ["HARD", "DIFFICILE", "DIFFICILE", "SCHWER", "DIFÍCIL", "DIFÍCIL"], ["LANGUAGE", "LANGUE", "LINGUA", "SPRACHE", "IDIOMA", "IDIOMA"], ["BACK", "RETOUR", "INDIETRO", "ZURÜCK", "VOLVER", "VOLTAR"], ["CLOSE", "FERMER", "CHIUDI", "SCHLIESSEN", "CERRAR", "FECHAR"], ["REPORT", "SIGNALER", "SEGNALA", "MELDEN", "INFORMAR", "REPORTAR"], ["SAVING...", "ENREGISTREMENT...", "SALVATAGGIO...", "SPEICHERN...", "GUARDANDO...", "A GUARDAR..."], ["INPUT", "ENTRÉE", "INGRESSO", "EINGABE", "ENTRADA", "ENTRADA"], ["PLAYSTATION CONTROLLER", "MANETTE PLAYSTATION", "CONTROLLER PLAYSTATION", "PLAYSTATION-CONTROLLER", "MANDO DE PLAYSTATION", "COMANDO PLAYSTATION"], ["XBOX CONTROLLER", "MANETTE XBOX", "CONTROLLER XBOX", "XBOX-CONTROLLER", "MANDO DE XBOX", "COMANDO XBOX"], ["MOUSE AND TOUCH", "SOURIS ET TACTILE", "MOUSE E TOUCH", "MAUS UND TOUCH", "RATÓN Y TÁCTIL", "RATO E TÁTIL"], ["MENU", "MENU", "MENU", "MENÜ", "MENÚ", "MENU"], ["SPACE", "ESPACE", "SPAZIO", "LEERTASTE", "ESPACIO", "ESPAÇO"], ["ENTER", "ENTRÉE", "INVIO", "EINGABE", "INTRO", "ENTER"], ["RIGHT SHIFT", "MAJ DROITE", "SHIFT DESTRO", "SHIFT RECHTS", "MAYÚS DERECHA", "SHIFT DIREITO"], ["/ OR CTRL", "/ OU CTRL", "/ O CTRL", "/ ODER STRG", "/ O CTRL", "/ OU CTRL"], ["TOWER SHIP SUB PLANE", "TOUR NAVIRE SOUS-MARIN AVION", "TORRE NAVE SOTTOMARINO AEREO", "TURM SCHIFF U-BOOT FLUGZEUG", "TORRE BARCO SUBMARINO AVIÓN", "TORRE NAVIO SUBMARINO AVIÃO"], ["OPEN WORLD: TANK HELICOPTER", "MONDE OUVERT : CHAR HÉLICOPTÈRE", "MONDO APERTO: CARRO ARMATO ELICOTTERO", "OFFENE WELT: PANZER HUBSCHRAUBER", "MUNDO ABIERTO: TANQUE HELICÓPTERO", "MUNDO ABERTO: TANQUE HELICÓPTERO"], ["OPEN WORLD: ARMY - CIVILIAN", "MONDE OUVERT : ARMÉE - CIVIL", "MONDO APERTO: ESERCITO - CIVILE", "OFFENE WELT: ARMEE - ZIVIL", "MUNDO ABIERTO: EJÉRCITO - CIVIL", "MUNDO ABERTO: EXÉRCITO - CIVIL"], ["DRIVE LEFT - RIGHT: HOLD - LET GO TO STOP", "CONDUIRE GAUCHE - DROITE : MAINTENIR - RELÂCHER POUR S'ARRÊTER", "GUIDA SINISTRA - DESTRA: TIENI - RILASCIA PER FERMARTI", "FAHREN LINKS - RECHTS: HALTEN - LOSLASSEN ZUM ANHALTEN", "CONDUCIR IZQUIERDA - DERECHA: MANTÉN - SUELTA PARA PARAR", "CONDUZIR ESQUERDA - DIREITA: MANTÉM - LARGA PARA PARAR"], ["LEFT RIGHT", "GAUCHE DROITE", "SINISTRA DESTRA", "LINKS RECHTS", "IZQUIERDA DERECHA", "ESQUERDA DIREITA"], ["PLANE: STOP - IT CIRCLES", "AVION : STOP - IL TOURNE EN ROND", "AEREO: STOP - GIRA IN TONDO", "FLUGZEUG: STOP - ES KREIST", "AVIÓN: STOP - DA VUELTAS", "AVIÃO: STOP - ANDA ÀS VOLTAS"], ["PLANE: STOP", "AVION : STOP", "AEREO: STOP", "FLUGZEUG: STOP", "AVIÓN: STOP", "AVIÃO: STOP"], ["AIM - CLIMB - DIVE", "VISER - MONTER - PIQUER", "MIRA - SALI - PICCHIATA", "ZIELEN - STEIGEN - SINKEN", "APUNTAR - SUBIR - PICAR", "APONTAR - SUBIR - PICAR"], ["UP DOWN", "HAUT BAS", "SU GIÙ", "HOCH RUNTER", "ARRIBA ABAJO", "CIMA BAIXO"], ["ZOOM OUT - IN", "ZOOM ARRIÈRE - AVANT", "ZOOM INDIETRO - AVANTI", "ZOOM RAUS - REIN", "ALEJAR - ACERCAR", "AFASTAR - APROXIMAR"], ["POWER - HELICOPTER GUN UP DOWN", "PUISSANCE - CANON D'HÉLICOPTÈRE HAUT BAS", "POTENZA - CANNONE ELICOTTERO SU GIÙ", "KRAFT - HUBSCHRAUBERKANONE HOCH RUNTER", "POTENCIA - CAÑÓN DEL HELICÓPTERO ARRIBA ABAJO", "POTÊNCIA - CANHÃO DO HELICÓPTERO CIMA BAIXO"], ["FIRE - MISSILE - TORPEDO", "TIR - MISSILE - TORPILLE", "FUOCO - MISSILE - SILURO", "FEUER - RAKETE - TORPEDO", "FUEGO - MISIL - TORPEDO", "FOGO - MÍSSIL - TORPEDO"], ["DEPTH CHARGE - BOMB - UP TORPEDO - MAGNET", "GRENADE ANTI-SOUS-MARINE - BOMBE - TORPILLE VERS LE HAUT - AIMANT", "CARICA DI PROFONDITÀ - BOMBA - SILURO IN SU - MAGNETE", "WASSERBOMBE - BOMBE - TORPEDO NACH OBEN - MAGNET", "CARGA DE PROFUNDIDAD - BOMBA - TORPEDO HACIA ARRIBA - IMÁN", "CARGA DE PROFUNDIDADE - BOMBA - TORPEDO PARA CIMA - ÍMAN"], ["MACHINE GUN - MINE", "MITRAILLEUSE - MINE", "MITRAGLIATRICE - MINA", "MASCHINENGEWEHR - MINE", "AMETRALLADORA - MINA", "METRALHADORA - MINA"], ["SMOKE SCREEN", "ÉCRAN DE FUMÉE", "CORTINA DI FUMO", "NEBELWAND", "CORTINA DE HUMO", "CORTINA DE FUMO"], ["A CIVILIAN VEHICLE: ITS BUTTONS 1 2 3 4", "UN VÉHICULE CIVIL : SES BOUTONS 1 2 3 4", "UN VEICOLO CIVILE: I SUOI PULSANTI 1 2 3 4", "EIN ZIVILFAHRZEUG: SEINE KNÖPFE 1 2 3 4", "UN VEHÍCULO CIVIL: SUS BOTONES 1 2 3 4", "UM VEÍCULO CIVIL: OS SEUS BOTÕES 1 2 3 4"], ["ALONE AT THE KEYBOARD: EITHER SET WORKS  -  OPEN WORLD: THE NUMBERS PICK ALONG THE ROW OF VEHICLE BUTTONS", "SEUL AU CLAVIER : LES DEUX JEUX DE TOUCHES MARCHENT  -  MONDE OUVERT : LES CHIFFRES CHOISISSENT DANS LA RANGÉE DE VÉHICULES", "DA SOLO ALLA TASTIERA: VANNO BENE ENTRAMBI  -  MONDO APERTO: I NUMERI SCELGONO NELLA FILA DEI VEICOLI", "ALLEIN AN DER TASTATUR: BEIDE TASTENSÄTZE GEHEN  -  OFFENE WELT: DIE ZAHLEN WÄHLEN IN DER FAHRZEUGREIHE", "SOLO EN EL TECLADO: SIRVEN AMBOS  -  MUNDO ABIERTO: LOS NÚMEROS ELIGEN EN LA FILA DE VEHÍCULOS", "SOZINHO NO TECLADO: SERVEM OS DOIS  -  MUNDO ABERTO: OS NÚMEROS ESCOLHEM NA FILA DE VEÍCULOS"], ["PHOTO MODE: ARROWS LOOK, + - ZOOM, ESC BACK  -  MOUSE OR TOUCH: SEE THE TOUCH PAGE", "MODE PHOTO : FLÈCHES POUR REGARDER, + - ZOOM, ESC RETOUR  -  SOURIS OU TACTILE : VOIR LA PAGE TACTILE", "MODALITÀ FOTO: FRECCE GUARDA, + - ZOOM, ESC INDIETRO  -  MOUSE O TOUCH: VEDI LA PAGINA TOUCH", "FOTOMODUS: PFEILE SCHAUEN, + - ZOOM, ESC ZURÜCK  -  MAUS ODER TOUCH: SIEHE TOUCH-SEITE", "MODO FOTO: FLECHAS MIRAN, + - ZOOM, ESC VOLVER  -  RATÓN O TÁCTIL: VER LA PÁGINA TÁCTIL", "MODO FOTO: SETAS OLHAM, + - ZOOM, ESC VOLTAR  -  RATO OU TÁTIL: VER A PÁGINA TÁTIL"], ["CANNON - MISSILE - UP TORPEDO", "CANON - MISSILE - TORPILLE VERS LE HAUT", "CANNONE - MISSILE - SILURO IN SU", "KANONE - RAKETE - TORPEDO NACH OBEN", "CAÑÓN - MISIL - TORPEDO HACIA ARRIBA", "CANHÃO - MÍSSIL - TORPEDO PARA CIMA"], ["CANNON - MISSILE", "CANON - MISSILE", "CANNONE - MISSILE", "KANONE - RAKETE", "CAÑÓN - MISIL", "CANHÃO - MÍSSIL"], ["PREVIOUS VEHICLE", "VÉHICULE PRÉCÉDENT", "VEICOLO PRECEDENTE", "VORHERIGES FAHRZEUG", "VEHÍCULO ANTERIOR", "VEÍCULO ANTERIOR"], ["NEXT VEHICLE", "VÉHICULE SUIVANT", "VEICOLO SUCCESSIVO", "NÄCHSTES FAHRZEUG", "VEHÍCULO SIGUIENTE", "VEÍCULO SEGUINTE"], ["ZOOM: UP IN - DOWN OUT", "ZOOM : HAUT AVANT - BAS ARRIÈRE", "ZOOM: SU AVANTI - GIÙ INDIETRO", "ZOOM: HOCH REIN - RUNTER RAUS", "ZOOM: ARRIBA ACERCA - ABAJO ALEJA", "ZOOM: CIMA APROXIMA - BAIXO AFASTA"], ["HOLD TO DRIVE - CLIMB - DIVE", "MAINTENIR POUR CONDUIRE - MONTER - PIQUER", "TIENI PER GUIDARE - SALIRE - PICCHIARE", "HALTEN ZUM FAHREN - STEIGEN - SINKEN", "MANTÉN PARA CONDUCIR - SUBIR - PICAR", "MANTÉM PARA CONDUZIR - SUBIR - PICAR"], ["HOLD TO DRIVE - CLIMB", "MAINTENIR POUR CONDUIRE - MONTER", "TIENI PER GUIDARE - SALIRE", "HALTEN ZUM FAHREN - STEIGEN", "MANTÉN PARA CONDUCIR - SUBIR", "MANTÉM PARA CONDUZIR - SUBIR"], ["MACHINE GUN", "MITRAILLEUSE", "MITRAGLIATRICE", "MASCHINENGEWEHR", "AMETRALLADORA", "METRALHADORA"], ["DEPTH CHARGE - MINE - BOMB - MAGNET - TANK SMOKE", "GRENADE - MINE - BOMBE - AIMANT - FUMÉE DU CHAR", "CARICA - MINA - BOMBA - MAGNETE - FUMO DEL CARRO", "WASSERBOMBE - MINE - BOMBE - MAGNET - PANZERNEBEL", "CARGA - MINA - BOMBA - IMÁN - HUMO DEL TANQUE", "CARGA - MINA - BOMBA - ÍMAN - FUMO DO TANQUE"], ["DEPTH CHARGE - MINE - BOMB - MAGNET", "GRENADE - MINE - BOMBE - AIMANT", "CARICA - MINA - BOMBA - MAGNETE", "WASSERBOMBE - MINE - BOMBE - MAGNET", "CARGA - MINA - BOMBA - IMÁN", "CARGA - MINA - BOMBA - ÍMAN"], ["DEPTH CHARGE - MINE - BOMB", "GRENADE - MINE - BOMBE", "CARICA - MINA - BOMBA", "WASSERBOMBE - MINE - BOMBE", "CARGA - MINA - BOMBA", "CARGA - MINA - BOMBA"], ["DEPTH CHARGE - MINE", "GRENADE ANTI-SOUS-MARINE - MINE", "CARICA DI PROFONDITÀ - MINA", "WASSERBOMBE - MINE", "CARGA DE PROFUNDIDAD - MINA", "CARGA DE PROFUNDIDADE - MINA"], ["BOMB - MAGNET", "BOMBE - AIMANT", "BOMBA - MAGNETE", "BOMBE - MAGNET", "BOMBA - IMÁN", "BOMBA - ÍMAN"], ["BOMB - MAGNET - TANK SMOKE", "BOMBE - AIMANT - FUMÉE DU CHAR", "BOMBA - MAGNETE - FUMO DEL CARRO", "BOMBE - MAGNET - PANZERNEBEL", "BOMBA - IMÁN - HUMO DEL TANQUE", "BOMBA - ÍMAN - FUMO DO TANQUE"], ["TANK SMOKE", "FUMÉE DU CHAR", "FUMO DEL CARRO", "PANZERNEBEL", "HUMO DEL TANQUE", "FUMO DO TANQUE"], ["MACHINE GUN - TORPEDO - LAUNCH", "MITRAILLEUSE - TORPILLE - LANCER", "MITRAGLIATRICE - SILURO - LANCIA", "MASCHINENGEWEHR - TORPEDO - STARTEN", "AMETRALLADORA - TORPEDO - LANZAR", "METRALHADORA - TORPEDO - LANÇAR"], ["MACHINE GUN - TORPEDO", "MITRAILLEUSE - TORPILLE", "MITRAGLIATRICE - SILURO", "MASCHINENGEWEHR - TORPEDO", "AMETRALLADORA - TORPEDO", "METRALHADORA - TORPEDO"], ["ANGLE AND POWER", "ANGLE ET PUISSANCE", "ANGOLO E POTENZA", "WINKEL UND KRAFT", "ÁNGULO Y POTENCIA", "ÂNGULO E POTÊNCIA"], ["D-PAD", "CROIX", "CROCE", "STEUERKREUZ", "CRUCETA", "CRUZETA"], ["LEFT STICK", "STICK GAUCHE", "LEVETTA SINISTRA", "LINKER STICK", "PALANCA IZQUIERDA", "ANALÓGICO ESQUERDO"], ["RIGHT STICK", "STICK DROIT", "LEVETTA DESTRA", "RECHTER STICK", "PALANCA DERECHA", "ANALÓGICO DIREITO"], ["PRESS IT IN", "ENFONCEZ-LE", "PREMILA", "REINDRÜCKEN", "PÚLSALA", "CARREGA NELE"], ["TRIANGLE", "TRIANGLE", "TRIANGOLO", "DREIECK", "TRIÁNGULO", "TRIÂNGULO"], ["CIRCLE", "ROND", "CERCHIO", "KREIS", "CÍRCULO", "CÍRCULO"], ["SQUARE", "CARRÉ", "QUADRATO", "QUADRAT", "CUADRADO", "QUADRADO"], ["CROSS", "CROIX", "CROCE", "KREUZ", "EQUIS", "CRUZ"], ["L1 R1 PICK A VEHICLE - CROSS LAUNCHES IT - IN A CIVILIAN ONE CROSS CIRCLE SQUARE TRIANGLE ARE ITS BUTTONS", "L1 R1 CHOISIT UN VÉHICULE - CROIX LE LANCE - DANS UN CIVIL CROIX ROND CARRÉ TRIANGLE SONT SES BOUTONS", "L1 R1 SCEGLIE UN VEICOLO - CROCE LO LANCIA - IN UNO CIVILE CROCE CERCHIO QUADRATO TRIANGOLO SONO I SUOI PULSANTI", "L1 R1 WÄHLEN EIN FAHRZEUG - KREUZ STARTET ES - IN EINEM ZIVILEN SIND KREUZ KREIS QUADRAT DREIECK SEINE KNÖPFE", "L1 R1 ELIGEN UN VEHÍCULO - EQUIS LO LANZA - EN UNO CIVIL EQUIS CÍRCULO CUADRADO TRIÁNGULO SON SUS BOTONES", "L1 R1 ESCOLHEM UM VEÍCULO - CRUZ LANÇA-O - NUM CIVIL CRUZ CÍRCULO QUADRADO TRIÂNGULO SÃO OS SEUS BOTÕES"], ["IN THE TOWER BOTH STICKS AIM - NOT DRIVING: THE LEFT STICK LOOKS AROUND", "DANS LA TOUR LES DEUX STICKS VISENT - SANS CONDUIRE : LE STICK GAUCHE REGARDE AUTOUR", "NELLA TORRE ENTRAMBE LE LEVETTE MIRANO - SENZA GUIDARE: LA LEVETTA SINISTRA GUARDA INTORNO", "IM TURM ZIELEN BEIDE STICKS - OHNE FAHREN: DER LINKE STICK SCHAUT UMHER", "EN LA TORRE AMBAS PALANCAS APUNTAN - SIN CONDUCIR: LA PALANCA IZQUIERDA MIRA ALREDEDOR", "NA TORRE OS DOIS ANALÓGICOS APONTAM - SEM CONDUZIR: O ESQUERDO OLHA À VOLTA"], ["LB RB PICK A VEHICLE - A LAUNCHES IT - IN A CIVILIAN ONE A B X Y ARE ITS BUTTONS", "LB RB CHOISIT UN VÉHICULE - A LE LANCE - DANS UN CIVIL A B X Y SONT SES BOUTONS", "LB RB SCEGLIE UN VEICOLO - A LO LANCIA - IN UNO CIVILE A B X Y SONO I SUOI PULSANTI", "LB RB WÄHLEN EIN FAHRZEUG - A STARTET ES - IN EINEM ZIVILEN SIND A B X Y SEINE KNÖPFE", "LB RB ELIGEN UN VEHÍCULO - A LO LANZA - EN UNO CIVIL A B X Y SON SUS BOTONES", "LB RB ESCOLHEM UM VEÍCULO - A LANÇA-O - NUM CIVIL A B X Y SÃO OS SEUS BOTÕES"], ["DRIVE LEFT - RIGHT", "CONDUIRE GAUCHE - DROITE", "GUIDA SINISTRA - DESTRA", "FAHREN LINKS - RECHTS", "CONDUCIR IZQUIERDA - DERECHA", "CONDUZIR ESQUERDA - DIREITA"], ["HOLD AN ARROW BUTTON - LET GO TO STOP", "MAINTENEZ UNE FLÈCHE - RELÂCHEZ POUR VOUS ARRÊTER", "TIENI UNA FRECCIA - RILASCIA PER FERMARTI", "PFEILKNOPF HALTEN - LOSLASSEN ZUM ANHALTEN", "MANTÉN UNA FLECHA - SUELTA PARA PARAR", "MANTÉM UMA SETA - LARGA PARA PARAR"], ["THE STOP BUTTON - IT CIRCLES", "LE BOUTON STOP - IL TOURNE EN ROND", "IL PULSANTE STOP - GIRA IN TONDO", "DER STOP-KNOPF - ES KREIST", "EL BOTÓN STOP - DA VUELTAS", "O BOTÃO STOP - ANDA ÀS VOLTAS"], ["CLIMB - DIVE", "MONTER - PIQUER", "SALIRE - PICCHIARE", "STEIGEN - SINKEN", "SUBIR - PICAR", "SUBIR - PICAR"], ["THE UP AND DOWN BUTTONS", "LES BOUTONS HAUT ET BAS", "I PULSANTI SU E GIÙ", "DIE KNÖPFE HOCH UND RUNTER", "LOS BOTONES ARRIBA Y ABAJO", "OS BOTÕES CIMA E BAIXO"], ["FIRE", "TIR", "FUOCO", "FEUER", "FUEGO", "FOGO"], ["THE WEAPON BUTTONS - EACH VEHICLE ITS OWN", "LES BOUTONS D'ARME - PROPRES À CHAQUE VÉHICULE", "I PULSANTI DELLE ARMI - OGNI VEICOLO I SUOI", "DIE WAFFENKNÖPFE - JEDES FAHRZEUG SEINE EIGENEN", "LOS BOTONES DE ARMA - CADA VEHÍCULO LOS SUYOS", "OS BOTÕES DAS ARMAS - CADA VEÍCULO OS SEUS"], ["AIM", "VISER", "MIRA", "ZIELEN", "APUNTAR", "APONTAR"], ["SLIDE THE ANGLE TAPE", "GLISSEZ LA RÈGLE D'ANGLE", "SCORRI IL NASTRO DELL'ANGOLO", "DAS WINKELBAND SCHIEBEN", "DESLIZA LA CINTA DEL ÁNGULO", "DESLIZA A FITA DO ÂNGULO"], ["POWER", "PUISSANCE", "POTENZA", "KRAFT", "POTENCIA", "POTÊNCIA"], ["DRAG THE POWER SLIDER", "FAITES GLISSER LA PUISSANCE", "TRASCINA IL CURSORE DELLA POTENZA", "DEN KRAFTREGLER ZIEHEN", "ARRASTRA EL CONTROL DE POTENCIA", "ARRASTA O CONTROLO DE POTÊNCIA"], ["TAKE A VEHICLE", "PRENDRE UN VÉHICULE", "PRENDI UN VEICOLO", "EIN FAHRZEUG NEHMEN", "TOMAR UN VEHÍCULO", "PEGAR NUM VEÍCULO"], ["TAP IT IN THE ROW OF VEHICLE BUTTONS", "TOUCHEZ-LE DANS LA RANGÉE DE VÉHICULES", "TOCCALO NELLA FILA DEI VEICOLI", "IN DER FAHRZEUGREIHE ANTIPPEN", "TÓCALO EN LA FILA DE VEHÍCULOS", "TOCA-LHE NA FILA DE VEÍCULOS"], ["ARMY - CIVILIAN", "ARMÉE - CIVIL", "ESERCITO - CIVILE", "ARMEE - ZIVIL", "EJÉRCITO - CIVIL", "EXÉRCITO - CIVIL"], ["OPEN WORLD: THE LAST BUTTON OF THAT ROW", "MONDE OUVERT : LE DERNIER BOUTON DE LA RANGÉE", "MONDO APERTO: L'ULTIMO PULSANTE DELLA FILA", "OFFENE WELT: DER LETZTE KNOPF DER REIHE", "MUNDO ABIERTO: EL ÚLTIMO BOTÓN DE LA FILA", "MUNDO ABERTO: O ÚLTIMO BOTÃO DA FILA"], ["SEND IT HOME", "LE RENVOYER À LA BASE", "MANDALO A CASA", "NACH HAUSE SCHICKEN", "MANDARLO A CASA", "MANDÁ-LO PARA CASA"], ["THE HOME BUTTON", "LE BOUTON MAISON", "IL PULSANTE CASA", "DER HAUS-KNOPF", "EL BOTÓN CASA", "O BOTÃO CASA"], ["LOOK AROUND", "REGARDER AUTOUR", "GUARDARSI INTORNO", "UMSCHAUEN", "MIRAR ALREDEDOR", "OLHAR À VOLTA"], ["NOT DRIVING: DRAG THE WORLD - OR HOLD THE RIGHT MOUSE BUTTON", "SANS CONDUIRE : FAITES GLISSER LE MONDE - OU MAINTENEZ LE CLIC DROIT", "SENZA GUIDARE: TRASCINA IL MONDO - O TIENI IL TASTO DESTRO", "OHNE FAHREN: DIE WELT ZIEHEN - ODER RECHTE MAUSTASTE HALTEN", "SIN CONDUCIR: ARRASTRA EL MUNDO - O MANTÉN EL BOTÓN DERECHO", "SEM CONDUZIR: ARRASTA O MUNDO - OU MANTÉM O BOTÃO DIREITO"], ["ZOOM", "ZOOM", "ZOOM", "ZOOM", "ZOOM", "ZOOM"], ["PINCH - MOUSE WHEEL - DOUBLE TAP: BACK TO NORMAL", "PINCER - MOLETTE - DOUBLE TOUCHE : RETOUR À LA NORMALE", "PIZZICA - ROTELLINA - DOPPIO TOCCO: TORNA NORMALE", "ZWICKEN - MAUSRAD - DOPPELTIPPEN: ZURÜCK ZU NORMAL", "PELLIZCAR - RUEDA - DOBLE TOQUE: VOLVER A NORMAL", "BELISCAR - RODA - TOQUE DUPLO: VOLTAR AO NORMAL"], ["TIME AND WEATHER", "HEURE ET MÉTÉO", "ORA E METEO", "ZEIT UND WETTER", "HORA Y TIEMPO", "HORA E TEMPO"], ["THE WORLD BUTTON: SLIDERS - THE WORLD HOLDS STILL", "LE BOUTON MONDE : CURSEURS - LE MONDE S'ARRÊTE", "IL PULSANTE MONDO: CURSORI - IL MONDO SI FERMA", "DER WELT-KNOPF: REGLER - DIE WELT HÄLT AN", "EL BOTÓN MUNDO: CONTROLES - EL MUNDO SE DETIENE", "O BOTÃO MUNDO: CONTROLOS - O MUNDO PARA"], ["PHOTO MODE", "MODE PHOTO", "MODALITÀ FOTO", "FOTOMODUS", "MODO FOTO", "MODO FOTO"], ["THE EYE BESIDE THE WORLD BUTTON", "L'OEIL À CÔTÉ DU BOUTON MONDE", "L'OCCHIO ACCANTO AL PULSANTE MONDO", "DAS AUGE NEBEN DEM WELT-KNOPF", "EL OJO JUNTO AL BOTÓN MUNDO", "O OLHO AO LADO DO BOTÃO MUNDO"], ["THE MENU BUTTON", "LE BOUTON MENU", "IL PULSANTE MENU", "DER MENÜ-KNOPF", "EL BOTÓN MENÚ", "O BOTÃO MENU"], ["HIT WHAT YOU CLICK", "TOUCHER CE QUE VOUS CLIQUEZ", "COLPISCI CIÒ CHE CLICCHI", "TREFFEN, WAS DU KLICKST", "ACERTAR LO QUE PULSAS", "ACERTAR NO QUE CLICAS"], ["OPEN WORLD: CLICK IT", "MONDE OUVERT : CLIQUEZ DESSUS", "MONDO APERTO: CLICCALO", "OFFENE WELT: ANKLICKEN", "MUNDO ABIERTO: PÚLSALO", "MUNDO ABERTO: CLICA NELE"], ["TAKE A CIVILIAN", "PRENDRE UN CIVIL", "PRENDI UN CIVILE", "EIN ZIVILES NEHMEN", "TOMAR UNO CIVIL", "PEGAR NUM CIVIL"], ["OPEN WORLD: SHIFT + CLICK IT", "MONDE OUVERT : MAJ + CLIC DESSUS", "MONDO APERTO: SHIFT + CLIC", "OFFENE WELT: SHIFT + KLICK", "MUNDO ABIERTO: MAYÚS + CLIC", "MUNDO ABERTO: SHIFT + CLIQUE"], ["OFF LINE THE CLICKS WORK ON THE WORLD ONLY WHEN NOTHING ON THE SCREEN IS UNDER THE MOUSE", "HORS LIGNE LES CLICS AGISSENT SUR LE MONDE SEULEMENT SI RIEN À L'ÉCRAN N'EST SOUS LA SOURIS", "OFFLINE I CLIC AGISCONO SUL MONDO SOLO SE NIENTE SULLO SCHERMO È SOTTO IL MOUSE", "OFFLINE WIRKEN KLICKS NUR AUF DIE WELT, WENN NICHTS AM BILDSCHIRM UNTER DER MAUS IST", "SIN CONEXIÓN LOS CLICS ACTÚAN EN EL MUNDO SOLO SI NADA EN PANTALLA ESTÁ BAJO EL RATÓN", "OFFLINE OS CLIQUES SÓ AGEM NO MUNDO SE NADA NO ECRÃ ESTIVER SOB O RATO"], ["TIME", "HEURE", "ORA", "ZEIT", "HORA", "HORA"], ["SKY", "CIEL", "CIELO", "HIMMEL", "CIELO", "CÉU"], ["CLOUDS", "NUAGES", "NUVOLE", "WOLKEN", "NUBES", "NUVENS"], ["FOG", "BROUILLARD", "NEBBIA", "NEBEL", "NIEBLA", "NEVOEIRO"], ["NONE", "AUCUN", "NESSUNO", "KEINER", "NINGUNO", "NENHUM"], ["RAIN", "PLUIE", "PIOGGIA", "REGEN", "LLUVIA", "CHUVA"], ["SEA", "MER", "MARE", "MEER", "MAR", "MAR"], ["CALM", "CALME", "CALMO", "RUHIG", "CALMA", "CALMO"], ["WIND", "VENT", "VENTO", "WIND", "VIENTO", "VENTO"], ["CLEAR", "DÉGAGÉ", "SERENO", "KLAR", "DESPEJADO", "LIMPO"], ["CLOUDY", "NUAGEUX", "NUVOLOSO", "BEWÖLKT", "NUBLADO", "NUBLADO"], ["OVERCAST", "COUVERT", "COPERTO", "BEDECKT", "CUBIERTO", "ENCOBERTO"], ["MIST", "BRUME", "FOSCHIA", "DUNST", "NEBLINA", "NEBLINA"], ["THICK", "ÉPAIS", "FITTA", "DICHT", "DENSA", "CERRADO"], ["DRIZZLE", "BRUINE", "PIOVIGGINE", "NIESELN", "LLOVIZNA", "CHUVISCO"], ["DOWNPOUR", "AVERSE", "ACQUAZZONE", "WOLKENBRUCH", "AGUACERO", "AGUACEIRO"], ["STORM", "TEMPÊTE", "TEMPESTA", "STURM", "TORMENTA", "TEMPESTADE"], ["THUNDER", "ORAGE", "TUONI", "GEWITTER", "TRUENOS", "TROVOADA"], ["ROUGH", "AGITÉE", "MOSSO", "RAU", "AGITADO", "AGITADO"], ["ON", "OUI", "SÌ", "AN", "SÍ", "SIM"], ["OFF", "NON", "NO", "AUS", "NO", "NÃO"], ["STORY - PICK A SLOT", "HISTOIRE - CHOISISSEZ UN EMPLACEMENT", "STORIA - SCEGLI UNO SLOT", "GESCHICHTE - WÄHLE EINEN PLATZ", "HISTORIA - ELIGE UNA RANURA", "HISTÓRIA - ESCOLHE UM ESPAÇO"], ["EMPTY", "VIDE", "VUOTO", "LEER", "VACÍO", "VAZIO"], ["NEW", "NOUVEAU", "NUOVO", "NEU", "NUEVO", "NOVO"], ["LOAD", "CHARGER", "CARICA", "LADEN", "CARGAR", "CARREGAR"], ["SAVED", "ENREGISTRÉ", "SALVATO", "GESPEICHERT", "GUARDADO", "GUARDADO"], ["SAVED *", "ENREGISTRÉ *", "SALVATO *", "GESPEICHERT *", "GUARDADO *", "GUARDADO *"], ["COULD NOT SAVE", "ENREGISTREMENT IMPOSSIBLE", "IMPOSSIBILE SALVARE", "SPEICHERN FEHLGESCHLAGEN", "NO SE PUDO GUARDAR", "NÃO FOI POSSÍVEL GUARDAR"], ["COULD NOT LOAD", "CHARGEMENT IMPOSSIBLE", "IMPOSSIBILE CARICARE", "LADEN FEHLGESCHLAGEN", "NO SE PUDO CARGAR", "NÃO FOI POSSÍVEL CARREGAR"], ["NOTHING SAVED IN SLOT #", "RIEN D'ENREGISTRÉ DANS L'EMPLACEMENT #", "NIENTE SALVATO NELLO SLOT #", "NICHTS GESPEICHERT IN PLATZ #", "NADA GUARDADO EN LA RANURA #", "NADA GUARDADO NO ESPAÇO #"], ["SLOT #", "EMPLACEMENT #", "SLOT #", "PLATZ #", "RANURA #", "ESPAÇO #"], ["ARE YOU SURE?", "ÊTES-VOUS SÛR ?", "SEI SICURO?", "BIST DU SICHER?", "ESTÁS SEGURO?", "TENS A CERTEZA?"], ["YES", "OUI", "SÌ", "JA", "SÍ", "SIM"], ["NO", "NON", "NO", "NEIN", "NO", "NÃO"], ["DAY #", "JOUR #", "GIORNO #", "TAG #", "DÍA #", "DIA #"], ["HOME", "MAISON", "CASA", "ZUHAUSE", "CASA", "CASA"], ["VEHICLE", "VÉHICULE", "VEICOLO", "FAHRZEUG", "VEHÍCULO", "VEÍCULO"], ["YOURS", "À VOUS", "TUO", "DEINS", "TUYO", "TEU"], ["SLEEPING...", "SOMMEIL...", "DORMI...", "SCHLAFEN...", "DURMIENDO...", "A DORMIR..."], ["DAMAGED", "ENDOMMAGÉ", "DANNEGGIATO", "BESCHÄDIGT", "DAÑADO", "DANIFICADO"], ["FUEL", "CARBURANT", "CARBURANTE", "TREIBSTOFF", "COMBUSTIBLE", "COMBUSTÍVEL"], ["GIVE", "DONNER", "DAI", "GEBEN", "DAR", "DAR"], ["NO FUNDS", "PAS ASSEZ D'ARGENT", "FONDI INSUFFICIENTI", "NICHT GENUG GELD", "SIN FONDOS", "SEM FUNDOS"], ["BUY", "ACHETER", "COMPRA", "KAUFEN", "COMPRAR", "COMPRAR"], ["RENT", "LOUER", "NOLEGGIA", "MIETEN", "ALQUILAR", "ALUGAR"], ["# PER # M", "# PAR # M", "# OGNI # M", "# PRO # M", "# CADA # M", "# POR # M"], ["BUY *", "ACHETER *", "COMPRA *", "* KAUFEN", "COMPRAR *", "COMPRAR *"], ["# COIN", "# PIÈCES", "# MONETE", "# MÜNZEN", "# MONEDAS", "# MOEDAS"], ["* #", "* #", "* #", "* #", "* #", "* #"], ["# *", "# *", "# *", "# *", "# *", "# *"], ["TAP TO BUY FOR # COIN", "TOUCHEZ POUR ACHETER # PIÈCES", "TOCCA PER COMPRARE A # MONETE", "TIPPEN ZUM KAUFEN FÜR # MÜNZEN", "TOCA PARA COMPRAR POR # MONEDAS", "TOCA PARA COMPRAR POR # MOEDAS"], ["TAP TO SELL FOR # COIN", "TOUCHEZ POUR VENDRE # PIÈCES", "TOCCA PER VENDERE A # MONETE", "TIPPEN ZUM VERKAUFEN FÜR # MÜNZEN", "TOCA PARA VENDER POR # MONEDAS", "TOCA PARA VENDER POR # MOEDAS"], ["PRESS * TO BUY FOR # COIN", "APPUYEZ SUR * POUR ACHETER # PIÈCES", "PREMI * PER COMPRARE A # MONETE", "* DRÜCKEN ZUM KAUFEN FÜR # MÜNZEN", "PULSA * PARA COMPRAR POR # MONEDAS", "PRIME * PARA COMPRAR POR # MOEDAS"], ["PRESS * TO SELL FOR # COIN", "APPUYEZ SUR * POUR VENDRE # PIÈCES", "PREMI * PER VENDERE A # MONETE", "* DRÜCKEN ZUM VERKAUFEN FÜR # MÜNZEN", "PULSA * PARA VENDER POR # MONEDAS", "PRIME * PARA VENDER POR # MOEDAS"], ["TAP TO PURCHASE", "TOUCHEZ POUR ACHETER", "TOCCA PER ACQUISTARE", "TIPPEN ZUM KAUFEN", "TOCA PARA COMPRAR", "TOCA PARA COMPRAR"], ["PRESS A TO PURCHASE", "APPUYEZ SUR A POUR ACHETER", "PREMI A PER ACQUISTARE", "A DRÜCKEN ZUM KAUFEN", "PULSA A PARA COMPRAR", "PRIME A PARA COMPRAR"], ["PRESS SPACE TO PURCHASE", "APPUYEZ SUR ESPACE POUR ACHETER", "PREMI SPAZIO PER ACQUISTARE", "LEERTASTE ZUM KAUFEN", "PULSA ESPACIO PARA COMPRAR", "PRIME ESPAÇO PARA COMPRAR"], ["TAP TO TAKE OUT", "TOUCHEZ POUR SORTIR", "TOCCA PER USCIRE", "TIPPEN ZUM AUSFAHREN", "TOCA PARA SACARLO", "TOCA PARA SAIR"], ["PRESS * TO TAKE OUT", "APPUYEZ SUR * POUR SORTIR", "PREMI * PER USCIRE", "* DRÜCKEN ZUM AUSFAHREN", "PULSA * PARA SACARLO", "PRIME * PARA SAIR"], ["PRESS * TO PURCHASE", "APPUYEZ SUR * POUR ACHETER", "PREMI * PER ACQUISTARE", "* DRÜCKEN ZUM KAUFEN", "PULSA * PARA COMPRAR", "PRIME * PARA COMPRAR"], ["SELL GOODS", "VENDRE DES MARCHANDISES", "VENDI MERCI", "WAREN VERKAUFEN", "VENDER MERCANCÍA", "VENDER MERCADORIAS"], ["CLOSED: OPENS AT *", "FERMÉ : OUVRE À *", "CHIUSO: APRE ALLE *", "GESCHLOSSEN: ÖFFNET UM *", "CERRADO: ABRE A LAS *", "FECHADO: ABRE ÀS *"], ["COOK", "CUISINER", "CUCINA", "KOCHEN", "COCINAR", "COZINHAR"], ["LIGHT", "LUMIÈRE", "LUCE", "LICHT", "LUZ", "LUZ"], ["HORN", "KLAXON", "CLACSON", "HUPE", "CLAXON", "BUZINA"], ["BEAM", "FAISCEAU", "FASCIO", "LEUCHTFEUER", "HAZ", "FEIXE"], ["FOG HORN", "CORNE DE BRUME", "SIRENA DA NEBBIA", "NEBELHORN", "SIRENA DE NIEBLA", "BUZINA DE NEVOEIRO"], ["ANGLE LEFT", "ANGLE GAUCHE", "ANGOLO SINISTRA", "WINKEL LINKS", "ÁNGULO IZQUIERDA", "ÂNGULO ESQUERDA"], ["ANGLE RIGHT", "ANGLE DROITE", "ANGOLO DESTRA", "WINKEL RECHTS", "ÁNGULO DERECHA", "ÂNGULO DIREITA"], ["ANGLE FRONT", "ANGLE AVANT", "ANGOLO DAVANTI", "WINKEL VORNE", "ÁNGULO FRENTE", "ÂNGULO FRENTE"], ["FISH", "POISSON", "PESCE", "FISCH", "PESCADO", "PEIXE"], ["GOLD", "OR", "ORO", "GOLD", "ORO", "OURO"], ["MEDICINE", "MÉDICAMENTS", "MEDICINE", "MEDIZIN", "MEDICINA", "MEDICAMENTOS"], ["CARGO", "CARGAISON", "CARICO", "FRACHT", "CARGA", "CARGA"], ["MARKET", "MARCHÉ", "MERCATO", "MARKT", "MERCADO", "MERCADO"], ["HANGAR", "HANGAR", "HANGAR", "HANGAR", "HANGAR", "HANGAR"], ["RESIDENTIAL", "RÉSIDENTIEL", "RESIDENZIALE", "WOHNHAUS", "RESIDENCIAL", "RESIDENCIAL"], ["DOCK", "QUAI", "MOLO", "ANLEGESTEG", "MUELLE", "CAIS"], ["TAXI", "TAXI", "TAXI", "TAXI", "TAXI", "TÁXI"], ["TAXI SHELTER", "ABRI DE TAXIS", "PENSILINA TAXI", "TAXISTAND", "PARADA DE TAXIS", "PRAÇA DE TÁXIS"], ["FISHING BOAT", "BATEAU DE PÊCHE", "PESCHERECCIO", "FISCHERBOOT", "BARCO DE PESCA", "BARCO DE PESCA"], ["JET BOAT", "JET-BOAT", "MOTOSCAFO A IDROGETTO", "JETBOOT", "LANCHA JET", "LANCHA A JATO"], ["MOTOR BOAT", "BATEAU À MOTEUR", "MOTOSCAFO", "MOTORBOOT", "LANCHA MOTORA", "BARCO A MOTOR"], ["SEAPLANE", "HYDRAVION", "IDROVOLANTE", "WASSERFLUGZEUG", "HIDROAVIÓN", "HIDROAVIÃO"], ["VAN", "FOURGONNETTE", "FURGONE", "TRANSPORTER", "FURGONETA", "CARRINHA"], ["MOTORCYCLE", "MOTO", "MOTO", "MOTORRAD", "MOTO", "MOTA"], ["TRACTOR", "TRACTEUR", "TRATTORE", "TRAKTOR", "TRACTOR", "TRATOR"], ["AMBULANCE", "AMBULANCE", "AMBULANZA", "KRANKENWAGEN", "AMBULANCIA", "AMBULÂNCIA"], ["FIRE ENGINE", "CAMION DE POMPIERS", "AUTOPOMPA", "FEUERWEHRAUTO", "CAMIÓN DE BOMBEROS", "CARRO DE BOMBEIROS"], ["BOX TRUCK", "CAMION FOURGON", "FURGONE CASSONATO", "KOFFER-LKW", "CAMIÓN DE CAJA", "CAMIÃO DE CAIXA"], ["DUMP TRUCK", "CAMION BENNE", "AUTOCARRO RIBALTABILE", "KIPPER", "VOLQUETE", "CAMIÃO BASCULANTE"], ["CITY BUS", "BUS", "AUTOBUS", "STADTBUS", "AUTOBÚS", "AUTOCARRO"], ["SCHOOL BUS", "BUS SCOLAIRE", "SCUOLABUS", "SCHULBUS", "AUTOBÚS ESCOLAR", "AUTOCARRO ESCOLAR"], ["MINISUB", "MINI SOUS-MARIN", "MINISOMMERGIBILE", "MINI-U-BOOT", "MINISUBMARINO", "MINISSUBMARINO"], ["LIGHTHOUSE", "PHARE", "FARO", "LEUCHTTURM", "FARO", "FAROL"], ["FIRE STATION", "CASERNE DE POMPIERS", "CASERMA DEI POMPIERI", "FEUERWACHE", "ESTACIÓN DE BOMBEROS", "QUARTEL DE BOMBEIROS"], ["POLICE STATION", "COMMISSARIAT", "COMMISSARIATO", "POLIZEIWACHE", "COMISARÍA", "ESQUADRA"], ["AIRCRAFT HANGAR", "HANGAR D'AVIONS", "HANGAR AEREI", "FLUGZEUGHANGAR", "HANGAR DE AVIONES", "HANGAR DE AVIÕES"], ["MARINE HANGAR", "HANGAR MARIN", "HANGAR NAUTICO", "BOOTSHANGAR", "HANGAR NÁUTICO", "HANGAR NÁUTICO"], ["LAUNCH PAD", "PAS DE TIR", "RAMPA DI LANCIO", "STARTRAMPE", "PLATAFORMA DE LANZAMIENTO", "PLATAFORMA DE LANÇAMENTO"], ["SLOT #'S SAVED STORY WILL BE LOST", "LA PARTIE DE L'EMPLACEMENT # SERA PERDUE", "LA STORIA SALVATA NELLO SLOT # ANDRÀ PERSA", "DIE GESPEICHERTE GESCHICHTE IN PLATZ # GEHT VERLOREN", "SE PERDERÁ LA HISTORIA GUARDADA EN LA RANURA #", "A HISTÓRIA GUARDADA NO ESPAÇO # PERDE-SE"], ["STORY WORLD *", "MONDE HISTOIRE *", "MONDO STORIA *", "GESCHICHTSWELT *", "MUNDO HISTORIA *", "MUNDO HISTÓRIA *"], ["* LOADED", "* CHARGÉ", "* CARICATO", "* GELADEN", "* CARGADO", "* CARREGADO"], ["PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION", "PLAYSTATION"], ["XBOX", "XBOX", "XBOX", "XBOX", "XBOX", "XBOX"], ["CPU", "CPU", "CPU", "CPU", "CPU", "CPU"], ["BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL", "BATTLESHIP DUEL"], ["LEFT", "GAUCHE", "SINISTRA", "LINKS", "IZQUIERDA", "ESQUERDA"], ["RIGHT", "DROITE", "DESTRA", "RECHTS", "DERECHA", "DIREITA"], ["*  X", "*  X", "*  X", "*  X", "*  X", "*  X"], ["THIS VERSION HAS A NEWER STORY WORLD (*)", "CETTE VERSION A UN MONDE HISTOIRE PLUS RÉCENT (*)", "QUESTA VERSIONE HA UN MONDO STORIA PIÙ RECENTE (*)", "DIESE VERSION HAT EINE NEUERE GESCHICHTSWELT (*)", "ESTA VERSIÓN TIENE UN MUNDO HISTORIA MÁS RECIENTE (*)", "ESTA VERSÃO TEM UM MUNDO HISTÓRIA MAIS RECENTE (*)"], ["THIS VERSION HAS A NEWER OPEN WORLD (*)", "CETTE VERSION A UN MONDE OUVERT PLUS RÉCENT (*)", "QUESTA VERSIONE HA UN MONDO APERTO PIÙ RECENTE (*)", "DIESE VERSION HAT EINE NEUERE OFFENE WELT (*)", "ESTA VERSIÓN TIENE UN MUNDO ABIERTO MÁS RECIENTE (*)", "ESTA VERSÃO TEM UM MUNDO ABERTO MAIS RECENTE (*)"], ["YOUR EDITS ON THIS DEVICE ARE OLDER (*)", "VOS MODIFICATIONS SUR CET APPAREIL SONT PLUS ANCIENNES (*)", "LE TUE MODIFICHE SU QUESTO DISPOSITIVO SONO PIÙ VECCHIE (*)", "DEINE ÄNDERUNGEN AUF DIESEM GERÄT SIND ÄLTER (*)", "TUS CAMBIOS EN ESTE DISPOSITIVO SON MÁS ANTIGUOS (*)", "AS TUAS ALTERAÇÕES NESTE DISPOSITIVO SÃO MAIS ANTIGAS (*)"], ["YOUR EDITS ON THIS DEVICE ARE OLDER", "VOS MODIFICATIONS SUR CET APPAREIL SONT PLUS ANCIENNES", "LE TUE MODIFICHE SU QUESTO DISPOSITIVO SONO PIÙ VECCHIE", "DEINE ÄNDERUNGEN AUF DIESEM GERÄT SIND ÄLTER", "TUS CAMBIOS EN ESTE DISPOSITIVO SON MÁS ANTIGUOS", "AS TUAS ALTERAÇÕES NESTE DISPOSITIVO SÃO MAIS ANTIGAS"], ["USE NEW", "PRENDRE LE NOUVEAU", "USA IL NUOVO", "NEUE NEHMEN", "USAR EL NUEVO", "USAR O NOVO"], ["KEEP MINE", "GARDER LE MIEN", "TIENI IL MIO", "MEINE BEHALTEN", "MANTENER EL MÍO", "MANTER O MEU"], ["GRASS", "", "", "", "", ""], ["SAND", "", "", "", "", ""], ["SNOW", "", "", "", "", ""], ["DIRT", "", "", "", "", ""], ["GRAVEL", "", "", "", "", ""], ["MUD", "", "", "", "", ""], ["CLAY", "", "", "", "", ""], ["ASH", "", "", "", "", ""], ["MOSS", "", "", "", "", ""], ["ROCK", "", "", "", "", ""], ["ICE", "", "", "", "", ""], ["Downloading data", "Téléchargement des données", "Download dei dati", "Daten werden geladen", "Descargando datos", "A transferir dados"], ["Unpacking pictures", "Décompression des images", "Decompressione delle immagini", "Bilder werden entpackt", "Descomprimiendo imágenes", "A descompactar imagens"], ["Preparing art", "Préparation des graphismes", "Preparazione della grafica", "Grafik wird vorbereitet", "Preparando gráficos", "A preparar gráficos"], ["Starting the graphics", "Démarrage des graphismes", "Avvio della grafica", "Grafik wird gestartet", "Iniciando los gráficos", "A iniciar os gráficos"], ["Preparing the graphics card", "Préparation de la carte graphique", "Preparazione della scheda grafica", "Grafikkarte wird vorbereitet", "Preparando la tarjeta gráfica", "A preparar a placa gráfica"], ["Starting the game", "Démarrage du jeu", "Avvio del gioco", "Spiel wird gestartet", "Iniciando el juego", "A iniciar o jogo"], ["Building world", "Construction du monde", "Costruzione del mondo", "Welt wird gebaut", "Construyendo el mundo", "A construir o mundo"], ["Loading", "Chargement", "Caricamento", "Laden", "Cargando", "A carregar"], ["Loading editor", "Chargement de l'éditeur", "Caricamento dell'editor", "Editor wird geladen", "Cargando el editor", "A carregar o editor"], ["Loading Biome Editor", "Chargement du Biome Editor", "Caricamento del Biome Editor", "Biome Editor wird geladen", "Cargando el Biome Editor", "A carregar o Biome Editor"], ["Could not download the game. Check the connection and reload.", "Impossible de télécharger le jeu. Vérifiez la connexion et rechargez.", "Impossibile scaricare il gioco. Controlla la connessione e ricarica.", "Spiel konnte nicht geladen werden. Verbindung prüfen und neu laden.", "No se pudo descargar el juego. Revisa la conexión y recarga.", "Não foi possível transferir o jogo. Verifique a ligação e recarregue."], ["BUG REPORT SAVED", "RAPPORT ENREGISTRÉ", "SEGNALAZIONE SALVATA", "BERICHT GESPEICHERT", "INFORME GUARDADO", "RELATÓRIO GUARDADO"], ["COULD NOT MAKE THE REPORT", "IMPOSSIBLE DE CRÉER LE RAPPORT", "IMPOSSIBILE CREARE LA SEGNALAZIONE", "BERICHT NICHT ERSTELLT", "NO SE PUDO CREAR EL INFORME", "NÃO FOI POSSÍVEL CRIAR O RELATÓRIO"], ["This game needs WebGPU", "Ce jeu nécessite WebGPU", "Questo gioco richiede WebGPU", "Dieses Spiel braucht WebGPU", "Este juego necesita WebGPU", "Este jogo precisa de WebGPU"], ["Use a recent Chrome, Edge, Firefox or Safari", "Utilisez un Chrome, Edge, Firefox ou Safari récent", "Usa un Chrome, Edge, Firefox o Safari recente", "Verwende ein aktuelles Chrome, Edge, Firefox oder Safari", "Usa un Chrome, Edge, Firefox o Safari reciente", "Use um Chrome, Edge, Firefox ou Safari recente"], ["WORLD PLAN", "PLAN DU MONDE", "PIANO DEL MONDO", "WELTPLAN", "PLANO DEL MUNDO", "PLANO DO MUNDO"], ["WORLD SNAPSHOT", "INSTANTANÉ DU MONDE", "ISTANTANEA DEL MONDO", "WELT-SNAPSHOT", "INSTANTÁNEA DEL MUNDO", "INSTANTÂNEO DO MUNDO"], ["TANK VS TANK", "CHAR CONTRE CHAR", "CARRO CONTRO CARRO", "PANZER GEGEN PANZER", "TANQUE CONTRA TANQUE", "TANQUE CONTRA TANQUE"], ["ROUND #", "MANCHE #", "ROUND #", "RUNDE #", "RONDA #", "RONDA #"], ["WIND # KM/H", "VENT # KM/H", "VENTO # KM/H", "WIND # KM/H", "VIENTO # KM/H", "VENTO # KM/H"], ["PLAYER # WINS THE ROUND", "LE JOUEUR # GAGNE LA MANCHE", "IL GIOCATORE # VINCE IL ROUND", "SPIELER # GEWINNT DIE RUNDE", "EL JUGADOR # GANA LA RONDA", "O JOGADOR # GANHA A RONDA"], ["DRAW", "ÉGALITÉ", "PAREGGIO", "UNENTSCHIEDEN", "EMPATE", "EMPATE"], ["TANK VS TANK IS PLAYED AT ONE SCREEN", "CHAR CONTRE CHAR SE JOUE SUR UN SEUL ÉCRAN", "CARRO CONTRO CARRO SI GIOCA SU UNO SCHERMO", "PANZER GEGEN PANZER WIRD AN EINEM BILDSCHIRM GESPIELT", "TANQUE CONTRA TANQUE SE JUEGA EN UNA PANTALLA", "TANQUE CONTRA TANQUE JOGA-SE NUM SÓ ECRÃ"], ["TAP TO CONTINUE", "TOUCHEZ POUR CONTINUER", "TOCCA PER CONTINUARE", "TIPPEN ZUM FORTFAHREN", "TOCA PARA CONTINUAR", "TOCA PARA CONTINUAR"], ["PRESS A TO CONTINUE", "APPUYEZ SUR A POUR CONTINUER", "PREMI A PER CONTINUARE", "A DRÜCKEN ZUM FORTFAHREN", "PULSA A PARA CONTINUAR", "PRIME A PARA CONTINUAR"], ["PRESS SPACE TO CONTINUE", "APPUYEZ SUR ESPACE POUR CONTINUER", "PREMI SPAZIO PER CONTINUARE", "LEERTASTE ZUM FORTFAHREN", "PULSA ESPACIO PARA CONTINUAR", "PRIME ESPAÇO PARA CONTINUAR"], ["TAP TO TALK", "TOUCHEZ POUR PARLER", "TOCCA PER PARLARE", "TIPPEN ZUM SPRECHEN", "TOCA PARA HABLAR", "TOCA PARA FALAR"], ["PRESS A TO TALK", "APPUYEZ SUR A POUR PARLER", "PREMI A PER PARLARE", "A DRÜCKEN ZUM SPRECHEN", "PULSA A PARA HABLAR", "PRIME A PARA FALAR"], ["PRESS SPACE TO TALK", "APPUYEZ SUR ESPACE POUR PARLER", "PREMI SPAZIO PER PARLARE", "LEERTASTE ZUM SPRECHEN", "PULSA ESPACIO PARA HABLAR", "PRIME ESPAÇO PARA FALAR"], ["GO TO", "ALLER À", "VAI A", "GEHE ZU", "IR A", "IR A"], ["BRING *", "APPORTER *", "PORTA *", "* BRINGEN", "LLEVAR *", "LEVAR *"], ["COLLECT *", "RÉCOLTER *", "RACCOGLI *", "* SAMMELN", "RECOGER *", "RECOLHER *"], ["SELL *", "VENDRE *", "VENDI *", "* VERKAUFEN", "VENDER *", "VENDER *"], ["TALK", "PARLER", "PARLA", "SPRECHEN", "HABLAR", "FALAR"], ["CONTINUE", "CONTINUER", "CONTINUA", "WEITER", "CONTINUAR", "CONTINUAR"], ["I NEED *. # DAYS LEFT.", "J'AI BESOIN DE *. IL ME RESTE # JOURS.", "HO BISOGNO DI *. MI RESTANO # GIORNI.", "ICH BRAUCHE *. NOCH # TAGE.", "NECESITO *. ME QUEDAN # DÍAS.", "PRECISO DE *. RESTAM-ME # DIAS."], ["I NEED *. # DAY LEFT.", "J'AI BESOIN DE *. IL ME RESTE # JOUR.", "HO BISOGNO DI *. MI RESTA # GIORNO.", "ICH BRAUCHE *. NOCH # TAG.", "NECESITO *. ME QUEDA # DÍA.", "PRECISO DE *. RESTA-ME # DIA."], ["WE HAVE NO * LEFT.", "NOUS N'AVONS PLUS DE *.", "NON ABBIAMO PIÙ *.", "WIR HABEN KEIN * MEHR.", "NO NOS QUEDA *.", "NÃO NOS RESTA *."], ["WE NEED * TO MAKE *.", "IL NOUS FAUT * POUR FAIRE *.", "CI SERVE * PER FARE *.", "WIR BRAUCHEN *, UM * ZU MACHEN.", "NECESITAMOS * PARA HACER *.", "PRECISAMOS DE * PARA FAZER *."]];
 //@src 11-zz-i18n.js:11
 I18N = {};
 ['fr', 'it', 'de', 'es', 'pt'].forEach((k, i) => { const D = I18N[k] = {}; for (const r of I18N_ROWS) if (r[i + 1]) D[r[0]] = r[i + 1]; });
@@ -12467,7 +12407,7 @@ function setScope(p, lv) { if (NET.remote) return; scopes[p].level = clamp(lv, 1
    ================================================================ */
 const runCtl = [0, 1].map(player => ({ player, cx: 0, cy: 0, w: 100, v: 0, drag: false }));
 // A thin pixel-art strip at the top: the two harbours at the ends and where everyone is
-// each captain's colour (from their flag) as a CSS colour
+// each side's colour (from their flag) as a CSS colour
 const teamCss = p => img.teamCol && img.teamCol[p] ? `rgb(${img.teamCol[p].join(',')})` : p ? '#ffcc33' : '#ff5b3a';
 // where shells came down on the minimap (owner -1: two shells met in the air)
 // The minimap shows each player's latest shot as a flat line in their colour, traced as the shell flies.
@@ -12566,7 +12506,7 @@ function drawMiniMap() {
     ug.fillRect(x - 4, py, 9, 1); ug.fillRect(x - 1, py - 2, 2, 5); ug.fillRect(f > 0 ? x - 4 : x + 4, py - 2, 1, 2);
   }
   for (const b of buoys) if (b.state === 'float') { ug.fillStyle = b.col === 'red' ? '#ff3b30' : '#ff8a2c'; ug.fillRect(mx(b.x), y - 3, 1, 3); }
-  // the captain in his lifeboat, as a single bright pixel
+  // the player in his lifeboat, as a single bright pixel
   for (let p = 0; p < 2; p++) {
     const c = crew[p];
     if (c.mode !== 'boat') continue;
@@ -12605,16 +12545,14 @@ function canTake(p, k) {
   if (k === 'mode') return LAND;                                   // (the army / civilian toggle)
   if (k.startsWith('cv:')) return LAND && civList().some(([c, v]) => civCatOf(c) === k.slice(3) && (v.driven == null || v.driven === p));
   if (k === 'tower') return towerUsable(myTw(p));
-  if (k === 'tank' || k === 'heli') {                            // (LAND TEST: standing, and a captain for it)
-    const v = k === 'tank' ? tankOf(p) : heliOf(p);
+  if (k === 'tank' || k === 'heli') {                            // (LAND TEST: standing, or one that can come)
     if (!LAND) return false;
-    if (landUp(p, k)) return !useCaptains() || v.cap != null || capFree(p) >= 0;
-    return landCanCome(p, k) && armyCan(p, k) && (!useCaptains() || capFree(p) >= 0);   // (a hangar of its team with its spot - Nov 1)   // (a new one comes in from your end of the world)
+    if (landUp(p, k)) return true;
+    return landCanCome(p, k) && armyCan(p, k);   // (a hangar of its team with its spot - Nov 1)   // (a new one comes in from your end of the world)
   }
-  const crewed = v => !useCaptains() || (v && v.cap != null) || capFree(p) >= 0;   // (out with a captain already, or one free to take her)
-  if (k === 'plane') { const pl = planeOf(p); return !!pl && (pl.state === 'fly' || (pl.state === 'hangar' && fleet[p].plane > 0 && armyCan(p, 'plane') && crewed(pl))); }
-  if (k === 'ship') return shipOf(p).state === 'afloat' && crewed(shipOf(p));
-  const sb = subOf(p); return (sb.state === 'out' || sb.state === 'docked') && crewed(sb);
+  if (k === 'plane') { const pl = planeOf(p); return !!pl && (pl.state === 'fly' || (pl.state === 'hangar' && fleet[p].plane > 0 && armyCan(p, 'plane'))); }
+  if (k === 'ship') return shipOf(p).state === 'afloat';
+  const sb = subOf(p); return sb.state === 'out' || sb.state === 'docked';
 }
 function vehLife(p, k) {
   if (k === 'civ' || k === 'mode' || k.startsWith('cv:')) return canTake(p, k) ? 1 : 0;
@@ -12791,10 +12729,10 @@ function netStep() {
 }
 /* ---------------- Multiplayer step 2: the world as data ----------------
    netSnapshot() is the host's game as plain data (numbers, strings, little arrays): the vehicles, the towers, the
-   guns, everything in flight, the captains, who's in what, the hour and the weather, the harbours' gates and
+   guns, everything in flight, each side's lives, who's in what, the hour and the weather, the harbours' gates and
    pillars, the winner. The guest's game runs on between snapshots (so everything moves smoothly and its own
    splashes and smoke happen), and netApply(snap) brings it back in line with the host's. What decides the game
-   (a ship going down, a captain dying, the winner) only ever comes from the host: on the guest those are carried
+   (a ship going down, a life lost, the winner) only ever comes from the host: on the guest those are carried
    out when a snapshot says so (NET.applying), never by its own simulation.
    The guest plays player 0 on its own screen, with its harbour on the right (SWAP), so every list indexed by
    player and every id / owner / player number is swapped on the way in (netSwap). */
@@ -12838,7 +12776,7 @@ function netSnapshot(sw, o = {}) {
     // online they were never sent, so a guest's never fell)
     towers: [...two(towers), ...(towers.length > 2 ? two(towers.slice(2)) : [])].map(o => P(o, 2)), guns: two(guns).map(o => P(o, 2)), tguns: two(tguns).map(o => P(o, 2)),
     shells: list(shells), torps: list(torps), bullets: list(bullets), dcharges: list(dcharges), mines: list(mines),
-    caps: two(captains).map(cs => cs.map(c => ({ face: c.face, state: c.state, veh: c.veh, t: c.t, blood: +(c.blood || 0).toFixed(2), band: c.band || 0 }))),
+    lives: two(lives),
     crew: two(crew).map(c => ({ mode: c.mode, dead: !!c.dead })),
     docks: two(homeDock).map(d => ({ gates: P(d.gates, 2), pillars: d.pillars.map(q => !!q.broken), pierGone: !!d.pierGone })),
     winner: ui.winner == null ? null : sw ? 1 - ui.winner : ui.winner,
@@ -12949,7 +12887,7 @@ function netApply(S) {
   try {
     Object.assign(env, S.env); W.t = S.Wt; W.frozen = true;              // (the host's sky)
     for (let p = 0; p < 2; p++) { netVehicle('ship', p, S.ships[p]); netVehicle('sub', p, S.subs[p]); netVehicle('plane', p, S.planes[p]); }
-    // what's gone down on the host goes down here (its pieces, its smoke, its captain's skull)
+    // what's gone down on the host goes down here (its pieces, its smoke)
     for (let p = 0; p < 2; p++) {
       const sh = shipOf(p), d = S.ships[p];
       if (d && sh.state === 'afloat' && d.state !== 'afloat') sinkShip(sh);
@@ -12974,7 +12912,7 @@ function netApply(S) {
       if (S.towers[p + 2] && towers.hAt(p + 2) && towers.hAt(p + 2).edge) netMerge(towers.hAt(p + 2), S.towers[p + 2]);
       if (S.guns[p] && guns[p]) netMerge(guns[p], S.guns[p]);
       if (S.tguns[p] && tguns[p]) netMerge(tguns[p], S.tguns[p]);
-      S.caps[p].forEach((c, i) => { const q = captains[p][i]; if (q) { const t = q.state === c.state ? q.t : time - (S.t - c.t); Object.assign(q, c); q.t = t; } });   // (their clock, not the host's)
+      if (typeof S.lives?.[p] === 'number') lives[p] = S.lives[p];
       const you = p === 0 && S.you ? S.you : S.crew[p];               // (a room: what you yourself are in, not your team's host)
       crew[p].mode = you.mode;
       crew[p].dead = you.dead;
@@ -13012,8 +12950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1122;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 16:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1123;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 17:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13383,7 +13321,6 @@ function setCtlState(p, s) {
    Sizes are in "design units": the user's iPad mock-up, where one player's half of the screen is 697 x 873.
    ================================================================ */
 const HUDI = {"rects": {"dial": [0, 0, 534, 110], "up": [536, 0, 102, 100], "power": [0, 112, 532, 100], "left": [534, 112, 103, 98], "stop": [639, 112, 104, 98], "right": [745, 112, 100, 97], "tabGold": [0, 214, 206, 97], "home": [208, 214, 103, 96], "down": [313, 214, 102, 94], "tabSteel": [417, 214, 202, 90], "gbtn": [621, 214, 120, 87], "torpUp": [743, 214, 44, 72], "icSub": [789, 214, 162, 64], "icTower": [0, 313, 162, 64], "icPlane": [164, 313, 165, 64], "icShip": [331, 313, 166, 63], "dc": [499, 313, 46, 54], "bullets": [547, 313, 60, 50], "shell": [609, 313, 72, 44], "knob": [683, 313, 42, 42], "powerFill": [727, 313, 1, 26], "offLamp": [730, 313, 35, 18], "litLamp": [767, 313, 35, 18]}, "spots": {"leftLamp": [51.5, 12.25], "stopLamp": [51.5, 11.75], "rightLamp": [51.25, 12.0], "shell": [0.5, -41.0], "dc": [0.25, -40.75], "bullets": [0.75, -41.25], "torpUp": [0.5, -41.0], "icShip": [0.0, -41.5], "icSub": [-0.5, -48.25], "icTower": [-0.5, -48.25], "icPlane": [-0.75, -48.25], "tape": [29.5, 36.5, 498.0, 86.5], "track": [23.0, 41.5, 509.0, 68.0], "knobR": 20.5}, "lamp": [35, 18]};
-const CAPTI = {"w": 42, "h": 42, "count": 32, "states": ["bare", "skeleton"], "darker": [1, 4, 8, 9, 12, 18, 20, 27, 30], "faces": [[29.5, 19], [30.5, 19], [29.5, 19], [30.5, 18], [29.5, 18], [29.5, 19], [28.5, 19], [30.5, 18], [29.5, 19], [30.5, 20], [29.5, 19], [29.5, 19], [30.5, 19], [32.5, 19], [29.5, 19], [29.5, 19], [29.5, 19], [30.5, 17], [30.5, 17], [29.5, 19], [29.5, 19], [30.5, 17], [29.5, 19], [29.5, 17], [29.5, 19], [30.5, 19], [29.5, 17], [30.5, 17], [29.5, 19], [29.5, 19], [29.5, 19], [29.5, 19]], "hats": {"ship": {"w": 26, "h": 8, "dx": -21.1, "dy": -7.6, "x": 0}, "plane": {"w": 22, "h": 21, "dx": -20.7, "dy": -7.1, "x": 28}, "sub": {"w": 23, "h": 18, "dx": -20.8, "dy": -9.1, "x": 52}}, "bands": [{"w": 5, "h": 10, "dx": -15.3, "dy": -0.1, "x": 0}, {"w": 13, "h": 12, "dx": -13.8, "dy": -0.3, "x": 7}, {"w": 16, "h": 14, "dx": -16.0, "dy": -2.0, "x": 22}], "note": "faces: [front edge x, forehead y]; a hat goes at face + (dx, dy)"};          // the captains' heads (bare, skeleton), each face's eye point, each hat's place
 const HUD_S0 = 0.62;                               // design units per atlas pixel (the mock-up's buttons)
 const HUD_VEH = ['tower', 'ship', 'sub', 'plane'];             // (the tower first, user Oct 24 night)
 // (OPEN WORLD, user Oct 25 late: "the civilian button is a toggle. You toggle between civilian and army... When I toggle
@@ -13537,18 +13474,14 @@ function hudLayout(p) {
   const x0 = mid - (tw * nT0 + g * (nT0 - 1)) / 2;
   const VS = hudVeh(p);
   const tabs = VS.map((v, i) => ({ id: 'tab:' + v, veh: v, x: Math.round(x0 + i * (tw + g)), y: Math.round(ui.top + 4), w: Math.round(tw), h: Math.round(th), k: tk }));
-  // the captains: a row of eight heads under the vehicle buttons, centred under them (each about the size of the
-  // weather button)
-  let caps = [], capB = Math.round(ui.top + 4 + (nT0 ? th : 0));   // (no buttons along the top: STORY)
-  if (useCaptains() && captains[p] && captains[p].length && !civUI[p]) {   // (the captains: army mode only)
-    const n = captains[p].length, gap = Math.max(2, Math.round(3 * u0));
-    // (42: one screen pixel per pixel of the heads' art, crisp; smaller only if eight won't fit)
-    const hs = Math.round(Math.min(42, ((oneT ? WT - 8 : WT - 64) / n) - gap));   // (split: clear of the menu button in the middle)
-    const cy = Math.round(ui.top + 4 + th + Math.max(6, 9 * u0)), cx0 = Math.round(mid - (n * hs + (n - 1) * gap) / 2);
-    caps = captains[p].map((c, i) => ({ id: 'cap:' + i, cap: i, x: cx0 + i * (hs + gap), y: cy, w: hs, h: hs }));
-    capB = cy + hs;
+  // the lives: a row of hearts under the vehicle buttons, centred under them (army mode only - drawLives)
+  let hearts = null, bot = Math.round(ui.top + 4 + (nT0 ? th : 0));   // (no buttons along the top: STORY)
+  if (useLives() && !civUI[p]) {
+    const w = heartsW(LIVES), y = Math.round(ui.top + 4 + th + Math.max(6, 9 * u0));
+    hearts = { x: Math.round(mid - w / 2), y, w, h: heartsH() };
+    bot = y + hearts.h;
   }
-  return { k, u, items, tabs, kit, caps, bottom: capB };
+  return { k, u, items, tabs, kit, hearts, bottom: bot };
 }
 // the ANGLE tape and POWER slider are lit while the vehicle you're in can use them
 function aimLive(p) {
@@ -13669,7 +13602,7 @@ function hudShade(name) {
 // --- drawing ---
 function hudImg(name, x, y, w, h) { const s = img.hud[name]; ug.drawImage(scaled(s, w / s.width, true), x, y); }
 // (user Nov 2 09:57, the Fishing Lab: "just the boat and its controls") a lab's screen: only these controls of the vehicle you're in
-// (their ids in hudLayout) - no tabs, captains, map, top bar or menu (48-render.js). null: the game's whole screen
+// (their ids in hudLayout) - no tabs, hearts, map, top bar or menu (48-render.js). null: the game's whole screen
 let HUD_ONLY = null;
 function drawHud(p) {
   if (p >= HUMANS() || crew[p].dead || crew[p].mode === 'gone' || ui.winner != null) return;
@@ -13698,7 +13631,7 @@ function drawHud(p) {
     if (down) { ug.globalAlpha = PRESS_DARK; ug.drawImage(scaled(hudShade(it.art), it.w / img.hud[it.art].width, true), it.x, y, it.w, it.h); }
     ug.globalAlpha = 1;
   }
-  if (!HUD_ONLY) { drawHudTabs(p, Lh); drawCaptains(p, Lh); }
+  if (!HUD_ONLY) { drawHudTabs(p, Lh); drawLives(p, Lh); }
   // watching a teammate (online): say so, and how to get back to playing
   if (crew[p].spec) drawText(ug, 'WATCHING YOUR TEAMMATE - PICK A FREE VEHICLE TO PLAY', Math.round((Lh.tabs[0].x + Lh.tabs[Lh.tabs.length - 1].x + Lh.tabs[Lh.tabs.length - 1].w) / 2), Lh.bottom + 8, '#ffd23a', 1, 'center');
   ug.restore();
@@ -13819,221 +13752,41 @@ function vehDir(p, k) {
 // a picture tinted red (cached on it)
 // (a 'source-atop' fill of rgba(255,40,30,0.7) over its shape: tinted by the graphics card as it's drawn - no copy)
 const redTint = c => tinted(c, 'red', [0.3, 0.3, 0.3], [0.7, 40 / 255 * 0.7, 30 / 255 * 0.7]);
-// the row of captains' heads, just the heads (no box): alive (ashore, or out in a vehicle: its little picture in
-// the corner), the one who died last wounded, the ones before skulls. They go out in order, left to right.
-/* The other team's vehicle buttons and captains, with one view (user Oct 24: "the enemy UI is the same size and
+/* The other team's vehicle buttons and lives, with one view (user Oct 24: "the enemy UI is the same size and
    shape as yours... just like when 2 players share a screen, just no middle line"): the top of the screen is laid
    out as for two players, each team's buttons over its own half of the sea; the other team's are only to look at. */
 const TWOBAR = () => PLAYERS === 2 && ONEVIEW() && !ui.title;
 function drawEnemyBar(q) {
-  if (!captains[q] || crew[q] == null) return;
+  if (crew[q] == null) return;
   const Lh = hudLayout(q);
   ug.save();
-  drawHudTabs(q, Lh); drawCaptains(q, Lh);
+  drawHudTabs(q, Lh); drawLives(q, Lh);
   ug.restore();
 }
-function drawCaptains(p, Lh) {
-  if (!Lh.caps.length || !img.captains || !img.hats) return;
-  const T = captArt(p), flip = SIDE(p) === 1;   // (the right-hand side's face left)
-  const next = nextCaptain(p), onTab = capsOnTabs(p, Lh);
-  ug.save(); ug.imageSmoothingEnabled = false;
-  for (const b of Lh.caps) {
-    const c = captains[p][b.cap], dead = c.state === 'bones' || c.state === 'dead';
-    // out in a vehicle: they're up on its button (user Oct 24); their place in the row waits, an empty frame
-    if (onTab.has(b.cap)) { drawDashedBox(b); continue; }
-    drawCapHead(p, T, c, b, flip);
-    // the next one to go out: a bead of sweat on the forehead
-    if (b.cap === next) {
-      if (flip) { ug.save(); ug.translate(b.x * 2 + b.w, 0); ug.scale(-1, 1); }
-      drawSweat(b, Math.sin(time * 3 + b.cap) * 0.6);
-      if (flip) ug.restore();
-    }
-    // dead: the skull first, then a red X struck over it, stroke by stroke
-    if (dead) {
-      const u = (time - c.t - 0.35) / 0.42;
-      if (u > 0) drawRedX(b, Math.min(1, u));
+// (user Nov 17 21:11, TANK VS TANK: "on the top side of each player, it should have 3 hearts representing the life they have"; Nov 19 15:47,
+// BATTLE: "You have 6 lives and it appears as hearts, just like in tank mode") a row of n hearts at x, y, the first hp of them full (red), the
+// rest lost (dark); a part of one filled that far. The run empties toward the screen's middle (mirror: the right side's, from its left)
+const HEART_PIX = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'], HEART_PX = 3;
+const heartsW = n => n * (HEART_PIX[0].length * HEART_PX + 4) - 4, heartsH = () => HEART_PIX.length * HEART_PX + 1;
+function drawHearts(x, y, n, hp, mirror) {
+  const W = HEART_PIX[0].length, px = HEART_PX, step = W * px + 4;
+  for (let i = 0; i < n; i++) {
+    const k = mirror ? n - 1 - i : i, fill = Math.max(0, Math.min(1, hp - k)), hx = x + i * step;   // (k: the heart's place counted from the outside)
+    for (let pass = 0; pass < 2; pass++) for (let r = 0; r < HEART_PIX.length; r++) for (let c = 0; c < W; c++) {
+      if (HEART_PIX[r][c] !== 'X') continue;
+      const lit = (mirror ? W - 1 - c : c) < fill * W;
+      ug.fillStyle = pass === 0 ? '#04070f' : !lit ? '#3a3f4a' : r === 1 && c === 1 ? '#ff9a8a' : '#e8322a';
+      ug.fillRect(hx + c * px + (pass ? 0 : 1), y + r * px + (pass ? 0 : 1), px, px);
     }
   }
-  ug.restore();
 }
-// which captains are shown on their vehicle's button (out in a vehicle that has a button)
-function capsOnTabs(p, Lh) {
-  const s = new Set(), vs = new Set(Lh.tabs.map(t => t.veh));
-  captains[p].forEach((c, i) => { if (c.state === 'out' && c.veh && vs.has(c.veh)) s.add(i); });
-  return s;
+// a side's lives under its vehicle buttons (06-fleet.js lives[p])
+function drawLives(p, Lh) {
+  const H = Lh.hearts; if (!H) return;
+  drawHearts(H.x, H.y, LIVES, lives[p], SIDE(p) === 1);
 }
-function drawDashedBox(b0) {
-  // (the size of a head, not of the square its picture is drawn in)
-  const b = { x: b0.x + Math.round(b0.w * 0.14), y: b0.y + Math.round(b0.h * 0.22), w: Math.round(b0.w * 0.72), h: Math.round(b0.h * 0.74) };
-  const s = Math.max(1, Math.round(b0.w / 21)), d = s * 3;
-  ug.fillStyle = 'rgba(205,220,240,0.55)';
-  for (let x = 0; x < b.w; x += d * 2) { const w = Math.min(d, b.w - x); ug.fillRect(b.x + x, b.y, w, s); ug.fillRect(b.x + x, b.y + b.h - s, w, s); }
-  for (let y = 0; y < b.h; y += d * 2) { const h = Math.min(d, b.h - y); ug.fillRect(b.x, b.y + y, s, h); ug.fillRect(b.x + b.w - s, b.y + y, s, h); }
-}
-// one captain's head in a box b: bare or skull; out in a vehicle, its hat (and the blood and holes of the trip);
-// the bandages from earlier trips (user Oct 24: three levels, from the user's art)
-function drawCapHead(p, T, c, b, flip) {
-  const S0 = CAPTI.h, k = b.w / S0, dead = c.state === 'bones' || c.state === 'dead';
-  if (flip) { ug.save(); ug.translate(b.x * 2 + b.w, 0); ug.scale(-1, 1); }
-  const worn = !dead && c.state === 'out' && c.veh && CAPTI.hats[c.veh];
-  // (wearing a hat: the head with its hair trimmed to the hat)
-  if (worn) ug.drawImage(capTrim(T, c.face, c.veh), b.x, b.y, b.w, b.h);
-  else ug.drawImage(T.heads, dead ? S0 : 0, c.face * S0, S0, S0, b.x, b.y, b.w, b.h);
-  if (!dead && c.band > 0 && img.bands && CAPTI.bands) ug.drawImage(capBand(T, c.face, Math.min(3, c.band)), b.x, b.y, b.w, b.h);
-  if (!dead && c.state === 'out' && c.veh) {
-    // out in a vehicle: blood on the face, more as the vehicle's knocked about; then its hat (holed as it's hurt)
-    const hurt = c.blood || 0, [fx, fy] = CAPTI.faces[c.face], H = CAPTI.hats[c.veh];
-    if (hurt > 0.02) drawMarks(T.blood[c.face], hurt, b, k, 26, ['#8e0b0b', '#b51a17', '#6a0707']);
-    if (H) {
-      const hx = Math.round(fx + H.dx), hy = Math.round(fy + H.dy);
-      ug.drawImage(T.hats, H.x, 0, H.w, H.h, b.x + hx * k, b.y + hy * k, H.w * k, H.h * k);
-      if (hurt > 0.02) drawMarks(T.holes[c.veh], hurt, { x: b.x + hx * k, y: b.y + hy * k }, k, 8, ['#0a0b10', '#151218']);
-    }
-  }
-  if (flip) ug.restore();
-}
-// a face's bandages at one level, kept to the head's own outline
-function capBand(T, f, lv) {
-  const id = f + '|' + lv;
-  if (T.band[id]) return T.band[id];
-  const S0 = CAPTI.h, W = img.captains.width, m = CAPTI.bands[lv - 1], [fx, fy] = CAPTI.faces[f];
-  const c = makeCanvas(S0, S0), x = c.getContext('2d', { willReadFrequently: true });
-  x.drawImage(img.bands, m.x, 0, m.w, m.h, Math.round(fx + m.dx), Math.round(fy + m.dy), m.w, m.h);
-  const id2 = x.getImageData(0, 0, S0, S0), d = id2.data;
-  for (let y = 0; y < S0; y++) for (let xx = 0; xx < S0; xx++) if (!T.hd[((f * S0 + y) * W + xx) * 4 + 3]) d[(y * S0 + xx) * 4 + 3] = 0;
-  x.putImageData(id2, 0, 0);
-  return (T.band[id] = c);
-}
-// how hurt a captain's vehicle is, 0..1
 // a plane in a cloud (seen in one by either view a moment ago) is lost to the radar and to the computer's eyes
 function hiddenPlane(pl) { return !!pl && pl.state === 'fly' && time - (pl.cloudT || -9) < 0.25; }
-function capHurt(p, k) {
-  if (k === 'ship') { const sh = shipOf(p); return sh.state === 'afloat' ? clamp(1 - shipLife(sh), 0, 1) : 1; }
-  if (k === 'sub') return clamp(1 - subLife(subOf(p)), 0, 1);
-  if (k === 'plane') { const pl = planeOf(p); return pl ? clamp((pl.hits + (pl.dmg || 0)) / VTUNE.plane.hits, 0, 1) : 0; }
-  return 0;
-}
-// marks (blood on a face, holes in a hat): the first few of a fixed scatter of spots, more as it gets worse
-function drawMarks(spots, f, o, k, max, cols) {
-  const n = Math.min(spots.length, Math.ceil(f * max)), s = Math.max(1, Math.round(k));
-  for (let i = 0; i < n; i++) {
-    const [x, y, big] = spots[i];
-    ug.fillStyle = cols[i % cols.length];
-    ug.fillRect(o.x + Math.round(x * k), o.y + Math.round(y * k), s * (big ? 2 : 1), s);
-    if (big) ug.fillRect(o.x + Math.round(x * k), o.y + Math.round((y + 1) * k), s, s);
-  }
-}
-// The heads and the hats in a player's colours: the navy of the uniforms and the caps becomes a deep shade of the
-// team colour (like the vehicles' red); and, for every face and hat, a scatter of spots for blood and holes
-const captCache = {};
-function captArt(p) {
-  const col = teamColour(p), key = col.join(',');
-  if (captCache[key]) return captCache[key];
-  const tint = (src, rowOk) => {
-    const c = makeCanvas(src.width, src.height), x = c.getContext('2d', { willReadFrequently: true });
-    x.drawImage(src, 0, 0);
-    const id = x.getImageData(0, 0, c.width, c.height), d = id.data, cm = Math.max(1, ...col);
-    for (let i = 0; i < d.length; i += 4) {
-      if (!d[i + 3] || (rowOk && !rowOk((i >> 2) / c.width | 0))) continue;
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      if (!(b > r + 20 && b >= g && r + g + b < 330)) continue;                 // navy: blue above red, and dark
-      const v = (r + g + b) / 3 / 52 * 0.5;
-      d[i] = clamp(col[0] * 255 / cm * v, 0, 255); d[i + 1] = clamp(col[1] * 255 / cm * v, 0, 255); d[i + 2] = clamp(col[2] * 255 / cm * v, 0, 255);
-    }
-    x.putImageData(id, 0, 0);
-    return { c, d };
-  };
-  // (on the heads only the jacket, below the chin: glasses have a bluish glint too)
-  const H = tint(img.captains, y => y % CAPTI.h >= CAPTI.faces[(y / CAPTI.h) | 0][1] + 11), K = tint(img.hats), S0 = CAPTI.h, W = img.captains.width;
-  // blood: on the skin of the face, below the eye line
-  const blood = CAPTI.faces.map(([fx, fy], f) => {
-    const out = [];
-    for (let y = Math.round(fy) - 3; y < Math.round(fy) + 11; y++) for (let x = 2; x < S0 - 3; x++) {
-      const i = ((f * S0 + y) * W + x) * 4, r = H.d[i], g = H.d[i + 1], b = H.d[i + 2];
-      if (H.d[i + 3] && r > 95 && r > b + 25 && r >= g) out.push([x, y, hash(f * 31 + x * 7.1 + y * 13.3) < 0.4]);
-    }
-    return out.sort((a, b) => hash(f + a[0] * 3.7 + a[1] * 9.1) - hash(f + b[0] * 3.7 + b[1] * 9.1));
-  });
-  const holes = {};
-  for (const k in CAPTI.hats) {
-    const h = CAPTI.hats[k], out = [];
-    for (let y = 1; y < h.h - 1; y++) for (let x = h.x + 1; x < h.x + h.w - 1; x++) if (K.d[(y * img.hats.width + x) * 4 + 3]) out.push([x - h.x, y, false]);
-    holes[k] = out.sort((a, b) => hash(a[0] * 5.3 + a[1] * 11.7 + k.length) - hash(b[0] * 5.3 + b[1] * 11.7 + k.length));
-  }
-  return (captCache[key] = { heads: H.c, hats: K.c, hd: H.d, kd: K.d, blood, holes, trim: {}, band: {} });
-}
-// a head under a hat (user: big hair mustn't show around it): above the forehead line only the hat shows, and in
-// the rows the hat covers, hair behind its back edge goes too; hair hanging below the hat stays
-function capTrim(T, f, k) {
-  const id = f + '|' + k;
-  if (T.trim[id]) return T.trim[id];
-  const S0 = CAPTI.h, W = img.captains.width, HW = img.hats.width, m = CAPTI.hats[k], [fx, fy] = CAPTI.faces[f];
-  const hx = Math.round(fx + m.dx), hy = Math.round(fy + m.dy);
-  const cov = new Uint8Array(S0 * S0), back = new Int16Array(S0).fill(9999);
-  for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) {
-    const X = hx + x, Y = hy + y;
-    if (X < 0 || Y < 0 || X >= S0 || Y >= S0 || !T.kd[(y * HW + m.x + x) * 4 + 3]) continue;
-    cov[Y * S0 + X] = 1; if (X < back[Y]) back[Y] = X;
-  }
-  const c = makeCanvas(S0, S0), x2 = c.getContext('2d'), id2 = x2.createImageData(S0, S0), d = id2.data;
-  for (let y = 0; y < S0; y++) for (let x = 0; x < S0; x++) {
-    const i = ((f * S0 + y) * W + x) * 4, o = (y * S0 + x) * 4;
-    const r = T.hd[i], g = T.hd[i + 1], b = T.hd[i + 2], a = T.hd[i + 3];
-    if (!a) continue;
-    if (!cov[y * S0 + x]) {
-      const skin = (r > 200 && g > 140 && b < 150 && r - b > 60) || (r > 95 && r > b + 25 && r >= g && r - g > 25 && r < 200 && g < 140);
-      if (y < fy || (back[y] < 9999 && x < back[y] && !skin)) continue;   // (rows the hat doesn't reach keep everything)
-    }
-    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = a;
-  }
-  x2.putImageData(id2, 0, 0);
-  return (T.trim[id] = c);
-}
-// the vehicle a captain is out in is damaged
-// a little blue bead of sweat at the front of the head, bobbing a pixel
-const SWEAT = ['..k..', '.kbk.', '.kbk.', 'kbwbk', 'kbwbk', 'kbbbk', '.kkk.'];
-function drawSweat(b, bob) {
-  const px = Math.max(1, Math.round(b.w / 42)), x0 = b.x + Math.round(b.w * 0.71), y0 = b.y + Math.round(b.h * 0.3 + bob * px);   // (on the forehead, under the cap's brim, like 😅)
-  const cols = { k: '#1d4f9c', b: '#5fb8ff', w: '#eaf8ff' };
-  SWEAT.forEach((row, j) => { for (let i = 0; i < row.length; i++) { const ch = row[i]; if (ch === '.') continue; ug.fillStyle = cols[ch]; ug.fillRect(x0 + i * px, y0 + j * px, px, px); } });
-}
-// the X drawn in: the first stroke (top left to bottom right), then the second (top right to bottom left)
-function drawRedX(b, u) {
-  const X = redX(b.w), w = b.w;
-  for (const [k, f] of [[0, clamp(u * 2, 0, 1)], [1, clamp(u * 2 - 1, 0, 1)]]) {
-    if (f <= 0) continue;
-    ug.save(); ug.beginPath();
-    if (k === 0) { ug.moveTo(b.x, b.y); ug.lineTo(b.x + 2 * w * f, b.y); ug.lineTo(b.x, b.y + 2 * w * f); }
-    else { ug.moveTo(b.x + w, b.y); ug.lineTo(b.x + w - 2 * w * f, b.y); ug.lineTo(b.x + w, b.y + 2 * w * f); }
-    ug.closePath(); ug.clip();
-    ug.drawImage(X[k], b.x, b.y);
-    ug.restore();
-  }
-}
-// a red X like two quick strokes of a brush: thick, a little ragged along the edges and dry at the ends, no outline
-function redX(w) {
-  const cache = redX.c || (redX.c = {});
-  if (cache[w]) return cache[w];
-  const cs = [makeCanvas(w, w), makeCanvas(w, w)];
-  const r = (i, j) => hash(i * 12.9898 + j * 78.233 + w * 0.37);
-  const m = w * 0.14, L = w - 2 * m, T = w * 0.09;                  // (thin: the skull shows)
-  for (const sgn of [1, -1]) {
-    const x = cs[sgn > 0 ? 0 : 1].getContext('2d');
-    const n = Math.ceil(L * 1.5);
-    for (let i = 0; i <= n; i++) {
-      const u = i / n, cx = m + u * L, cy = sgn > 0 ? m + u * L : w - m - u * L;
-      // thick in the middle of the stroke, thinning and breaking up at its ends
-      const end = Math.min(u, 1 - u), th = T * (0.75 + 0.25 * Math.min(1, end * 6)) * (0.9 + 0.2 * r(i, sgn));
-      for (let k = -th / 2; k <= th / 2; k += 0.7) {
-        if (Math.abs(k) > th * 0.36 && r(i * 3 + Math.round(k * 4), sgn + 7) < 0.25) continue;   // ragged edges
-        if (end < 0.06 && r(i, Math.round(k * 9)) < 0.45) continue;                                 // dry ends
-        const px = cx + k * 0.7071 * sgn, py = cy - k * 0.7071;
-        x.fillStyle = '#e3231c'; x.fillRect(Math.round(px), Math.round(py), 1, 1);
-      }
-    }
-  }
-  return (cache[w] = cs);
-}
 // when each of a player's vehicles was last hit (to flag one under attack while you're elsewhere)
 const hitAlert = [{}, {}];
 function noteHit(p, k) { if (p === 0 || p === 1) { hitAlert[p][k] = time; sound('underAttack', p, k); } }
@@ -14093,12 +13846,8 @@ function drawHudTabs(p, Lh) {
     tabLamp(p, t.veh, on, fx, fy, fw / fr.width);
     // the picture, filled across with its life (the rest of it dim)
     const ic = img.hud[tabIcon(p, t.veh)] || img.hud.icCiv, off = HUDI.spots[tabIcon(p, t.veh)] || HUDI.spots.icShip;
-    // (its captain aboard: their head on the right of the button, the picture smaller on its left - user's mock-up)
-    const capI = captains[p] && useCaptains() ? captains[p].findIndex(c => c.state === 'out' && c.veh === t.veh) : -1, shift = capI >= 0 ? 1 : 0;
-    const isz = shift ? 0.66 : 1;
-    // (drawn smaller from the full-size picture, pixel for pixel: a smooth shrink loses its thin parts)
-    const iw = Math.round(ic.width * t.k * isz), ih = Math.round(ic.height * t.k * isz), sp = scaled(ic, Math.round(ic.width * t.k) / ic.width, true);
-    const ix = shift ? Math.round(fx + fw * 0.09) : Math.round(t.x + t.w / 2 + off[0] * t.k - iw / 2), iy = Math.round(t.y + t.h + (down ? 1 : 0) + off[1] * t.k - ih / 2) - (shift ? Math.round(fh * 0.04) : 0);
+    const iw = Math.round(ic.width * t.k), ih = Math.round(ic.height * t.k), sp = scaled(ic, iw / ic.width, true);
+    const ix = Math.round(t.x + t.w / 2 + off[0] * t.k - iw / 2), iy = Math.round(t.y + t.h + (down ? 1 : 0) + off[1] * t.k - ih / 2);
     const life = vehLife(p, t.veh), lw = Math.round(iw * clamp(life, 0, 1));
     const dim = on && danger && blink;
     const ga = ug.globalAlpha;
@@ -14116,13 +13865,6 @@ function drawHudTabs(p, Lh) {
       for (let i = 0; i < aw; i++) { const hh = ah - i * 2; if (hh <= 0) break; const xx = vd < 0 ? ax + aw - 1 - i : ax + i; ug.fillRect(xx - 1, ay + i - 1, 3, hh + 2); }
       ug.fillStyle = '#ffd23a';
       for (let i = 0; i < aw; i++) { const hh = ah - i * 2; if (hh <= 0) break; const xx = vd < 0 ? ax + aw - 1 - i : ax + i; ug.fillRect(xx, ay + i, 1, hh); }
-    }
-    if (shift && img.captains && img.hats) {
-      // (as tall as the button's inside, standing on its bottom edge like the mock-up)
-      const sz = Math.round(fh * 0.9), ga2 = ug.globalAlpha;
-      ug.globalAlpha = 1;
-      drawCapHead(p, captArt(p), captains[p][capI], { x: fx + fw - sz - Math.round(fw * 0.05), y: fy + fh - sz - Math.round(fh * 0.1), w: sz, h: sz }, SIDE(p) === 1);
-      ug.globalAlpha = ga2;
     }
     // one of yours under attack: its button's outline blinks red
     // (the one you're in too, user Oct 24 night)
@@ -14147,14 +13889,6 @@ function drawHudTabs(p, Lh) {
       const bx = Math.round(fx + fw / 2 - bw / 2), by = fy + Math.round(2 * t.k);
       ug.globalAlpha = 1; ug.fillStyle = 'rgba(4,7,15,0.75)'; ug.fillRect(bx, by, bw, bh);
       drawText(ug, 'TEAM', bx + bw / 2, by + sc, crew[p].spec === t.veh ? '#ffd23a' : '#ffffff', sc, 'center');
-    }
-    // how many of them you have left (the one on the water included): a plate hanging under the button
-    if (false) {                                        // (the count plates: gone; it's captains that run out now)
-      const n = fleet[p][t.veh], sc = Math.max(3, Math.min(t.h > 70 ? 6 : 4, Math.floor(t.h * 0.6 / 7))), str = 'X' + n, bw = (textWidth(str) + 2) * sc + 2, bh = 7 * sc;
-      const bx = Math.round(t.x + t.w / 2 - bw / 2), by = Math.round(t.y + t.h - bh * 0.25);
-      ug.globalAlpha = ga;
-      ug.fillStyle = '#04070f'; ug.fillRect(bx, by, bw, bh);
-      drawText(ug, str, bx + bw / 2, by + sc, n > 0 ? '#ffd23a' : '#ff4a3a', sc, 'center');
     }
   }
   ug.globalAlpha = 1;
@@ -14680,7 +14414,7 @@ function edModeSync() {
 }
 /* (user Oct 31: "The logic is more, you see in the editor, the initial world state. versus hiding some things and not
    others.") Open: the game going on is put aside as it is (edGameSave: what a SNAPSHOT holds - the vehicles, their damage
-   and fires, everything in flight, the captains, every system's table, the smoke) and the world is built fresh, as a game
+   and fires, everything in flight, each side's lives, every system's table, the smoke) and the world is built fresh, as a game
    starts, untouched: that's what the editor shows and edits. CLOSE: the world built again, with the edits in it, and the
    game put back into it as it was (edGameBack) - it goes on from where it was. Offline only: online the world isn't one
    screen's to rebuild (there the editor holds the world as before). */
@@ -15143,7 +14877,7 @@ function menuHit(ux, uy) {
   if (ux < M.x || ux > M.x + M.w || uy < M.y || uy > M.y + M.h) return { act: 'close' };
   return { act: 'none' };
 }
-/* ---------------- Main menu: both captains pick a flag, then PLAY ---------------- */
+/* ---------------- Main menu: both sides pick a flag, then PLAY ---------------- */
 // panels and buttons: a white frame around see-through dark glass (the game shows through)
 function glassPanel(x, y, w, h, t = 4) {
   ug.fillStyle = 'rgba(0,0,0,0.5)'; ug.fillRect(x + t, y + t, w - 2 * t, h - 2 * t);   // (half see-through, user Oct 24)
@@ -15477,7 +15211,8 @@ function menuArrow(x, y, d, col = '#ffd23a') {
 function menuClick() { audioInit(); sound('click', gunCtl[0]); }
 // (user Nov 7, the TODO list: "With BATTLE picked, show this text on the empty space on the left") the rules, in the screen's
 // language, wrapped to the room left of the panel (none on a narrow screen: left out)
-const BATTLE_RULES = "SINK THE ENEMY'S HARBOUR TOWER BEFORE THEY SINK YOURS. EVERY VEHICLE YOU LOSE COSTS A CAPTAIN, AND LOSING ALL 8 ALSO LOSES THE GAME. CONTROLS ARE IN OPTIONS.";
+// (user Nov 19 15:47: no captains - "You have 6 lives": # is LIVES, 06-fleet.js)
+const BATTLE_RULES = "SINK THE ENEMY'S HARBOUR TOWER BEFORE THEY SINK YOURS. YOU HAVE # LIVES. EVERY VEHICLE YOU LOSE COSTS ONE, AND LOSING THEM ALL ALSO LOSES THE GAME. CONTROLS ARE IN OPTIONS.";
 const shownModeOf = () => joinedRoom() ? LINK.mode : menuSel.mode;
 function wrapPx(str, maxW, sc) {
   const L = []; let cur = '';
@@ -15487,7 +15222,7 @@ function wrapPx(str, maxW, sc) {
 function drawBattleRules(T) {
   const room = T.x - 32; if (room < 150) return;
   const sc = room > 330 ? 2 : 1, w = Math.min(room, 150 * sc + 120), x = Math.round((T.x - w) / 2);
-  const lines = wrapPx(trText(BATTLE_RULES), w, sc);
+  const lines = wrapPx(trText(BATTLE_RULES.replace('#', LIVES)), w, sc);
   let y = T.y + 12;
   drawText(ug, 'RULES', x, y, '#ffd23a', sc + 1); y += 8 * (sc + 1) + 6;
   for (const ln of lines) { drawText(ug, ln, x + 1, y + 1, '#1b2a3a', sc); drawText(ug, ln, x, y, '#ffffff', sc); y += 10 * sc; }
@@ -16783,7 +16518,7 @@ function collide() {
     const bounce = Math.max(12, closing * 0.38);
     A.vx = Math.min(A.vx, 0) - bounce * 0.5;
     B.vx = Math.max(B.vx, 0) + bounce * 0.5;
-    // both captains back off: engines astern for a moment, then the telegraphs fall to STOP
+    // both back off: engines astern for a moment, then the telegraphs fall to STOP
     for (const [sh, away] of [[A, -1], [B, 1]]) {
       sh.recoilT = 1.1; sh.recoilDir = away;
       sh.throttle = away * 0.2;
@@ -17366,8 +17101,8 @@ function crumbleTower(tw) {
 // (Nov 11, tables) the submarines: a record table, every hull a row - each side's own (subOf(p)), the placed ones, the lost ones going
 // on down (05-game-state.js THE ARMY'S HULLS): her side, where and how she moves, her dive (dive, depthT, rising, autoDive, awash), her
 // torpedoes and mines and their reloads, her lamp, her sections (lvl, chip), going down (sinkT, leak, rest, parts - her halves), mended
-// (weld, fixIdx), her captain, her harbour (dock) and its gate, the autopilot, the kraken's hold (_krHeld, _krS)
-const subs = new ColTable(vehRec(...VEH_REC, 'num: id fac facing x y vx vy a throttle input dive depthT away rising autoDive torps tk resupT mines mk light bubbleAcc fixIdx sinkT weld leak rest ventAcc aimA homeWait bumpT onFloor blockT scareT awash cap _krHeld',
+// (weld, fixIdx), her harbour (dock) and its gate, the autopilot, the kraken's hold (_krHeld, _krS)
+const subs = new ColTable(vehRec(...VEH_REC, 'num: id fac facing x y vx vy a throttle input dive depthT away rising autoDive torps tk resupT mines mk light bubbleAcc fixIdx sinkT weld leak rest ventAcc aimA homeWait bumpT onFloor blockT scareT awash _krHeld',
   'txt: state', 'val: dock lvl scorch parts turn lamp gate auto chip lastSec blockTop drag emerge washAcc foamAcc oil _krS', ...CIV_REC));
 // (engine stage 3) the submarines' own random source, made on first use (this file is read before the tables); their
 // tables subs and oldSubs in 36-zz-vehicles.js
@@ -17527,7 +17262,7 @@ function subsCollide() {
   const cx = (A.x + B.x) / 2 + (px / SUB_L < py / H ? 0 : 0), cy = (ay + by) / 2;
   const secOf = sb => clamp(Math.floor((cx - (sb.x - SUB_L / 2)) / SUB_L * SUB_SECTIONS), 0, SUB_SECTIONS - 1);
   hitSub(A, secOf(A), cx, cy, true); hitSub(B, secOf(B), cx, cy, true);
-  // both captains back off: engines to stop (a sub never backs up), so they don't keep grinding into each other
+  // both back off: engines to stop (a sub never backs up), so they don't keep grinding into each other
   for (const sb of [A, B]) { const t = telegraphs[sb.id]; if (t && crew[sb.id].mode === 'sub' && !sb.auto) { setOrder(t, 3); } }
   sound('crash', cx, Math.min(1, speed / 40));
   spawnSparks(cx, cy, 24, 200);
@@ -19100,7 +18835,7 @@ function drawMines(x0, x1) {
 
 //@src 29-plane.js:1
 /* ---------------- The fighter plane ----------------
-   Each captain has three. Taking one over brings it in from the sky on your side, a little above the hangar,
+   Each side has its own. Taking one over brings it in from the sky on your side, a little above the hangar,
    flying toward the enemy at full speed (a plane never stops). Hold rise / dive to climb and dive; the arrow
    pointing back turns it round; at the enemy's edge of the world it turns round by itself. Flying off your own
    edge it's home: repaired and rearmed, and you step into something else. Machine gun (held), four missiles fired
@@ -19133,7 +18868,7 @@ const PTRAIL_LIFE = 60;                        // a trail hangs in the sky for a
 // still falling or sinking (05-game-state.js THE ARMY'S HULLS): its side and kind, where and how it flies (spd, pitch, gam, aoa, roll,
 // turn, stall ...), its engine (eng), its weapons and their reloads, its damage (hits, dmg, wings, ice), in the clouds, its trail
 // (strand: its row of planeTrails; cover, splat), on the ground (gear, ground ...), the autopilot and the CPU's raid (auto, raid, aiStick ...)
-const planes = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy spd facing pitch hits dmg bombs rockets rk bk mgT mg smokeT smokeDark spin inCloud cloudT vaporT wait sink ice strand lampPh wings offT recoverT holdT holdS gam aoa cap gear flare pullT pullS bp q flyAt flap stall stallT turb invT smAcc',
+const planes = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy spd facing pitch hits dmg bombs rockets rk bk mgT mg smokeT smokeDark spin inCloud cloudT vaporT wait sink ice strand lampPh wings offT recoverT holdT holdS gam aoa gear flare pullT pullS bp q flyAt flap stall stallT turb invT smAcc',
   'txt: state eng kind', 'val: turn auto cover splat loiter roll coG ground rot gWant climbT climbX noseT enterK exitK offField raid _civT aiStick around aiGamT aiGam coughT frzT cranking iceAcc susY cloudCol dir washT', ...CIV_REC));
 // (engine stage 3) the planes' own random source, made on first use (this file is read before the tables; the engine's cough
 // sound, sfxSputter, keeps the shared rnd: a sound, not the game's state); their tables in 36-zz-vehicles.js
@@ -19177,7 +18912,7 @@ function prepPlaneArt(sheet, I) {
 }
 const planeArt = pl => wpArt(pl);   // (every warplane is drawn from the user's renders, each kind its own - 29-zzz-warplanes.js)
 /* ---------------- Team colours ----------------
-   Each captain's boats and planes wear a colour of their own, taken from the flag they fly: the red paint on the
+   Each side's boats and planes wear a colour of their own, taken from the flag they fly: the red paint on the
    battleship's and the sub's bottoms and on the plane's nose and tail is repainted in it (the shading kept). */
 // (worked out once a flag: the team's colour asks it every frame - Oct 31; read only, never changed by the callers)
 const FLAG_TONES = new Map();
@@ -19204,7 +18939,7 @@ function teamColour(p) {
   const mine = flagColours(flagOf(p)), def = p ? [60, 110, 200] : [200, 46, 40];
   let c = mine[0] || def;
   if (p === 1) {
-    // the same colour as the other captain's: take the flag's next colour, or a blue
+    // the same colour as the other side's: take the flag's next colour, or a blue
     const o = flagColours(flagOf(0))[0] || [200, 46, 40], near = a => Math.hypot(a[0] - o[0], a[1] - o[1], a[2] - o[2]) < 90;
     if (near(c)) c = mine.find(x => !near(x)) || (near([60, 110, 200]) ? [230, 200, 60] : [60, 110, 200]);
   }
@@ -19561,7 +19296,7 @@ function planeLost(pl) {
   fleet[pl.id].plane = Math.max(0, fleet[pl.id].plane - 1);
   emit('lost', { kind: 'plane', o: pl });
   if (crew[pl.id].mode === 'plane' || seatDriving(pl.id, 'plane')) lostVeh(pl.id, pl.x, 'plane');
-  else if (crew[pl.id].mode === 'dock' && !hasForces(pl.id)) killCaptain(pl.id);
+  else if (crew[pl.id].mode === 'dock' && !hasForces(pl.id)) sideLost(pl.id);
 }
 // Flying (or falling) into something. The sea: a splash, and it sinks. The land: a blast and smoke.
 // The enemy's tower: the tower comes down with it. The enemy's battleship or submarine: two hits on her.
@@ -20893,12 +20628,12 @@ function wpLights(pl, P) {
 }
 
 //@src 30-vehicle-switching.js:1
-/* ---------------- The captain: one life, in the tower, a boat or ashore in the harbour ---------------- */
+/* ---------------- The player: in the tower, a boat or ashore in the harbour ---------------- */
 // What a player still has: a standing tower, or a boat afloat (out on the water or berthed at home).
 // With none of those left, that player has lost.
 function hasForces(p) {
   if (STORY || TVT) return true;                                 // (STORY: no army to run out of; TANK VS TANK: the round's own rule - 50-zzzz-tvt.js)
-  if (useCaptains()) return capsLeft(p) > 0;                     // (the captains are what runs out)
+  if (useLives()) return lives[p] > 0;                           // (the lives are what runs out - 06-fleet.js)
   const sh = shipOf(p), sb = subOf(p);
   return towerUsable(towers.hAt(p)) || sh.state === 'afloat' || sb.state === 'out' || sb.state === 'docked' || fleet[p].ship > 0 || fleet[p].sub > 0 || canTake(p, 'plane');
 }
@@ -20909,7 +20644,7 @@ function lostUnit(p, x, lost) {
   setOrder(telegraphs[p], 3);
   const was = c.mode;
   c.mode = 'dock';
-  if (!hasForces(p)) { killCaptain(p); return; }
+  if (!hasForces(p)) { sideLost(p); return; }
   // (user Oct 28: "It seems we are no longer staying on the vehicle that crashed, but the camera just snaps to a random
   // place?" - it used to park the view at the surface where she was lost) the camera stays on the wreck as it falls or
   // sinks, framed as the vehicle was, and stays on it where it comes to rest (stepWatch). User Oct 28, 14:36: "it stays
@@ -20987,7 +20722,6 @@ function takeOver(p, k) {
   if (k === 'tank' || k === 'heli') {
     if (!canTake(p, k)) return false;
     const v = landUp(p, k) ? (k === 'tank' ? tankOf(p) : heliOf(p)) : landArrive(p, k);
-    boardCaptain(p, v, k);
     c.mode = k; setOrder(t, 3); v.input = 0;
     return true;
   }
@@ -20995,14 +20729,12 @@ function takeOver(p, k) {
     const pl = planeOf(p);
     if (!canTake(p, 'plane')) return false;
     if (pl.state === 'hangar') { launchPlane(pl); launchZoom(p, 'plane'); }   // (one in the air carries on as it was)
-    boardCaptain(p, pl, 'plane');
     pl.mg = false;
     c.mode = 'plane'; return true;
   }
   const v = k === 'ship' ? shipOf(p) : subOf(p);
   if (k === 'ship' ? v.state !== 'afloat' : v.state !== 'out' && v.state !== 'docked') return false;
   c.mode = k;
-  boardCaptain(p, v, k);
   // switching to a boat leaves her doing what she was doing (going ahead, going home, in or out through her
   // gate): only one lying at her berth is brought out. The lever shows her order
   if (!v.gate && (v.moored === true || v.state === 'docked')) { launchOut(v); setOrder(t, 3); launchZoom(p, k); }
@@ -21078,7 +20810,7 @@ function holdView(p, F) {
   const c = crew[p]; c.watch = null;
   c.look = F && Number.isFinite(F[0]) && Number.isFinite(F[1]) ? { x: F[0], y: F[1] } : null;
 }
-function killCaptain(p) {
+function sideLost(p) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
   const c = crew[p];
   if (c.dead) return;
@@ -21443,7 +21175,7 @@ function sfxDoor(x) {
   thump(out, t + 1.25, 90, 45, 0.25, 0.5);
 }
 
-/* ---------------- Crew: the captain's lifeboat ---------------- */
+/* ---------------- Crew: the player's lifeboat ---------------- */
 // The rigid inflatable that leaves a sinking battleship (after the reference): bow on the left - two shapes (the shape book, 04-zzz-shapes.js)
 function buildLifeboatArt() {
   const W = 48, H = 20;
@@ -21589,17 +21321,17 @@ function stepCrew(dt) {
       continue;
     }
     if (c.watch) stepWatch(p, dt);
-    if (c.mode === 'dock' && !hasForces(p)) killCaptain(p);
+    if (c.mode === 'dock' && !hasForces(p)) sideLost(p);
   }
   // a teammate online in a tower that's coming down: ashore
   for (const st of NET.seats) if (st.crew.mode === 'tower') { const tw = myTw(st.team); tw.inUse = true; if (!towerUsable(tw)) viaSeat(st, q => lostUnit(q, tw.x, 'tower')); }
   for (const tw of towers) {
     const cc = crew[tw.player];                        // (a nobody's tower - player -1: no crew of its own)
     if (!cc || cc.mode !== 'tower' || tw !== myTw(tw.player)) tw.inUse = false;
-    // the tower down: that's the round (the other captain wins once it's fallen)
+    // the tower down: that's the round (the other side wins once it's fallen)
     // (OPEN WORLD, user Oct 26: "BOTH towers need to be destroyed for you to lose a match" - the harbour's and the mountain's;
-    // Oct 27: "You only lose if both your towers are destroyed or you lost all captains. That's the rule." The captains:
-    // killCaptain. A fallen harbour tower's pier gun is no tower: it doesn't keep the round going. The sea game has the
+    // Oct 27: "You only lose if both your towers are destroyed or you lost all captains. That's the rule." Since Nov 19 the
+    // captains are lives (06-fleet.js): sideLost. A fallen harbour tower's pier gun is no tower: it doesn't keep the round going. The sea game has the
     // one tower: losing it loses the round)
     else if (tw.fallen && docks.length && ui.winner == null && tw.player >= 0 && (LAND ? towers.every(o => o.player !== tw.player || o.fallen || o.hp <= 0) : !tw.edge)) {
       tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
@@ -21634,20 +21366,20 @@ function stepCrew(dt) {
 // (user Oct 27: "When a tower has black smoke, it should go higher in the air") how much higher than the sea's smoke a
 // tower's rises before it slows to a drift: its own height above the sea (a mountain's tower stands far up), and 260 more
 const twClimb = tw => Math.max(0, WATER_Y - twBase(tw)) + 260;
-// The match ends the moment a captain dies
+// The match ends: a side's tower down, its lives gone, or its player lost
 function gameOver(winner) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
   if (ui.winner != null || PEACE()) return;                // (STORY: nobody ever wins - it goes on)
   ui.winner = winner; ui.winT = 0;
 }
-// the lifeboat is hit: that's the captain gone
+// the lifeboat is hit: that's the player gone
 function killGuy(p) {
   const c = crew[p];
   if (c.mode !== 'boat') return;
   const sy = surfaceY(c.x);
   for (let i = 0; i < 6; i++) debrisRow({ x: c.x + vehCrewRnd(-4, 4), y: sy - 2, vx: vehCrewRnd(-40, 40), vy: -vehCrewRnd(40, 120), a: vehCrewRnd(0, 6), w: vehCrewRnd(-10, 10), sw: vehCrewRnd(1.5, 3), sh: 1.2, col: i % 2 ? '#e8e2d2' : '#8a5a30', state: 0, bub: 0, seed: vehCrewR() * 6, age: 0 });
   c.mode = 'gone';
-  killCaptain(p);
+  sideLost(p);
 }
 function guysNear(x, y, r) {
   for (let p = 0; p < 2; p++) {
@@ -22499,7 +22231,7 @@ function sinkShip(sh) {
   if (sh.state !== 'afloat') return;
   sh.state = 'sinking'; sh.sinkT = 0; sh.input = 0; sh.throttle = 0; sh.moored = false;
   if (shipOf(sh.id) === sh) fleet[sh.id].ship = Math.max(0, fleet[sh.id].ship - 1);
-  emit('lost', { kind: 'ship', o: sh });                  // (engine stage 3: the captain (06-fleet-captains), the fish (35-particles))
+  emit('lost', { kind: 'ship', o: sh });                  // (engine stage 3: a life (06-fleet), the fish (35-particles))
   if (crew[sh.id].mode === 'ship') setOrder(telegraphs[sh.id], 3);   // only if you were aboard her
   // the hull parts at the sections that were blown open
   const cuts = new Set();
@@ -22697,7 +22429,7 @@ function stepSinkingShip(sh, dt) {
   if (n) sh.x = sx / n;
   sh.vx = 0;
   if (sh.sinkT > 13) {
-    // there is no second ship: this captain fights on from the tower alone
+    // there is no second ship: this side fights on from the tower alone
     for (const p of pieces) if (p.owner === sh.id) p.gen = 1;
     sh.state = 'gone';
   }
@@ -24191,7 +23923,7 @@ function tableOf(o) { if (o && o.hid != null && o.T instanceof ColTable && o.T.n
 // particles, splashes, trails...), never sent; net: 'changes' - built the same on both screens (the land's props), only its rows
 // changed since the round began are sent; netSkip: fields that are each screen's own (the physics accumulator); perPlayer: N -
 // the list is each side's own things at its index, in groups of N per side... (2: [side 0, side 1, side 0, side 1...]), sent
-// swapped to the second team's guest); netIds: more fields than id / owner / player that are a side (the captains' p))
+// swapped to the second team's guest); netIds: more fields than id / owner / player that are a side)
 // a thing as plain data at full precision (the network's netPlain rounds; a save must replay exactly): numbers, strings, little
 // arrays and nested plain objects; pictures, canvases, functions and the network's local-only fields left out; another thing of
 // a table referred to by its id ({ ref: uid })
@@ -24289,7 +24021,7 @@ function tablesLoad(S) {
 // row any more (a save from before the families were tables) takes its first hull of that family that isn't lost or placed
 defTable('sideOwn', null, { cols: sideOwn });
 const vehOwnBack = (k, T) => { for (let p = 0; p < 2; p++) { const v = ownOf(k, p); if (!v || !v.alive()) ownPut(k, p, T.find(q => !q.lost && q.placed == null && q.id === p) || null); } };
-// the battleships (06-fleet-captains makeShip, 22-ship-physics) - shipOf(p) each side's own, the lost ones going down
+// the battleships (06-fleet makeShip, 22-ship-physics) - shipOf(p) each side's own, the lost ones going down
 // (her art and dock are each side's own: TBL_SKIP leaves them out; one without a harbour gets her side's back)
 const vehDockBack = arr => { for (const v of arr) if (!v.dock && homeDock[v.id]) v.dock = homeDock[v.id]; };
 // (moved by the GAME EDITOR, 'tableMove': off her harbour's gate, her autopilot and her moorings)
@@ -24325,13 +24057,10 @@ defTable('planeWisps', null, { cols: planeWisps, rows: rows => planeWisps.plainO
 defTable('iceBits', null, { cols: iceBits, drawn: ['x', 'y', 'life', 'max', 's', 'tw'], rows: rows => iceBits.plainOfRows(rows), net: false });   // (Nov 1: a column table)
 // the crews (32-crew freshCrew): crew[p] each side's (loaded into the same two objects: NET.home holds them); the blood on the pier
 defTable('crew', () => crew, { net: false, make: () => freshCrew() });
-// the captains (06-fleet-captains buildCaptains): both sides' in one table, each back in her side's list once loaded
-defTable('captains', () => captains[0].concat(captains[1]), { netIds: ['p'], make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
-  after: arr => { captains[0] = arr.filter(c => (c.p || 0) === 0); captains[1] = arr.filter(c => c.p === 1); } });
-// the captain each side has picked to go next (captSel[p], an index in her side's list) and each side's hulls left (fleet[p]):
-// a row per side at its index. The pick is a plain number, so its row reads and writes it (worldRow, 36-zz-world.js)
-const CAPT_SEL_ROWS = [0, 1].map(p => worldRow({ i: [() => captSel[p], v => { if (typeof v === 'number') captSel[p] = v; }] }));
-defTable('captSel', () => CAPT_SEL_ROWS, { perPlayer: 2, make: () => CAPT_SEL_ROWS[0] });
+// each side's lives left (lives[p], 06-fleet.js) and each side's hulls left (fleet[p]): a row per side at its index. A life count is a
+// plain number, so its row reads and writes it (worldRow, 36-zz-world.js)
+const LIVES_ROWS = [0, 1].map(p => worldRow({ n: [() => lives[p], v => { if (typeof v === 'number') lives[p] = v; }] }));
+defTable('lives', () => LIVES_ROWS, { perPlayer: 2, make: () => LIVES_ROWS[0] });
 defTable('fleet', () => fleet, { perPlayer: 2, make: () => ({ ship: 0, sub: 0, plane: 0 }) });
 
 //@src 36-zz-wild.js:1
@@ -24429,7 +24158,7 @@ const WATER_ROW = worldRow({
 });
 defTable('water', () => [WATER_ROW], { net: false, make: () => WATER_ROW });
 // ---- the game's clock (time: what every system's timers count by) and the round (who won, and how long ago). The clock comes
-// back too, so the tables' own times (stamps of it) mean what they did. (Not shifted: the captains' clocks and a plane's time
+// back too, so the tables' own times (stamps of it) mean what they did. (Not shifted: a plane's time
 // in a cloud, which netApply puts on this screen's time - their own tables, loaded too, hold them as they were; shifted again
 // here they ran a second ahead, s3-drift Oct 30)
 function roundClock(v) {
@@ -24523,7 +24252,7 @@ defTable('dcharges', null, { cols: dcharges, rows: rows => dcharges.plainOfRows(
 defTable('mines', null, { cols: mines, rows: rows => mines.plainOfRows(rows) });   // (a column table since Nov 9, part 8)
 
 //@src 36-zzz-dock-tables.js:1
-/* THE HARBOURS AS TABLES (engine migration, stage 3 - 36-zz-tables.js). Their random source: dockR, 06-fleet-captains.js (the
+/* THE HARBOURS AS TABLES (engine migration, stage 3 - 36-zz-tables.js). Their random source: dockR, 06-fleet.js (the
    pier breaking and falling, the gates' foam in stepGates). */
 // ---- docks: each harbour in the world (docks; a side's stand-in far past the world's edge has nothing that changes) as its
 // plain state - its gates (how far open), door, flag and repair job, the pillars (broken, where, head gone, stump) and the
@@ -24665,7 +24394,7 @@ defTable('wclouds', null, { cols: wclouds, drawn: ['x', 'y', 'r', 'age', 'life',
    What decides the game still only comes from the host (NET.applying while it's put in; netGuestHold on the guest's own steps).
    The guest still sends its commands (act) and control state (ctlState) as before. Online the guest's team is player 0 on its
    screen: for the second team the player-indexed tables are sent in swapped order and every id / owner / player 0-1 swapped
-   (as netPlain does), the captains' side (p) too.
+   (as netPlain does), and a table's own fields that name a side (netIds) too.
    Messages go as JSON text, so the bytes counted (the perf panel's NET TABLES line) are what goes on the wire. The link is
    reliable and in order (PeerJS reliable:true), so what was sent is what the guest acknowledges; a guest that sees a snapshot
    missing asks for everything again (tfull), and the host starts that guest over from nothing. */
@@ -24674,7 +24403,7 @@ const NET_TABLES = (() => { try { return new URLSearchParams(location.search).ge
 // smoke, the particles, splashes, trails; the guest's own seat is its crew, sent as "you"; the CPU's brains think on the host;
 // the sea's surface is simulated on each screen); net: 'changes' - the land's props, built the same on both screens: only the
 // rows changed since the host first saw them; netSkip - fields each screen keeps for itself; perPlayer - a list each side's
-// things are at their index in (swapped for the second team); netIds - more fields that are a side (the captains' p)
+// things are at their index in (swapped for the second team); netIds - more fields that are a side
 const ntbOn = t => t.net !== false && !t.cols;   // (a column table's rows aren't sent here yet - PART-NOTES.md: the column path the worker has)
 const NTB_RANGE = 3;                         // (screens from a guest's view that are sent: ACTIVE within 1, NEAR within 3)
 const NTB_SLICE = 15;                        // (a 'changes' table's rows are looked at once in this many snapshots: once a second)
@@ -24867,7 +24596,7 @@ function ntbApply(T) {
   for (const [t, arr] of touched) if (t.after) t.after(arr);
 }
 // (the guest) a row's state turned on the host - a ship sinking, a tower falling: here too, with what that does on the screen
-// (its sound, its pieces and chunks - each screen's own: net: false - its smoke, its captain's skull), before its new values
+// (its sound, its pieces and chunks - each screen's own: net: false - its smoke), before its new values
 // are put in. Only for a thing the guest already had (one made from the row has nothing to go down from). As netApply did
 const ntbSinkSub = s => s === 'sinking' || s === 'wreck';
 const NTB_EVENTS = {
@@ -26915,7 +26644,7 @@ const camOverride = [null, null];
 on('sunk', e => {
   const p = e.o.id, k = e.kind, c = crew[p];
   if (c.mode === k || seatDriving(p, k)) lostVeh(p, e.o.x, k);
-  else if (c.mode === 'dock' && !hasForces(p)) killCaptain(p);
+  else if (c.mode === 'dock' && !hasForces(p)) sideLost(p);
 }, 'camera');
 // (user Nov 3 14:44: "when you crash in the water, the camera suddenly snaps") every focus goes through the plane's lead (planeLeadF),
 // so the lead eases out wherever the view goes next - onto the wreck as it falls - rather than vanishing in a frame
@@ -26927,7 +26656,7 @@ function camFocus(i) { return camUnderHud(i, planeLeadF(i, camFocus0(i))); }
 function camUnderHud(i, F) {
   if (!F || !F[4] || F[4][2] == null || ui.title) return F;
   const z = cam.za[ONEVIEW() ? 0 : i] || cam.zt[i] || 1, hz = 0.5 * VIEW_H / z;
-  const band = (typeof hudTop === 'function' ? hudTop() + 70 : 0) / Math.max(1, ubh) * VIEW_H / z;   // (the buttons, captains and minimap, in world units)
+  const band = (typeof hudTop === 'function' ? hudTop() + 70 : 0) / Math.max(1, ubh) * VIEW_H / z;   // (the buttons, hearts and minimap, in world units)
   const yMax = F[4][2] + hz - band - F[4][1];                        // (the view's middle no lower than this: its top edge clears the band by the thing's size)
   return F[1] > yMax ? [F[0], yMax, F[2], F[3], F[4]] : F;
 }
@@ -37280,7 +37009,7 @@ try { localStorage.removeItem('bd_sky_new'); } catch (e) { }   // (the old SKY: 
 // then I can pass it to you for debug. Can you add the same feature to the main game editor?"): the game as it is now, as text
 // to give to Claude, who loads it in the same build and sees exactly this; LOAD puts one back here. It holds the build, the
 // screen, the mode, the editor's view, the hour and the weather, the world as the online game sends it (netSnapshot: the
-// vehicles with their damage and fires, the towers, the docks, everything in flight, the captains, who's in what), the sky
+// vehicles with their damage and fires, the towers, the docks, everything in flight, each side's lives, who's in what), the sky
 // (NSKY.snapshot: the sky editor's settings, the clouds' growth, the decks' drift, the sun) and the settings this browser keeps
 // (bd_*: terrain edits and the like - put in first by LOAD too, user Nov 1: snapWorldLoad, 00-world.js). Not kept: the smoke,
 // sparks and splashes in the air - they start again from whatever is burning.
@@ -44073,7 +43802,7 @@ function cpuPlane(B, dt) {
   let pitchWant;
   if ((kind === 'dog' || kind === 'strafe' || kind === 'ram') && Math.abs(tx - pl.x) < 700) pitchWant = clamp(Math.atan2(ty - pl.y, Math.abs(tx - pl.x) + 40), -0.7, 0.7);
   else pitchWant = clamp((altWant - pl.y) / 320, -0.55, 0.55);
-  // never ram another plane (it costs a captain on each side): if an enemy plane is on a collision course in the
+  // never ram another plane (it costs a life on each side): if an enemy plane is on a collision course in the
   // next half second, break off - the higher one climbs, the lower one dives - and come round again
   if (kind !== 'ram') for (const o of planes) {
     if (!o || o === pl || o.id === p || o.state !== 'fly') continue;
@@ -50308,7 +50037,7 @@ function krgTube(x0, y0, r0, x1, y1, r1) {
        and what's sinking - a battleship's broken pieces, a sub's halves, containers, the liner's loose parts. Each is a proxy
        (KR.objs) on the game's object (o.ref): free, it follows the object; held, the kraken moves it and the object is pinned
        there (krPin, every physics step). A fish or a shark it takes leaves its school / the sharks and is drawn here.
-       Eaten, it's gone from the world through the game's own paths: an army sub is lost as when sunk (fleet, its captain,
+       Eaten, it's gone from the world through the game's own paths: an army sub is lost as when sunk (fleet, a life,
        lostVeh: the next one is ready at home), a minisub is lost and its driver ashore, a piece / half / box / part removed.
      - HITS: the game's torpedoes are the Lab's torpedoes (dodging, covering the head, a wound on the first hit, a split on the
        second, three head hits kill, falling pieces break); every underwater blast in reach (depth charges, mines, a torpedo
@@ -51268,7 +50997,7 @@ function krGone(o) {
   }
   KR.map.delete(r);
 }
-// an army sub eaten: lost as when she's sunk (sinkSub) - one fewer in the fleet, her captain gone, whoever drove her ashore
+// an army sub eaten: lost as when she's sunk (sinkSub) - one fewer in the fleet, a life gone, whoever drove her ashore
 // (the next one is ready at home: stepFleet); only there's nothing left of her to go down
 function krSubLost(sb) {
   if (netGuestHold() || (sb.state !== 'out' && sb.state !== 'docked')) return;
@@ -51277,7 +51006,7 @@ function krSubLost(sb) {
   emit('lost', { kind: 'sub', o: sb });
   sb.auto = null;
   if (crew[sb.id].mode === 'sub' || seatDriving(sb.id, 'sub')) lostVeh(sb.id, sb.x, 'sub');
-  else if (crew[sb.id].mode === 'dock' && !hasForces(sb.id)) killCaptain(sb.id);
+  else if (crew[sb.id].mode === 'dock' && !hasForces(sb.id)) sideLost(sb.id);
 }
 const krObjOf = ref => (ref && KR.map.get(ref)) || null;
 // ---- what's coming at it: the game's torpedoes, sinking shells and depth charges near it, as the Lab's torpedoes (KR.torps)
@@ -59931,8 +59660,8 @@ function terrainSyncSecs() {
 /* ================================================================
    LAND TEST (user Oct 25): the tank and the helicopter
    Each side starts with a tank and a helicopter on its own ground and can call in the plane (it comes in from that
-   side's edge of the world, as at sea). Every vehicle takes a captain; a vehicle lost costs its captain, and a side
-   with no captains left has lost. A lost tank or helicopter is replaced on its side's ground a few seconds later.
+   side's edge of the world, as at sea). A vehicle lost costs its side a life, and a side with no lives left has lost
+   (06-fleet.js). A lost tank or helicopter is replaced on its side's ground a few seconds later.
    Back on your own ground (stopped, or landed) a tank or helicopter is repaired and rearmed.
    - Tank: forward and back on the lever; rides the ground (tilting on slopes, falling into a crater dug under it,
      stopped by a wall too steep to climb). Its turret swings through 180 degrees (the ANGLE tape, as the battleship's
@@ -59958,9 +59687,9 @@ const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 // (Nov 11, tables) the tanks and the army helicopters: record tables, every hull a row - each side's own (tankOf(p), heliOf(p): none
 // till one comes in), the placed ones, the lost ones still going down (05-game-state.js THE ARMY'S HULLS)
-const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT gnd cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet av sinkT lay',   // (av: its body's turn, rad/s - landBody, and in water (sinkTurn); gnd: on its tracks on the ground, it drives (landBody); hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks; lay: its terrain layer - groundBelow, layStep)
+const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT gnd smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet av sinkT lay',   // (av: its body's turn, rad/s - landBody, and in water (sinkTurn); gnd: on its tracks on the ground, it drives (landBody); hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks; lay: its terrain layer - groundBelow, layStep)
   'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick scorch', ...CIV_REC));
-const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin cap smokeT input fixT roll lampPh enter col turb washT bitT lay',
+const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin smokeT input fixT roll lampPh enter col turb washT bitT lay',
   'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag scorch', ...CIV_REC));
 const landWrecks = [];
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
@@ -60053,17 +59782,17 @@ function landArrive(p, k) {
 }
 // is one standing (or flying) now, or can one come in?
 const landUp = (p, k) => { const v = k === 'tank' ? tankOf(p) : heliOf(p); return !!v && (k === 'tank' ? v.state === 'alive' : v.state === 'fly' || v.state === 'landed'); };
-const landCanCome = (p, k) => !landUp(p, k) && !(landWait[p][k] > 0) && !crew[p].dead && capsLeft(p) > 0;
+const landCanCome = (p, k) => !landUp(p, k) && !(landWait[p][k] > 0) && !crew[p].dead;
 function makeTank(p, x, y) {   // (y: where it's put down - on the terrain layer whose ground is there: tankSettle)
   const t = { id: p, fac: p, kind: 'tank', state: 'alive', x, y: Number.isFinite(y) && layHas(x) ? y : landTop(x, 0), a: 0, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, input: 0, hp: VTUNE.tank.hp,
-    ammo: VTUNE.tank.ammo, rk: 0, recoil: 0, mgT: 0, gnd: 1, cap: null, smokeT: 0, hitT: -9, fixT: 0 };
+    ammo: VTUNE.tank.ammo, rk: 0, recoil: 0, mgT: 0, gnd: 1, smokeT: 0, hitT: -9, fixT: 0 };
   tankSettle(t, 0, true);
   return t;
 }
 function makeHeli(p, x, y0) {   // (y0: where it's put down - on the terrain layer whose ground is there: layRest; none: from the sky down)
   const R = layHas(x) ? layRest(x, y0) : null, y = (R ? R.y : landTop(x, 0)) - heliSkid();
   return { id: p, fac: p, kind: 'heli', state: 'landed', x, y, lay: R ? R.lay : 0, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, tilt: 0, turn: null, hp: VTUNE.heli.hp, rockets: VTUNE.heli.rockets, rk: 0, mgT: 0,
-    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: landUnitR() };
+    rotor: 0, spin: 0, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: landUnitR() };
 }
 function buildLandUnits() {
   landListsReset();
@@ -61589,13 +61318,12 @@ function lakeClip(x0, x1, fn) {
   C.save(); spansClip(L); fn(); C.restore();
 }
 
-// a tank or helicopter gone off its own end of the world: home, mended and rearmed (its captain ashore again); the
+// a tank or helicopter gone off its own end of the world: home, mended and rearmed; the
 // button brings in a fresh one (user Oct 25 late)
 function landGoHome(p, k) {
   const v = k === 'tank' ? tankOf(p) : heliOf(p);
   if (!v) return;
   if (k === 'heli') { ropeRelease(v); v.rope = null; }
-  captainHome(v);
   { const T = k === 'tank' ? tanks : helis; T.cut(T.indexOf(v)); ownPut(k, p, null); }
   homeVeh(p, k);
 }
@@ -70284,7 +70012,7 @@ function storySubs(dt) {
 //@src 50-story.js:1
 /* ================================================================
    STORY (user Oct 31, the Story spec "Battleship Duel implementation notes", gen/story-spec-oct31.md): the OPEN WORLD's map
-   with no army and no enemy (PEACE: nobody wins, nothing runs out - 06-fleet-captains.js), one player. It opens looking at
+   with no army and no enemy (PEACE: nobody wins, nothing runs out - 06-fleet.js), one player. It opens looking at
    your home (a HOME structure - 50-zz-struct.js; else the first house; else the harbour) at sunrise; the day's number
    top-left (W.day: the clock's days - 36-sea-storm-weather.js, a 12-minute day) and your coins top-right. You take only
    civilian vehicles (canTake); the rest of the spec - your own vehicles parked at structures, switching between connected
@@ -74976,7 +74704,7 @@ function pillarFloor(x, y) { x = clamp(x, 0, WORLD_W - 1); return Math.min(groun
    renderObjects), its deck in its own turn as before - so the floor covers the pillar's foot, never a post standing on air */
 const PILLAR_SINK = 1.2 * UPM;
 function pillarFoot(xa, xb, y) { let f = -Infinity; for (const x of [xa + 0.5, (xa + xb) / 2, xb - 0.5]) f = Math.max(f, pillarFloor(x, y)); return f + PILLAR_SINK; }
-/* (engine part 5) a pier's picture by the things' pass (pierVis - 06-fleet-captains.js: its parts as they stand, what broke taken out): its
+/* (engine part 5) a pier's picture by the things' pass (pierVis - 06-fleet.js: its parts as they stand, what broke taken out): its
    deck's rows (the deck, its beams, the pillars' heads) or its pillars' (posts - before the ground they go into); in the transform m, s
    screen pixels a texel, from the window [u0, r0, ..] of its texels at m's origin; a stone pier on the desert's side in the desert's tone
    (the shader's paint - desertTone's rule), a wooden one in the hour's light (as the structures) */
@@ -75036,7 +74764,7 @@ function pierFloorsChanged() { try { for (const d of pierHosts()) { PIER_PP.dele
    'legs' go down until they find ground and the whole thing can be destroyed)"; 23:10: a car drives on it). A DOCK in its wooden look
    standing in the sea is a pier of its own, as a PIER one is (HARB.free): its deck solid (harbourTop at its own height, deckY), each
    tile's post a pillar that a shell, torpedo or depth charge breaks (pillarAt, breakPillar), a span going into the sea once nothing
-   holds it, the whole dock down once half its posts are broken (pierSettle, collapsePier - 06-fleet-captains.js, at its own scale:
+   holds it, the whole dock down once half its posts are broken (pierSettle, collapsePier - 06-fleet.js, at its own scale:
    pierK, pierTop, pierRows). Its picture (woodPierParts): the tile along its length, each post carried down to the floor under it - the
    tile's plain post again and again, its wet foot on the bottom. A dock in a lake stays as drawn. ---- */
 const WOOD = { deck: 19, rows: 62, post: [68, 91], seg: [46, 62], foot: [62, 80] };   // (the tile's rows and columns: planks' top, the deck strip's height, the post, its plain stretch, its wet foot)
@@ -78465,28 +78193,13 @@ function tvtFocus() {
   const vh = VIEW_H / (cam.zt[0] || 1);
   return [WORLD_W / 2, (Number.isFinite(lo) ? lo : WATER_Y) - 0.24 * vh, 0, 0, null];
 }
-// (user Nov 17 21:11: "on the top side of each player, it should have 3 hearts representing the life they have. Every time they get hit, they lose a
-// heart") a player's hearts: one for each hit their tank can take (VTUNE.tank.hp - a TvT hit takes one), full ones red, lost ones dark; a part of one
-// (a hard landing's damage) filled that far. Each side's run empties toward the bar's middle (mirror: the right side's)
-const TVT_HEART = ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
-function tvtHearts(x, y, n, hp, mirror) {
-  const W = TVT_HEART[0].length, px = 3, step = W * px + 4;
-  for (let i = 0; i < n; i++) {
-    const k = mirror ? n - 1 - i : i, fill = Math.max(0, Math.min(1, hp - k)), hx = x + i * step;   // (k: the heart's place counted from the outside)
-    for (let pass = 0; pass < 2; pass++) for (let r = 0; r < TVT_HEART.length; r++) for (let c = 0; c < W; c++) {
-      if (TVT_HEART[r][c] !== 'X') continue;
-      const lit = (mirror ? W - 1 - c : c) < fill * W;
-      ug.fillStyle = pass === 0 ? '#04070f' : !lit ? '#3a3f4a' : r === 1 && c === 1 ? '#ff9a8a' : '#e8322a';
-      ug.fillRect(hx + c * px + (pass ? 0 : 1), y + r * px + (pass ? 0 : 1), px, px);
-    }
-  }
-}
+// a player's hearts: one for each hit their tank can take (VTUNE.tank.hp - a TvT hit takes one) - drawHearts (17-hud.js, BATTLE's lives too)
 // the bar at the top of the screen: each side's flag, hearts and rounds won, the round, and the wind - its way and strength
 function tvtDraw() {
   if (!TVT || ui.title) return;
   const cx = ubw >> 1, y = (ui.top || 12) + 4, fw = 30, fh = 22;   // (the top's own buttons - the world's gear, the menu - in the top left corner: topLayout)
   const sc = 3, txt = TV.wins[SIDE(0) ? 1 : 0] + ' - ' + TV.wins[SIDE(0) ? 0 : 1];   // (left side's score first)
-  const nh = Math.max(1, Math.round(VTUNE.tank.hp)), hb = nh * (TVT_HEART[0].length * 3 + 4) - 4;   // (each side's hearts: one a hit the tank takes - its health)
+  const nh = Math.max(1, Math.round(VTUNE.tank.hp)), hb = heartsW(nh);   // (each side's hearts: one a hit the tank takes - its health)
   const tw = textWidth(txt) * sc, bw = tw + 2 * fw + 40 + 2 * (hb + 10);
   ug.fillStyle = 'rgba(4,7,15,0.55)'; ug.fillRect(cx - (bw >> 1) - 6, y - 4, bw + 12, fh + 30);
   // each player's flag and hearts on their own side (SIDE: player 0 is on the right when the sides swap), the hearts outside the flag
@@ -78494,7 +78207,7 @@ function tvtDraw() {
     const r = SIDE(p), f = img.flag && img.flag[flagPick[p]], fx = r ? cx + (bw >> 1) - hb - 10 - fw : cx - (bw >> 1) + hb + 10;
     if (f) ug.drawImage(f, fx, y, fw, fh);
     const t = tankOf(p), hp = t && t.state === 'alive' ? Math.max(0, t.hp) * nh / VTUNE.tank.hp : 0;
-    tvtHearts(r ? cx + (bw >> 1) - hb : cx - (bw >> 1), y + 2, nh, hp, r);
+    drawHearts(r ? cx + (bw >> 1) - hb : cx - (bw >> 1), y + 2, nh, hp, r);
   }
   drawText(ug, txt, cx + 1, y + 5, '#04070f', sc, 'center'); drawText(ug, txt, cx, y + 4, '#ffffff', sc, 'center');
   drawText(ug, 'ROUND #'.replace('#', TV.round), cx, y + fh + 4, '#ffd23a', 1, 'center');
@@ -80287,7 +80000,7 @@ function audioUpdate(dt) {
   // the sea: always there, louder and more surf-filled when it's rough or windy
   const sea = env.sea, wind = Math.abs(env.wind);
   const swell = 0.75 + 0.25 * Math.sin(time * 0.55) * Math.sin(time * 0.23 + 1);
-  // what each captain hears depends on where they are: up in a plane the sea is only heard low over it; down in
+  // what each player hears depends on where they are: up in a plane the sea is only heard low over it; down in
   // a dived sub it's a muffled rumble through the hull (the sub's own sounds take over)
   const L = ONEVIEW() ? [0] : [0, 1];
   let seaK = 0, underK = 0;
@@ -80719,8 +80432,7 @@ async function start(data) {
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     bedLife: () => ({ reef, coastFront, weedBits, chunks, plants }), seabedHit: (x, hl, pw, vx, cut, bl) => seabedHit(x, hl, pw, vx, cut, bl), uwBlast: (x, y, pw) => underwaterBlast(x, y, pw),   // (Oct 27: the bottom's growth)
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, cover: () => ({ up: coverUp(), asked: COVER.off.size > 0, last: COVER.last, lifts: COVER.lifts.slice() }), shipBlastAt: (p, x, y, pw) => shipBlast(shipOf(p), x, y, pw), captains, get screens() { return screenRows(); }, hiddenShip: p => hiddenShip(shipOf(p)), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planeOf(p).loiter = { x: planeOf(p).x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subOf(p).tk = 0; fireTorpedo(subOf(p), up); }, downPlane: p => downPlane(planeOf(p)), get oldPlanes() { return planes.filter(v => v.lost); }, shipOf, subOf, planeOf, tankOf, heliOf, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeTrailPts, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers.hAt(p)), seaHeli: (x, y) => { const old = heliOf(0); if (old) helis.cut(helis.indexOf(old)); const h = ownPut('heli', 0, hullRow(helis, makeHeli(0, x))); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planeOf(p)), rocket: p => fireRocket(planeOf(p)), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subOf(p)), capsLeft: p => capsLeft(p),
-    landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => { if (!L.s) return ''; const c = makeCanvas(L.s.w, L.s.h); c.getContext('2d').drawImage(L.s.pic, 0, 0); return c.toDataURL(); }); }, wrecks: () => landWrecks.length, top: x => landTop(x, 0), below: (x, y) => landBelow(x, y, 0), sandActive: () => land.sand.length,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, cover: () => ({ up: coverUp(), asked: COVER.off.size > 0, last: COVER.last, lifts: COVER.lifts.slice() }), shipBlastAt: (p, x, y, pw) => shipBlast(shipOf(p), x, y, pw), lives, get screens() { return screenRows(); }, hiddenShip: p => hiddenShip(shipOf(p)), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planeOf(p).loiter = { x: planeOf(p).x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subOf(p).tk = 0; fireTorpedo(subOf(p), up); }, downPlane: p => downPlane(planeOf(p)), get oldPlanes() { return planes.filter(v => v.lost); }, shipOf, subOf, planeOf, tankOf, heliOf, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeTrailPts, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers.hAt(p)), seaHeli: (x, y) => { const old = heliOf(0); if (old) helis.cut(helis.indexOf(old)); const h = ownPut('heli', 0, hullRow(helis, makeHeli(0, x))); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planeOf(p)), rocket: p => fireRocket(planeOf(p)), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subOf(p)),     landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => { if (!L.s) return ''; const c = makeCanvas(L.s.w, L.s.h); c.getContext('2d').drawImage(L.s.pic, 0, 0); return c.toDataURL(); }); }, wrecks: () => landWrecks.length, top: x => landTop(x, 0), below: (x, y) => landBelow(x, y, 0), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = ltR0(c); while (r < ltR1(c) && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < ltR1(c) && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(ltBelow(x, -Infinity)) ) }),
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, LAYOUT_L, LAYOUT_R, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? LAYOUT_R + 10 : LAYOUT_L - 10)), get LAND_Y() { return LAND_Y; }, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x, 0), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (LAYOUT_L + LAYOUT_R) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subOf(0), b = subOf(1), dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tankOf(p)) ownPut('tank', p, hullRow(tanks, makeTank(p, landHomeX(p, 'tank')))); if (!heliOf(p)) ownPut('heli', p, hullRow(helis, makeHeli(p, landHomeX(p, 'heli')))); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r; return { jet: d(a), jetWin: windowsDots(a) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.addRow({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(shipOf(p)), sinkSub: p => sinkSub(subOf(p)), fleet, get oldSubs() { return subs.filter(v => v.lost); }, get oldShips() { return ships.filter(v => v.lost); }, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
