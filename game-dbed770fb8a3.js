@@ -12962,8 +12962,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1098;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 00:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1099;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 00:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22306,7 +22306,7 @@ function stepStreaks(dt) {
    along it, breaking up as it fades (a hash a block), white or pale blue, faded as it is (each block's own colour: a 'view rgba' column).
    One more than 10 outside the view isn't drawn */
 const STREAK_L = pxLayer({
-  table: streaks, cols: { x: 'view i32', y: 'view i32', rgba: 'view rgba' }, pal: [],
+  table: streaks, cols: { x: 'view i32', y: 'view i32', rgba: 'view rgba' }, pal: [], hold: true,
   view: (T, own, nr, x0, x1, L) => {
     const c = T.c, X1 = c.x1, Y1 = c.y1, X2 = c.x2, Y2 = c.y2, ga = C.s.ga, col = [0, 0, 0, 0];
     let m = 0, R = pxRoom(L, 64);
@@ -22380,7 +22380,7 @@ function splashPal() {
    big drop, the splash's white, every fourth drop (by its place in the table) its pale blue; one more than 5 outside the view
    isn't drawn. pal: the splash's whites (by day, or in the waterline's light at night - splashPal) */
 const SPRAY_L = pxLayer({
-  table: spray, cols: { on: 'view u8', x: 'view i32', y: 'view i32', n: 'view u8' }, pal: [],
+  table: spray, cols: { on: 'view u8', x: 'view i32', y: 'view i32', n: 'view u8' }, pal: [], hold: true,
   view: (T, own, n, x0, x1, L) => {
     const X = T.c.x, Y = T.c.y, S = T.c.s;
     for (let i = 0; i < n; i++) {
@@ -22410,7 +22410,7 @@ function drawSplashes(x0, x1, pal) {
 // column's foot included (JSY: kept for the column being drawn, by its stamp)
 const JSY = new Float64Array(2048), JSK = new Int32Array(2048); let jsStamp = 0;
 const JET_L = pxLayer({
-  table: jets, cols: { x: 'view i32', y: 'view i32', c: 'view u8' }, pal: [],
+  table: jets, cols: { x: 'view i32', y: 'view i32', c: 'view u8' }, pal: [], hold: true,
   view: (T, own, n, x0, x1, L) => {
     const J = T.c;
     let m = 0, R = pxRoom(L, 64);
@@ -31043,6 +31043,9 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
             (Math.round(x * SV) comes out wrong for ~0.2% of rows). A tight loop over typed arrays: microseconds. It gives back
             how many entries it wrote: n for a layer of rows; for a layer of rectangles (Nov 1, the foam: as many as a row
             needs this view) the rectangles it wrote, one each, made room for with pxRoom(L, m)
+     hold   (Nov 18) its view is the table's rows and the view's numbers alone (where it is, its zoom, blocks and alpha): a second draw of it in the
+            same view of the same frame - the sea's pass and the land's both draw the splashes and the lakes' bubbles - uses the entries the
+            first one worked out (pxHeld), not the loop again
      rect   bool rect(int j, out ivec4 r, out int c) - the row's j-th rectangle as fillRect(r.x, r.y, r.z, r.w) in the view's
             pixels, in colour c (-1: its own, the 'view rgba' column); false: none. Whole numbers only (u_pb: PB). Written in
             the game's GLSL and made WGSL by the graphics layer's translator as the layer is first drawn (gpuNaga, one source).
@@ -31061,7 +31064,7 @@ const PXL = { pal: new Float32Array(128), b255: new Float32Array(256).map((_, i)
 // (pxLayer is called by files before this one: it reads none of this file's constants)
 const PXL_HW = 152;
 function pxLayer(o) {
-  const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, tick: -1, fgen: -1, fn: -1, fat: [], batch: 0, vs: null, pipes: new Map(), ep: -1 };
+  const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, tick: -1, fgen: -1, fn: -1, fat: [], batch: 0, vs: null, pipes: new Map(), ep: -1, hold: o.hold ? new Float64Array(12) : null };
   if (Object.keys(L.cols).length > 16 || L.pal.length > 32) throw new Error('pxLayer: at most 16 columns and 32 colours');   // (the header's room: PXL_HW)
   for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : L.cols[k].endsWith('rgba') ? Uint32Array : Int32Array)(16);
   L.hasFrame = Object.keys(L.cols).some(k => L.cols[k].startsWith('frame'));
@@ -31175,12 +31178,21 @@ function pxRoom(L, m) {
   for (const k in L.own) { const a = L.own[k]; if (a.length < m) { const b = new a.constructor(Math.max(m, a.length * 2)); b.set(a); L.own[k] = b; } }
   return L.own;
 }
+// (a layer that holds its view - hold: this view's entries already worked out this frame for the same rows and the same numbers, its count;
+// else worked out now and kept. Its own columns are written only by its view)
+function pxHeld(L, T, n, lo, hi) {
+  const H = L.hold, ga = C.s.ga;
+  if (H[0] === renderTick && H[1] === viewIdx && H[2] === lo && H[3] === hi && H[4] === SV && H[5] === CAMPX && H[6] === TOPPX && H[7] === PB && H[8] === PBV && H[9] === ga && H[10] === n) return H[11];
+  const cnt = L.view(T, L.own, n, lo, hi, L);
+  H[0] = renderTick; H[1] = viewIdx; H[2] = lo; H[3] = hi; H[4] = SV; H[5] = CAMPX; H[6] = TOPPX; H[7] = PB; H[8] = PBV; H[9] = ga; H[10] = n; H[11] = cnt;
+  return cnt;
+}
 function pxDraw(L, lo, hi) {
   const ctx = C, T = L.table, n = T ? T.n : 0;
   if ((T && !n) || !GPU.on || GPU.lost || GLR.lost || !frameDrawable(ctx)) return;
-  for (const k in L.own) { const a = L.own[k]; if (a.length < n) { L.own[k] = new a.constructor(Math.max(n, a.length * 2)); L.tick = -1; } }
+  for (const k in L.own) { const a = L.own[k]; if (a.length < n) { L.own[k] = new a.constructor(Math.max(n, a.length * 2)); L.tick = -1; if (L.hold) L.hold[0] = -1; } }
   if (L.tick !== renderTick) { if (L.frame) L.frame(T, L.own, n); L.tick = renderTick; L.fgen = -1; }   // (once a frame)
-  const cnt = L.view(T, L.own, n, lo, hi, L);
+  const cnt = L.hold ? pxHeld(L, T, n, lo, hi) : L.view(T, L.own, n, lo, hi, L);
   if (!cnt) return;
   const X = frameDrawBegin(ctx); if (!X) return;
   const s = ctx.s, t = ctx.target, m = s.m, op = s.op;
@@ -38326,7 +38338,7 @@ function drawDuds(x0, x1) {
    and a highlight, a small one a pixel. One more than 5 outside the view isn't drawn */
 const BUBBLE_PAL = ['rgba(4,28,64,0.38)', ...BUBBLE_COLS.flat()];   // (0 the shadow; 1 + band * 3 + rim / highlight / small)
 const BUBBLE_L = pxLayer({
-  table: bubbles, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: BUBBLE_PAL,
+  table: bubbles, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: BUBBLE_PAL, hold: true,
   view: (T, own, n, x0, x1, L) => {
     const X = T.c.x, Y = T.c.y, RR = T.c.r, R = pxRoom(L, n * 3);
     let m = 0;
