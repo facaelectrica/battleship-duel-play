@@ -14677,7 +14677,7 @@ function perfLines() {
     // (engine skeleton, Nov 9: the graphics card's own time a frame - the layer's timestamps, read a frame or more late - and its memory by pool)
     !GPU.on ? 'NO WEBGPU' : !GPU.feat['timestamp-query'] ? 'GPU TIME: NO TIMESTAMPS ON THIS DEVICE' : (G => 'GPU ' + f(FR.gpuMs) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays) + '  PASSES ' + FR.passMs.length)(GPUT.parts),
     !GPU.on ? '' : 'GPU MEMORY ' + Math.round((GPU_MEM.tex + GPU_MEM.buf + GPU_MEM.arena) / 1048576) + ' MB: ' + Object.entries(GPU_MEM.by).filter(e => e[1] > 524288).sort((x, y) => y[1] - x[1]).map(e => e[0].toUpperCase() + ' ' + Math.round(e[1] / 1048576)).join('  '),
-    'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + '  WEBGPU',
+    'V' + GAME_VERSION + ' ' + BUILD + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + '  WEBGPU',
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
@@ -22890,7 +22890,7 @@ const MSPL_LOBES = [[-46, 11, 0.42, -0.85, 0.06], [47, 11, 0.44, 0.8, 0.06], [-3
 // its rays: [where along its foot, angle from upright (rad), length (of the whole height)] - the high ones, then the low ones
 const MSPL_RAYS = [[-26, -0.72, 0.62], [27, 0.74, 0.6], [-34, -0.86, 0.5], [35, 0.84, 0.52], [-20, -0.62, 0.42], [21, 0.6, 0.44],
   [-40, -1.18, 0.34], [41, 1.2, 0.32], [-46, -1.3, 0.22], [47, 1.32, 0.24]];
-const MSPL_ROW = { q: new Float64Array(0), half: new Float64Array(0), cx: new Float64Array(0), j0: new Float64Array(0), j1: new Float64Array(0), on: new Float64Array(0) };   // (a row's spires - drawMineSplashes)
+if (MSPL_LOBES.length > 9 || MSPL_RAYS.length > 10) throw new Error('fsMine holds 9 spires and 10 rays a splash: widen its items with MSPL_LOBES / MSPL_RAYS');   // (its rows' layout, 40-zz-water-gpu.js)
 const MSPL_H = 185, MSPL_HOLD = 0, MSPL_SLUMP = 0.6;   // (the middle's height, world units: about ten mines; no pause at its full height (user Oct 29: "It should not 'hold' a pose, but come down"); how fast it falls back, against a thrown drop - slower than one, but not too slow)
 function startMineSplash(x, amt) {
   const k = 0.55 + 0.45 * amt, H0 = MSPL_H * amt;
@@ -22938,97 +22938,51 @@ function stepMineSplashes(dt) {
   }
 }
 // (user Oct 29: "fire and smoke should render behind it") drawn last of the overlays, after the smoke and the fire
-// (47-render-overlays.js renderOverlays). Nov 10: its blocks a painted-blocks draw (pxPaint, 40-zzzz-layers.js)
+// (47-render-overlays.js renderOverlays). Nov 19 (the sea's effects uncapped: 65 splashes on the user's view, their blocks a block at a time in JavaScript):
+// drawn on the GPU - a splash an instance of one draw (waterMinesGPU / fsMine, 40-zz-water-gpu.js), its blocks worked out per pixel by the rules this
+// loop had. Here each splash's numbers (168 a splash, in table order: fsMine's items) - its spires and rays now, its foot, its span and its box
 function drawMineSplashes(x0, x1, pal) {
   if (!msplashes.n) return;
-  pxPaint(B => {
-    for (let mi = 0; mi < msplashes.n; mi++) {
-      const S = msplashes.c, mx = S.x[mi], mt = S.t[mi], mH0 = S.H0[mi], mseed = S.seed[mi], id = S.sq[mi];
-      if (offViewR(mx, mH0 * 2, x0, x1)) continue;   // (its rays and spires reach about its height either way, blown with the wind)
-      const sy = surfaceY(mx), k = S.k[mi];
-      // (user Oct 29: "it should be affected by wind if there is any") blown downwind, the more the higher and the longer it stands
-      const wl = clamp(E.windU / 75, -1.5, 1.5) * 0.3 * Math.min(1, mt / 0.8);
-      // each spire now: [middle, half-width at the foot, height, lean, fallen, index]
-      const now = [], Q = msplLobes.c;
-      msplRun(msplLobes, id);
-      for (let q = MSPL_RUN[0], q1 = MSPL_RUN[1], i = 0; q < q1; q++, i++) { const [h, r, f] = msplLobe(Q.H[q], Q.v0[q], Q.d[q], mt); if (h > 1) now.push([Q.c[q] * (1 + 0.5 * f), Q.r[q] * (0.55 + 0.45 * Math.min(1, r * 1.6)) * (1 + 0.6 * f), h, Q.l[q], f, i]); }
-      const fMid = now.length ? now[now.length - 1][4] : 1;
-      // the rays: thin streaks out from its foot, breaking into dashes, then dots, toward their ends
-      const RY = msplRays.c;
-      msplRun(msplRays, id);
-      for (let q = MSPL_RUN[0], q1 = MSPL_RUN[1]; q < q1; q++) {
-        const [len, , f] = msplLobe(RY.L[q], RY.v0[q], RY.d[q], mt); if (len < 2) continue;
-        const ra = RY.a[q], rseed = RY.seed[q], rw = RY.w[q];
-        const ux = Math.sin(ra), uy = -Math.cos(ra), bx = mx + RY.c[q], n = Math.ceil(len * SV / PB);
-        for (let j = 0; j < n; j++) {
-          const u = j / n, wx = bx + ux * len * u - wl * uy * len * u, wy = sy + uy * len * u;
-          const hh = hash(j * 1.7 + rseed + Math.floor(mt * 10) * 0.37);
-          if (hh < Math.max(0, u - 0.35) * 1.2 + f * 0.6) continue;             // (dashes, then dots, toward its end; more so as it falls)
-          const X = Math.floor(PX(wx) / PB) * PB, Y = Math.floor(PY(wy) / PB) * PB;
-          if (Y + PB > PY(surfaceY(wx))) continue;                              // (never under the water)
-          B.fill(u > 0.7 ? pal[2] : pal[0]);
-          B.rect(X, Y, PB * (rw > 1 && u < 0.5 ? 2 : 1), PB);
-        }
-      }
-      if (!now.length) continue;
-      const top = Math.max(...now.map(q => q[2]));
-      const foot = 64 * k * Math.min(1, top / 40) * (1 + 0.5 * fMid), footH = Math.min(top, 0.16 * mH0 * k);   // (the white water heaped round its foot)
-      const span = 130 * k * (1 + 0.8 * fMid);
-      const yt = PY(sy - top - 8 * k), Xa = Math.floor(PX(mx - span) / PB) * PB, colY = [];
-      let yb = -1e9;
-      for (let X = Xa; X < PX(mx + span); X += PB) { const v = PY(surfaceY((X + PB / 2 + CAMPX) / SV)); colY.push(v); if (v > yb) yb = v; }   // (the sea's surface at each column)
-      // (Nov 18, the sea's effects uncapped: a spire's edge at a row - its middle, half-width and the jag of each side - is the row's alone, worked out
-      // once a row, not again for every block along it; and only the blocks a spire or the foot can reach looked at - each still by its own sums)
-      const nn = now.length; if (MSPL_ROW.q.length < nn) for (const key in MSPL_ROW) MSPL_ROW[key] = new Float64Array(nn * 2);
-      const RQ = MSPL_ROW.q, RH = MSPL_ROW.half, RC = MSPL_ROW.cx, RJ0 = MSPL_ROW.j0, RJ1 = MSPL_ROW.j1, RI = MSPL_ROW.on;
-      for (let y = Math.floor(yt / PB) * PB; y < yb; y += PB) {
-        const wy = sy - (y + PB / 2 + TOPPX) / SV;                             // (height above the water, world units)
-        const row = Math.floor(wy / 2.4);                                      // (the steps of the ragged edge)
-        let lo = Infinity, hi = -Infinity;                                     // (where along the row anything of it can be - world units from its middle)
-        for (let j = 0; j < nn; j++) {
-          const [c, r, h, l, , i] = now[j];
-          if (wy >= h + 2) { RI[j] = 0; continue; }
-          RI[j] = 1;
-          const q = clamp(Math.max(0, wy) / h, 0, 1), half = r * (1 - q), cx = c + (l + wl) * Math.max(0, wy);
-          const A = (0.6 + 2.4 * q) * k;                                      // (more ragged higher up, near the tip)
-          const j0 = A * (1.4 * (hash(row * 1.91 + i * 17.3 + 0 * 7.7 + mseed) - 0.5) + 0.5 * Math.sin(wy * 0.23 + i * 2.1 + 0 * 1.3 + mseed));
-          const j1 = A * (1.4 * (hash(row * 1.91 + i * 17.3 + 1 * 7.7 + mseed) - 0.5) + 0.5 * Math.sin(wy * 0.23 + i * 2.1 + 1 * 1.3 + mseed));
-          RQ[j] = q; RH[j] = half; RC[j] = cx; RJ0[j] = j0; RJ1[j] = j1;
-          lo = Math.min(lo, cx - half - Math.abs(j0) - 1); hi = Math.max(hi, cx + half + Math.abs(j1) + 1);
-        }
-        const fon = footH > 0 && wy < footH + 2, fhalf = fon && wy < footH ? foot * Math.pow(1 - Math.max(0, wy) / footH, 0.8) : 0;
-        const fj0 = fon ? 2.5 * k * (1.4 * (hash(row * 2.31 + 0 * 5.1 + mseed + 41) - 0.5) + 0.5 * Math.sin(wy * 0.4 + 0 + mseed)) : 0;
-        const fj1 = fon ? 2.5 * k * (1.4 * (hash(row * 2.31 + 1 * 5.1 + mseed + 41) - 0.5) + 0.5 * Math.sin(wy * 0.4 + 1 + mseed)) : 0;
-        if (fon) { lo = Math.min(lo, -fhalf - Math.abs(fj0) - 1); hi = Math.max(hi, fhalf + Math.abs(fj1) + 1); }
-        if (!(lo < hi)) continue;
-        // (the first block whose middle is at lo or past it, on the same grid of blocks)
-        const Xs = Xa + Math.max(0, Math.ceil(((lo + mx) * SV - CAMPX - PB / 2 - Xa) / PB)) * PB, Xe = Math.min(PX(mx + span), (hi + mx) * SV - CAMPX - PB / 2 + PB);
-        for (let X = Xs; X < Xe; X += PB) {
-          const wx = (X + PB / 2 + CAMPX) / SV - mx;
-          // (user Oct 29: "at the start frame it should never go underwater, it ruins the illusion. it has to be properly
-          // masked") nothing of it below the sea's own surface at this column - the surface it punched down included
-          if (y + PB > colY[(X - Xa) / PB]) continue;
-          // s: how far inside the water this point is (world units; < 0 outside), each spire's edges stepped and notched
-          let s = -99, ov = 0, oh = 0, oq = 0;                                         // (ov, oh: the front-most spire it's in - how far in, its half-width here)
-          for (let j = 0; j < nn; j++) {
-            if (!RI[j]) continue;
-            const cx = RC[j], v = RH[j] - Math.abs(wx - cx) + (wx < cx ? RJ0[j] : RJ1[j]);
-            if (v > s) s = v;
-            if (v > 0) { ov = v; oh = RH[j]; oq = RQ[j]; }                              // (the middle ones are drawn last: in front)
-          }
-          if (fon) { const v = fhalf - Math.abs(wx) + (wx < 0 ? fj0 : fj1); if (v > s) s = v; }
-          if (s <= 0) continue;
-          // (user Oct 29, gen/sea_src/mine_splash_ref_shade_oct29.png: "some proper shading") each spire white along its edges with
-          // a pale blue core up its middle, narrowing to the tip, so the spires in front stand out against the ones behind -
-          // the blue showing in V's between them; thin tips, the rays, the drops and the foot stay white
-          if (oh > 3 * k && oq < 0.75 && ov > Math.max(2.4 * k, oh * (0.5 + 0.5 * oq / 0.75))) B.fill(pal[4]);   // (a core that narrows to its own point, a quarter of the way below the tip, and runs right down to the water - user Oct 29)
-          // (inside: white; at the rim a pale pixel now and then, as the edge catches the water's colour)
-          else B.fill(s < 1.6 * k && hash(X * 0.37 + y * 1.13 + mseed) > 0.7 ? pal[3] : pal[0]);
-          B.rect(X, y, PB, PB);
-        }
-      }
+  const R = wRows(21 * msplashes.n);
+  let m = 0;
+  for (let mi = 0; mi < msplashes.n; mi++) {
+    const S = msplashes.c, mx = S.x[mi], mt = S.t[mi], mH0 = S.H0[mi], mseed = S.seed[mi], id = S.sq[mi];
+    if (offViewR(mx, mH0 * 2, x0, x1)) continue;   // (its rays and spires reach about its height either way, blown with the wind)
+    const sy = surfaceY(mx), k = S.k[mi], o = m * 168;
+    R.fill(0, o, o + 168);
+    // (user Oct 29: "it should be affected by wind if there is any") blown downwind, the more the higher and the longer it stands
+    const wl = clamp(E.windU / 75, -1.5, 1.5) * 0.3 * Math.min(1, mt / 0.8);
+    const mxP = mx * SV - CAMPX, syR = sy * SV - TOPPX;
+    // each spire now: middle, half-width at the foot, height, lean | fallen, its place among them
+    const Q = msplLobes.c; let nn = 0, top = 0, fMid = 1;
+    msplRun(msplLobes, id);
+    for (let q = MSPL_RUN[0], q1 = MSPL_RUN[1], i = 0; q < q1; q++, i++) {
+      const [h, r, f] = msplLobe(Q.H[q], Q.v0[q], Q.d[q], mt); if (h <= 1) continue;
+      const p = o + 16 + nn * 8;
+      R[p] = Q.c[q] * (1 + 0.5 * f); R[p + 1] = Q.r[q] * (0.55 + 0.45 * Math.min(1, r * 1.6)) * (1 + 0.6 * f); R[p + 2] = h; R[p + 3] = Q.l[q]; R[p + 4] = f; R[p + 5] = i;
+      top = Math.max(top, h); fMid = f; nn++;
     }
-  });
+    const foot = 64 * k * Math.min(1, top / 40) * (1 + 0.5 * fMid), footH = nn ? Math.min(top, 0.16 * mH0 * k) : 0;   // (the white water heaped round its foot)
+    const span = 130 * k * (1 + 0.8 * fMid);
+    let bx0 = mxP - span * SV, bx1 = mxP + span * SV, by0 = syR - (top + 8 * k) * SV;
+    // the rays: thin streaks out from its foot, breaking into dashes, then dots, toward their ends
+    const RY = msplRays.c; let nr = 0;
+    msplRun(msplRays, id);
+    for (let q = MSPL_RUN[0], q1 = MSPL_RUN[1]; q < q1; q++) {
+      const [len, , f] = msplLobe(RY.L[q], RY.v0[q], RY.d[q], mt); if (len < 2) continue;
+      const ux = Math.sin(RY.a[q]), uy = -Math.cos(RY.a[q]), p = o + 88 + nr * 8, bxP = (mx + RY.c[q]) * SV - CAMPX, ex = bxP + (ux - wl * uy) * len * SV;
+      R[p] = bxP; R[p + 1] = ux; R[p + 2] = uy; R[p + 3] = len; R[p + 4] = f; R[p + 5] = RY.seed[q] + Math.floor(mt * 10) * 1.618; R[p + 6] = RY.w[q]; R[p + 7] = Math.ceil(len * SV / PB);
+      bx0 = Math.min(bx0, bxP, ex); bx1 = Math.max(bx1, bxP, ex); by0 = Math.min(by0, syR + uy * len * SV); nr++;
+    }
+    if (!nn && !nr) continue;
+    // (its box: down to the lowest the water's surface stands under it)
+    let by1 = syR; for (let X = Math.floor(bx0 / PB) * PB; X < bx1 + PB; X += PB) by1 = Math.max(by1, PY(surfaceY((X + PB / 2 + CAMPX) / SV)));
+    R[o] = mxP; R[o + 1] = syR; R[o + 2] = k; R[o + 3] = wl; R[o + 4] = top; R[o + 5] = foot; R[o + 6] = footH; R[o + 7] = span;
+    R[o + 8] = nn; R[o + 9] = nr; R[o + 10] = mseed;
+    R[o + 12] = Math.floor(bx0 / PB) * PB - 2 * PB; R[o + 13] = Math.floor(by0 / PB) * PB - 2 * PB; R[o + 14] = Math.ceil(bx1 / PB) * PB + 3 * PB; R[o + 15] = Math.ceil(by1 / PB) * PB + 2 * PB;
+    m++;
+  }
+  waterMinesGPU(R, m, pal);
 }
 
 //@src 35-particles.js:1
@@ -29500,6 +29454,76 @@ fn foamHMax(nb: f32, t: f32) -> f32 { return max(1.0, floor(nb * 0.4 * (1.0 - 0.
   if (col.a <= 0.0) { discard; }
   return col;
 }
+// ---- A MINE'S SPLASH (drawMineSplashes, 34-zz-mine-splash.js): a splash an instance, its blocks of PB (wk[0].x) in the splash's whites (wk[1..5],
+// premultiplied) worked out per pixel by the rules its painting loop had. items: 42 each - [0] its middle's column (unrounded), the water's row there
+// (unrounded), its size k, the wind's lean; [1] its top (world units), its foot's half-width and height, its span; [2] its spires now, its rays, its seed, -;
+// [3] its box; [4..21] its spires (up to 9, back to front: middle, half-width at the foot, height, lean | how far fallen, its place); [22..41] its rays (up
+// to 10: its foot's column (unrounded), its way (x, y), its length now | how far fallen, its hash's seed (its own and the moment's), its width, its
+// dots). Its rays first - a dot a step along each, dashes then dots toward its end - then its body over them: the spires packed into one mass, each
+// one's edges stepped and notched a row at a time (wLat), the white water heaped round its foot, a pale blue core up each spire, a paler rim pixel now and
+// then; nothing under the water's surface at its column
+fn mineJag(row: f32, i: i32, side: i32, sd: u32, wy: f32, ms: f32, A: f32) -> f32 {
+  return A * (1.4 * (wLat(i32(row), i * 2 + side, sd) - 0.5) + 0.5 * sin(wy * 0.23 + f32(i) * 2.1 + f32(side) * 1.3 + ms));
+}
+@vertex fn vsMine(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
+  let bb = items[n * 42u + 3u];
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
+  var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
+  return o;
+}
+@fragment fn fsMine(v: VO) -> @location(0) vec4f {
+  let x = floor((v.p.x - D.m.z) / D.m.x); let y = floor((D.tgt.y - v.p.y - D.m.w) / D.m.y);
+  let o = v.i * 42u; let h0 = items[o]; let h1 = items[o + 1u]; let h2 = items[o + 2u]; let PB = D.wk[0].x; let SV = D.ds.z;
+  let X = floor(x / PB) * PB; let Y = floor(y / PB) * PB; let k = h0.z; let sd = bitcast<u32>(h2.z);
+  var col = -1;
+  // the rays: the last dot of any of them to land on this block
+  for (var q = 0u; q < u32(h2.y); q++) {
+    let a = items[o + 22u + q * 2u]; let b = items[o + 23u + q * 2u]; let len = a.w; let nd = b.w;
+    let dy = a.z * len * SV; if (abs(dy) < 1.0e-3) { continue; }
+    let ua = (Y - 0.5 - h0.y) / dy; let ub = (Y + PB - 0.5 - h0.y) / dy;
+    let j0 = max(0.0, floor(min(ua, ub) * nd) - 1.0); let j1 = min(nd - 1.0, ceil(max(ua, ub) * nd) + 1.0);
+    for (var t = 0; t < 8; t++) {
+      let j = j0 + f32(t); if (j > j1) { break; }
+      let u = j / nd;
+      let px = floor(a.x + (a.y - h0.w * a.z) * len * u * SV + 0.5); let py = floor(h0.y + a.z * len * u * SV + 0.5);
+      let DX = floor(px / PB) * PB; let DY = floor(py / PB) * PB;
+      if (DY != Y || !(X == DX || (b.z > 1.0 && u < 0.5 && X == DX + PB))) { continue; }
+      if (DY + PB > surfRow(px)) { continue; }                                           // (never under the water)
+      if (wLat(i32(j), i32(q), bitcast<u32>(b.y)) < max(0.0, u - 0.35) * 1.2 + b.x * 0.6) { continue; }   // (dashes, then dots; more so as it falls)
+      col = select(0, 2, u > 0.7);
+    }
+  }
+  // its body
+  let nn = u32(h2.x);
+  if (nn > 0u && X >= floor(floor(h0.x - h1.w * SV + 0.5) / PB) * PB && X < floor(h0.x + h1.w * SV + 0.5) && Y >= floor(floor(h0.y - (h1.x + 8.0 * k) * SV + 0.5) / PB) * PB
+      && Y + PB <= surfRow(X + PB * 0.5)) {
+    let wy = (h0.y - (Y + PB * 0.5)) / SV; let row = floor(wy / 2.4); let wx = (X + PB * 0.5 - h0.x) / SV; let wl = h0.w;
+    var s = -99.0; var ov = 0.0; var oh = 0.0; var oq = 0.0;
+    for (var j = 0u; j < nn; j++) {
+      let p = items[o + 4u + j * 2u]; let pq = items[o + 5u + j * 2u];
+      if (wy >= p.z + 2.0) { continue; }
+      let q = clamp(max(0.0, wy) / p.z, 0.0, 1.0); let half = p.y * (1.0 - q); let cx = p.x + (p.w + wl) * max(0.0, wy); let side = select(1, 0, wx < cx);
+      let jag = mineJag(row, i32(pq.y), side, sd, wy, h2.z, (0.6 + 2.4 * q) * k);   // (more ragged higher up, near the tip)
+      let vv = half - abs(wx - cx) + jag;
+      if (vv > s) { s = vv; }
+      if (vv > 0.0) { ov = vv; oh = half; oq = q; }                                          // (the middle ones are drawn last: in front)
+    }
+    let footH = h1.z;
+    if (footH > 0.0 && wy < footH + 2.0) {
+      let half = select(0.0, h1.y * pow(max(1.0e-6, 1.0 - max(0.0, wy) / footH), 0.8), wy < footH); let side = select(1, 0, wx < 0.0);
+      let vv = half - abs(wx) + 2.5 * k * (1.4 * (wLat(i32(row), 100 + side, sd) - 0.5) + 0.5 * sin(wy * 0.4 + f32(side) + h2.z));
+      if (vv > s) { s = vv; }
+    }
+    if (s > 0.0) {
+      if (oh > 3.0 * k && oq < 0.75 && ov > max(2.4 * k, oh * (0.5 + 0.5 * oq / 0.75))) { col = 4; }   // (a core that narrows to its own point)
+      else { col = select(0, 3, s < 1.6 * k && wLat(i32(X), i32(Y), sd ^ 0x5bd1e995u) > 0.7); }     // (at the rim a pale pixel now and then)
+    }
+  }
+  if (col < 0) { discard; }
+  let c = D.wk[1 + col];
+  if (c.a <= 0.0) { discard; }
+  return c;
+}
 // ---- A DEPTH CHARGE'S GAS BALL (drawGasBalls): a ball of white water drawn as a pixel artist would - a few flat tones lit from above-left, a dithered blend
 // between them, pressure rings running outward, streaks fanning out; tearing apart from the rim inward. A ball an instance (items: 9 each - its middle on the
 // screen, radius, age; its seed, block, how far torn, the rings' strength; its box; its five tones and its core's (premultiplied)), a block of PBV a pixel's;
@@ -30750,6 +30774,16 @@ function waterJetsGPU(R, k, pal) {
   for (let a = 0; a < k; a += per) {
     const b = Math.min(k, a + per), items = wgpuArena((b - a) * 64, (u8, o) => new Float32Array(u8.buffer, o, (b - a) * 16).set(R.subarray(a * 16, b * 16)));
     waterDraw('vsJet', 'fsJet', f => { f[168] = PBV; for (let i = 0; i < 3; i++) f.set(wgpuPmB(pal[i], ga), 172 + i * 4); }, items, b - a);
+  }
+}
+/* A MINE'S SPLASHES (drawMineSplashes, 34-zz-mine-splash.js): R their rows (168 numbers each - fsMine's items, in table order), k of them, pal its five
+   whites (css) - an instance a splash of one draw, as many a draw as an arena piece holds */
+function waterMinesGPU(R, k, pal) {
+  if (!k || !wgpuReady()) return;
+  const ga = C.s.ga, per = Math.floor((ARENA.CH - 4096) / 672);
+  for (let a = 0; a < k; a += per) {
+    const b = Math.min(k, a + per), items = wgpuArena((b - a) * 672, (u8, o) => new Float32Array(u8.buffer, o, (b - a) * 168).set(R.subarray(a * 168, b * 168)));
+    waterDraw('vsMine', 'fsMine', f => { f[26] = SV; f[168] = PB; for (let i = 0; i < 5; i++) f.set(wgpuPmB(pal[i], ga), 172 + i * 4); }, items, b - a);
   }
 }
 /* A DEPTH CHARGE'S GAS BALLS (drawGasBalls, 26-white-water.js - in the sea, and in each lake): a ball an instance of one draw (fsBall). list: [middle's column, row,
@@ -41544,9 +41578,6 @@ const FIRE_T = [0.12, 0.22, 0.36, 0.5, 0.64, 0.78, 0.92];
 // with them (40-zz-water-gpu.js, its blob a layer)
 const PUFF_LAYERS = [[1, 0, 4], [0.87, 0.12, 3], [0.72, 0.24, 2], [0.52, 0.36, 1], [0.3, 0.5, 0]];   // size, shift toward light, tone
 let renderTick = 0;
-// When the frame is over budget the governor lets a kept picture stand for up to three frames (the
-// billowing part of smoke and trails changes slowly; the thin line behind a shell is drawn every frame)
-let PUFF_PERIOD = 2;
 
 /* Fire: every flame is a soft disc of heat; the heat adds up where flames overlap and is cut into the fire palette's steps. The
    disc's profile is the old sprite's: full heat at the centre, 0.6 half way out, nothing at the edge. (It was painted with blended
@@ -79965,24 +79996,6 @@ function worldNow(restore) {
 function worldDrop() { WORLD_READY = false; builtViewW = -1; }
 
 let last = 0, acc = 0, holdFrames = false;
-// The governor watches how long each frame's own work takes and the time between frames. It used to lower FX
-// (1 = everything) to thin smoke, bubbles and sparks on slow frames; since Oct 29 it never does (the user: details are
-// never capped) - FX stays 1 unless a test pins it (FX_PIN).
-let FX = 1, FX_PIN = null, workEma = 8, gapEma = 16.7, refresh = 16.7;
-function govern(workMs, gapMs) {
-  if (FX_PIN !== null) { FX = FX_PIN; return; }                       // (a test can pin the level)
-  workEma += (workMs - workEma) * 0.08;
-  if (gapMs > 0 && gapMs < 100) {                                    // ignore tab switches and stalls
-    gapEma += (gapMs - gapEma) * 0.08;
-    refresh = Math.min(refresh + 0.002, gapEma);                     // the best the display keeps up
-  }
-  // (user Oct 29: "The details should never be capped. We need to figure out how to keep it." - the governor no longer thins
-  // anything: FX stays 1 - nothing is thinned by it (Nov 18: the sea's effects have no count limits either - bubbles, spray, foam, wakes) - and the puff
-  // pictures are repainted every other frame as always. It still measures (workEma, gapEma) for the perf panel; slow frames
-  // are fixed by doing less wasted work, never by showing less)
-  FX = 1; PUFF_PERIOD = 2; puffHold = 0;
-}
-let puffHold = 0;
 const perf = { phys: 0, smoke: 0, render: 0 }, FT = {};
 function frame(now) {
   requestAnimationFrame(frame);                                     // first: an error below can't stop the game
@@ -80060,7 +80073,6 @@ function frameBody(now) {
   probeTick(dt);
   const t3 = performance.now();
   perf.phys += (t1 - t0 - perf.phys) * 0.05; perf.smoke += (t2 - t1 - perf.smoke) * 0.05; perf.render += (t3 - t2 - perf.render) * 0.05;
-  govern(t3 - t0, dt * 1000); perf.fx = FX;
   // (the next frame was already asked for at the top of frame())
 }
 
@@ -80104,7 +80116,7 @@ async function start(data) {
     cave: CAVE,                                           // (the underwater caves: 50-land-caves)
     nsky: NSKY, gpuw: GPUW, disturb, skyv: () => SKYV, strike: x => strike(x, surfaceY(x), null), planesInSmokeTest: (a, dt) => { const vx = a._smX === undefined ? 0 : (a.x - a._smX) / dt, vy = a._smY === undefined ? 0 : (a.y - a._smY) / dt; a._smX = a.x; a._smY = a.y; const sp = Math.hypot(vx, vy); if (sp > 25) smearAir(a, vx, vy, sp, dt); },
     lifeboat: () => img.lifeboat, docks: () => docks, blast: (p, k) => { const sh = shipOf(p); const [x, y] = deckPoint(sh, k, 0.5); sectionBlast(x, y - 6, 0.95, sh.vx); damageSection(sh, k, 1, x, y); }, runCtl, shocks, plants, birds, perches, ships, cam, telegraphs, guns, tguns, towers, crew, pieces, debris, smoke, shells, trails, dust, grains, flames, env, scopes,
-    get time() { return time; }, get worldW() { return WORLD_W; }, boom: (x, y, pw) => sectionBlast(x, y, pw || 1, 0), ui, menuBtn: () => { const L = topLayout(); return [(L.menu[0] + 20) * PIXU / dpr, (L.menu[1] + 20) * PIXU / dpr]; }, mapTracks, shellAt: (p, x, y) => { const sh = shipOf(p), sec = hitTest(sh, x, y); if (sec >= 0) shellHit({ x, y, vx: 0, vy: 100, owner: 1 - p }, sh, sec); return sec; }, pinFX: v => { FX_PIN = v; }, get fx() { return FX; }, wh: () => wh, computeEnv,
+    get time() { return time; }, get worldW() { return WORLD_W; }, boom: (x, y, pw) => sectionBlast(x, y, pw || 1, 0), ui, menuBtn: () => { const L = topLayout(); return [(L.menu[0] + 20) * PIXU / dpr, (L.menu[1] + 20) * PIXU / dpr]; }, mapTracks, shellAt: (p, x, y) => { const sh = shipOf(p), sec = hitTest(sh, x, y); if (sec >= 0) shellHit({ x, y, vx: 0, vy: 100, owner: 1 - p }, sh, sec); return sec; }, wh: () => wh, computeEnv,
     setOrder: (p, i) => setOrder(telegraphs[p], i), fire: p => fireGun(shipOf(p)), shipMG: p => shipMG(shipOf(p)), tower: (p, mg) => fireTower(towers.hAt(p), mg),
     damage: (p, i, d) => damageSection(shipOf(p), i, d), kill: p => killGuy(p),
     get layout() { return { bw, bh, PIXW, ubw, ubh, PIXU, dpr }; },
