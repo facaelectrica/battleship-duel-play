@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1097, build: 'NOV 19 00:24', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1097, build: 'NOV 19 00:33', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -13032,7 +13032,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1097;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 00:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 19 00:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -64596,10 +64596,12 @@ struct LU {
 @group(0) @binding(3) var tS: texture_2d<f32>;          // (the flood's last step - or, laying it, the dark)
 @group(0) @binding(4) var<storage, read> lamps: array<vec4f, 32>;   // (each lamp two: its cell, its aim; its strength, reach (world), pool (world))
 @group(0) @binding(5) var<storage, read> wrow: array<f32>;   // (each texel column's water surface - its row in cells; 1e9: no water there - lightWater)
-@group(0) @binding(6) var<storage, read> lys: array<u32>;    // (each texel column's terrain layers: bit L, layer L stands there - lightLays; ring.x 0: none read)
+@group(0) @binding(6) var<storage, read> lys: array<u32>;    // (each cell column's front layer - bit L - and its foot's row (f32), two words a column - lightLays; ring.x 0: none read)
 // (a texel column's layers - none off the box) and the frontmost of them under bit L (0: the back)
 // (a cell column of the box - i from its first: its front layer's bit, 0 none - lightLays)
-fn laysAt(i: i32) -> u32 { if (U.ring.x < 0.5 || i < 0 || i >= i32(U.tgt.z * U.ring.z)) { return 0u; } return lys[i]; }
+fn laysAt(i: i32) -> u32 { if (U.ring.x < 0.5 || i < 0 || i >= i32(U.tgt.z * U.ring.z)) { return 0u; } return lys[2u * u32(i)]; }
+// (its foot's row: under it the column is the ground's - its dark the ground's)
+fn layFootAt(i: i32) -> f32 { if (U.ring.x < 0.5 || i < 0 || i >= i32(U.tgt.z * U.ring.z)) { return 0.0; } return bitcast<f32>(lys[2u * u32(i) + 1u]); }
 const CELL = ${LT_CELL.toFixed(4)};
 // (the water: the surface over a cell's column - the texel column it's in; off the box, none) and the day left at a cell under it: 1 over it or out of
 // any water, then fading with the depth under the surface (lightWater) - the light comes in at the surface and the water takes it
@@ -64731,9 +64733,14 @@ fn litD(d: f32) -> f32 { return 1.0 - smoothstep(0.13 * U.jf.z, U.jf.z, d * U.bo
   let t = vec2i(floor((p - U.lay.xy) / max(U.lay.zw - U.lay.xy, vec2f(1e-3)) * U.tgt.zw));
   if (t.x < 0 || t.y < 0 || t.x >= i32(U.tgt.z) || t.y >= i32(U.tgt.w)) { discard; }
   // (terrain layers: each layer's dark only on the pixels of the cell columns it's the front layer of - the pixel's own column, not its texel's: a texel
-  // across a layer's end lays each side its own dark; everything behind the front layer there is background - none of its dark - user Nov 18 22:44)
-  if (U.wat.z > 0.5) { let cx = i32(floor((p.x - U.lay.x) / max(U.lay.z - U.lay.x, 1e-3) * U.tgt.z * U.ring.z)); let b = laysAt(cx); let k = u32(U.wat.y + 0.5);
-    if (select(0u, u32(firstLeadingBit(b)), b != 0u) != k) { discard; } }
+  // across a layer's end lays each side its own dark; everything behind the front layer there is background - none of its dark - user Nov 18 22:44.
+  // And only over its foot there: under it - the water and the sea's floor under the layer - the ground's dark, as in a column with no layer (the
+  // coordinator Nov 18, the black block under the road))
+  if (U.wat.z > 0.5) {
+    let cx = i32(floor((p.x - U.lay.x) / max(U.lay.z - U.lay.x, 1e-3) * U.tgt.z * U.ring.z)); let b = laysAt(cx); let k = u32(U.wat.y + 0.5);
+    let ry = U.box.y + (p.y - U.lay.y) / max(U.lay.w - U.lay.y, 1e-3) * U.tgt.w * U.ring.z;   // (the pixel's row, cells)
+    let own = select(0u, u32(firstLeadingBit(b)), b != 0u && ry < layFootAt(cx));
+    if (own != k) { discard; } }
   let c = textureLoad(tS, t, 0); if (c.a <= 0.0) { discard; }
   let dbg = u32(U.wdk.w + 0.5); if (dbg != 0u && dbg != 4u) { discard; }   // (the layers' debug look - LAY_DBG: 4 the dark alone, by whose)
   if (dbg == 4u) { return select(vec4f(c.a, 0.0, c.a, c.a), vec4f(0.0, c.a, c.a, c.a), U.wat.y > 0.5); }
@@ -64875,12 +64882,13 @@ function lightEye(vi, vw) {
      the ground's grid). So the hill's dark never falls on the road in front of it or on what stands on the road, the road darkens under its own top,
      and the hill seen over the road keeps its face.
    No layer in the view: one dark, laid as always */
-// each cell column's front layer in the box (bit L: layer L - layFrontC; 0 none), the box's lw x LS columns - the shader's lys; .K: the front layers in
-// the box; .h its key
+// each cell column's front layer in the box (bit L: layer L - layFrontC; 0 none) and that layer's foot there (its row, a float - none: 0), two words a
+// column, the box's lw x LS columns - the shader's lys; .K: the front layers in the box; .h its key
 function lightLays(c0, LS, lw) {
-  const n = lw * LS, B = new Uint32Array(Math.max(4, n)), K = new Set(); let h = 0;
+  const n = lw * LS, B = new Uint32Array(Math.max(4, 2 * n)), BF = new Float32Array(B.buffer), K = new Set(); let h = 0;
   if (typeof layOn === 'function' && layOn()) for (let i = 0; i < n; i++) { const f = layFrontC(c0 + i); if (!f || f >= 32) continue;
-    B[i] = (1 << f) >>> 0; K.add(f); h = (h * 31 + i * 7 + f) | 0; }
+    const ft = (LF.foot[c0 + i] - LT_Y0) / LT_CELL;   // (its foot: the last of its spans' bottoms there, rows - layFrontC)
+    B[2 * i] = (1 << f) >>> 0; BF[2 * i + 1] = ft; K.add(f); h = (h * 31 + i * 7 + f + Math.round(ft) * 131) | 0; }
   B.K = [...K].sort((x, y) => x - y); B.h = h; return B;
 }
 // the view's box, colours and inputs this frame - the same for every layer's dark (made once a view a frame); null: no dark
