@@ -13011,8 +13011,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1114;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 11:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1115;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 11:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73208,7 +73208,9 @@ function bySize(list) {
    sound of entering that object ... A small animation ... Some effect if it makes sense ... It must be VISUALLY clear that you
    switched to control something else ... This is a global story rule for every swap we do from now on").
    One rule for every object. You always control one thing - a home you're in (a residential structure or a HOME BASE) or a
-   vehicle - and it wears the ORANGE arrow, still. Everything you could swap to from there wears a WHITE arrow bouncing over it:
+   vehicle. (user Nov 19 10:51: "Why do I keep seeing a giant arrow on the vehicle I am controlling? the arrows should only be when I
+   swap") The ORANGE arrow shows what you control only while a swap plays out: it flies over, lands, and fades away by END - between
+   swaps nothing marks what you're in. Everything you could swap to from there wears a WHITE arrow bouncing over it:
    - the place: the structure you're in and the ones it touches (storyLinks), or, in a vehicle that has stopped, every structure
      within STORY_PARK_M of it and the ones those touch;
    - the homes in the place, and every story vehicle in it or within STORY_PARK_M of the one you're in: your own, or one for
@@ -73222,7 +73224,8 @@ function bySize(list) {
             object takes your weight - a vehicle dips on its springs / in the water (susKick, susY), a home's windows light up
             and its stove's chimney puffs; the other arrows pop back, the old one's now white and bouncing;
      ENGINE a vehicle's engine catches (the sound's starter, then the engine) - its own exhaust, funnel smoke and screw bubbles,
-            the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start);
+            the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start); the orange arrow
+            fades away from here to END;
             Till ENGINE its lever does nothing (swapHold - stepCivDriven).
    (user Nov 13 17:47: "If I choose to switch immediately back, it should do it. There's no wait.") A swap can be made at any moment: one
    made while another plays out replaces it - its timeline starts again from 0 on the new object, and the old one's sound is cut
@@ -73397,7 +73400,7 @@ function swapEngineFx(v) {
 }
 
 /* ---- the arrows, drawn in the controls' layer (drawStoryBanner): pixel art, stepped in whole blocks (a 7-block arrowhead on a
-   3-block shaft, an ink edge round it, its right side a shade darker). The orange one still on what you control; the white
+   3-block shaft, an ink edge round it, its right side a shade darker). The orange one on what you control only through a swap; the white
    ones bouncing; a picked one (the keys, a pad's shoulders) a little bigger. Over a vehicle for sale: its name, its price, and
    how to buy it (or NO FUNDS); over your own: its name. ---- */
 const ARROW = ['..###..', '..###..', '..###..', '#######', '.#####.', '..###..', '...#...'];
@@ -73446,9 +73449,9 @@ function drawStoryArrows() {
   for (const T of L) {
     const p = w(T.wx, T.wy), X = Math.round(p.X), Y = Math.round(p.Y) - ARROW_GAP;
     if (T.cur) {
-      if (flying) continue;
-      const k = STSW.on ? clamp((tS - STSW_T.LAND) / 0.25, 0, 1) : 1, sq = STSW.on ? Math.sin(k * Math.PI) * (1 - k) * 1.6 : 0;   // (landed: squashed, springing back)
-      pxArrow(X, Y, ARROW_B, ARROW_COL.cur, sq);
+      if (flying || !STSW.on) continue;                    // (no swap playing out: what you control wears no arrow)
+      const k = clamp((tS - STSW_T.LAND) / 0.25, 0, 1), sq = Math.sin(k * Math.PI) * (1 - k) * 1.6;   // (landed: squashed, springing back)
+      pxArrow(X, Y, ARROW_B, ARROW_COL.cur, sq, clamp((STSW_T.END - tS) / (STSW_T.END - STSW_T.ENGINE), 0, 1));   // (then gone by the swap's end)
       if (STSW.on && k < 1) swapSparks(X, Y, k);
       continue;
     }
