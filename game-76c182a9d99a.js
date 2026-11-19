@@ -12950,8 +12950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1123;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 17:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1124;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 18:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24023,14 +24023,17 @@ defTable('sideOwn', null, { cols: sideOwn });
 const vehOwnBack = (k, T) => { for (let p = 0; p < 2; p++) { const v = ownOf(k, p); if (!v || !v.alive()) ownPut(k, p, T.find(q => !q.lost && q.placed == null && q.id === p) || null); } };
 // the battleships (06-fleet makeShip, 22-ship-physics) - shipOf(p) each side's own, the lost ones going down
 // (her art and dock are each side's own: TBL_SKIP leaves them out; one without a harbour gets her side's back)
+// (battle-lives chat, Nov 19: a hull's harbour is never sent (TBL_SKIP 'dock') - the page gives it back, after a load (after) AND after each of the
+// worker's snapshots (adopted): a new hull made in the worker (a sunk sub's next, spareReady - her lost one still going down) reached the page with
+// no harbour, and drawing her at her gate (harbourClip - gateOf) threw a DRAW ERROR)
 const vehDockBack = arr => { for (const v of arr) if (!v.dock && homeDock[v.id]) v.dock = homeDock[v.id]; };
 // (moved by the GAME EDITOR, 'tableMove': off her harbour's gate, her autopilot and her moorings)
 const vehBoatMoveTo = (v, e) => { tblMoveTo(v, e); v.gate = null; v.auto = null; v.moored = false; };
-defTable('ships', null, { cols: ships, after: arr => { vehDockBack(arr); vehOwnBack('ship', ships); }, moveTo: vehBoatMoveTo });
+defTable('ships', null, { cols: ships, after: arr => { vehDockBack(arr); vehOwnBack('ship', ships); }, adopted: () => vehDockBack(ships), moveTo: vehBoatMoveTo });
 // (a sunk ship's broken pieces are the weapons' table, 'pieces' - 36-zzz-arms-tables.js)
 // the submarines (24-submarine makeSub) - subOf(p) each side's own, the lost ones going down and their halves on the sand (art and
 // dock each side's own; one without a harbour gets her side's back)
-defTable('subs', null, { cols: subs, after: arr => { vehDockBack(arr); vehOwnBack('sub', subs); }, moveTo: vehBoatMoveTo });
+defTable('subs', null, { cols: subs, after: arr => { vehDockBack(arr); vehOwnBack('sub', subs); }, adopted: () => vehDockBack(subs), moveTo: vehBoatMoveTo });
 // the planes (29-plane makePlane) - planeOf(p) each side's own, the lost ones still falling or sinking (strand - the trail it's
 // laying, cover and splat - saved and sent as any field); the trails, the wisps of rushing air and the ice shed off its wings
 defTable('planes', null, { cols: planes, after: () => vehOwnBack('plane', planes) });
