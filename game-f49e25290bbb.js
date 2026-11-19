@@ -10833,10 +10833,12 @@ function dwAt(x) { const L = DW.live; let y = 0; for (let i = 0; i < L.length; i
 const dwYAt = (w, x, h) => surfaceY0(x) - (h - dwTab(w, x, true));
 // the water's own speed along at x (world units a second): with the wave, by how high its surface stands there
 function dwFlow(x) {
-  const L = DW.live; let v = 0;
-  for (let i = 0; i < L.length; i++) { const w = L[i]; if (w.H > 0 && x >= w.xa && x <= w.xb) v += w.dir * w.c * (w.K.push || 0) * clamp(dwTab(w, x, true) / w.H, -0.3, 1); }   // (where it stands at all - dwTab's own rule: nothing of it elsewhere)
+  const L = DW.live, n = DWS.on ? dwAbout(x) : -1; let v = 0;
+  if (n < 0) for (let i = 0; i < L.length; i++) v += dwFlowOf(L[i], x); else for (let i = 0; i < n; i++) v += dwFlowOf(L[DW_AB[i]], x);
   return v;
 }
+// (a wave's share of it - where it stands at all, dwTab's own rule: nothing of it elsewhere)
+const dwFlowOf = (w, x) => w.H > 0 && x >= w.xa && x <= w.xb ? w.dir * w.c * (w.K.push || 0) * clamp(dwTab(w, x, true) / w.H, -0.3, 1) : 0;
 // THE WATER'S SPEED WHERE A THING RIDES (world y on a wave's water - dwSurfAt): a wave's water moves on with it the more the higher up it is (its push of
 // its speed, by its height there), and a LIP - water with air under it, thrown out ahead - moves at the wave's own speed (user Nov 18 13:51: a boat
 // up at the crest as it pitches over is taken with it, over the falls - not left behind on a slower surface). And on any face steeper than 1:1 at
@@ -10886,26 +10888,60 @@ const DW_WHITE = [255, 255, 255];
    dwSpans(w, x, S): the column's highest water (S.top) and its air gaps top down (S.g: [high, low] heights - DW_GAPS at most; S.n of them).
    TRAPPED AIR: a gap with no way out to the open air - no neighbouring column's air beside it reaching up to the sky, step by step (dwTrapMark) - is
    air the wave has closed in - a tunnel: drawn as the air it is (dwGapCols), it fills with churned foam as it's shut (dwTrapFoam), bursting out at the tip */
-const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32), DW_XK = new Int16Array(32);   // (each crossing: its height, its way, which piece of the curve)
-const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), gk: new Int16Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });   // (gk: the curve's pieces over and under each gap)
-function dwSpans(w, x, S) {
-  const C = w.C; let m = 0; S.n = 0; S.top = -Infinity;
-  // (user Nov 18 16:25, bug-20261118-162454: "land gets a giant triangle of water" - a wave is water only over its own water, as its table is
-  // (dwTab): past the shore its outline is nothing, drawn or felt)
-  if (!(x >= w.xa && x <= w.xb) || !w.n || x < w.run[0] || x > w.run[1]) return false;
-  for (let k = 0; k < w.n - 1 && m < 32; k++) {
-    const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) === (xB <= x)) continue;
-    const h = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), d = xB > xA ? 1 : -1;
-    let j = m++; while (j > 0 && DW_XS[j - 1] < h) { DW_XS[j] = DW_XS[j - 1]; DW_XD[j] = DW_XD[j - 1]; DW_XK[j] = DW_XK[j - 1]; j--; } DW_XS[j] = h; DW_XD[j] = d; DW_XK[j] = k;   // (top first)
-  }
-  let wd = 0, hi = 0, hk = 0;
+const DW_GAPS = 3;
+// (a column's answer, and its crossings of the outline while it's worked out - xs, xd, xk: each one's height, its way, which piece of the curve; m of them)
+const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), gk: new Int16Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS),   // (gk: the curve's pieces over and under each gap)
+  m: 0, xs: new Float64Array(32), xd: new Int8Array(32), xk: new Int16Array(32) });
+// one more crossing of a column: kept top first, those of one height in the curve's order (32 at most)
+function dwSpanPut(S, h, d, k) {
+  if (S.m >= 32) return;
+  const xs = S.xs, xd = S.xd, xk = S.xk; let j = S.m++;
+  while (j > 0 && xs[j - 1] < h) { xs[j] = xs[j - 1]; xd[j] = xd[j - 1]; xk[j] = xk[j - 1]; j--; }
+  xs[j] = h; xd[j] = d; xk[j] = k;
+}
+// a column's crossings wound into its water and its air gaps
+function dwSpanWind(S) {
+  const xs = S.xs, xd = S.xd, xk = S.xk, m = S.m; let wd = 0, hi = 0, hk = 0;
   for (let i = 0; i < m; i++) {
-    const was = wd !== 0; wd += DW_XD[i]; const now = wd !== 0;
-    if (!was && now) { if (S.top === -Infinity) S.top = DW_XS[i]; else if (S.n < DW_GAPS) { S.g[2 * S.n] = hi; S.g[2 * S.n + 1] = DW_XS[i]; S.gk[2 * S.n] = hk; S.gk[2 * S.n + 1] = DW_XK[i]; S.open[S.n] = 0; S.n++; } }
-    else if (was && !now) { hi = DW_XS[i]; hk = DW_XK[i]; }
+    const was = wd !== 0; wd += xd[i]; const now = wd !== 0;
+    if (!was && now) { if (S.top === -Infinity) S.top = xs[i]; else if (S.n < DW_GAPS) { S.g[2 * S.n] = hi; S.g[2 * S.n + 1] = xs[i]; S.gk[2 * S.n] = hk; S.gk[2 * S.n + 1] = xk[i]; S.open[S.n] = 0; S.n++; } }
+    else if (was && !now) { hi = xs[i]; hk = xk[i]; }
   }
   return S.top > -Infinity;
 }
+function dwSpans(w, x, S) {
+  const C = w.C; S.m = 0; S.n = 0; S.top = -Infinity;
+  // (user Nov 18 16:25, bug-20261118-162454: "land gets a giant triangle of water" - a wave is water only over its own water, as its table is
+  // (dwTab): past the shore its outline is nothing, drawn or felt)
+  if (!(x >= w.xa && x <= w.xb) || !w.n || x < w.run[0] || x > w.run[1]) return false;
+  for (let k = 0; k < w.n - 1 && S.m < 32; k++) {
+    const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) === (xB <= x)) continue;
+    dwSpanPut(S, C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), xB > xA ? 1 : -1, k);
+  }
+  return dwSpanWind(S);
+}
+/* THE SAME FOR A RUN OF COLUMNS SIDE BY SIDE (L[0..n) at the places X[0..n), rising and evenly apart): the outline is laid into the columns
+   once - each piece of the curve given to the few columns it crosses - instead of every column asking every piece (96 of them: a view's
+   columns under ten waves, twice a physics step for the trapped air and for every drawing of the water, was a third of a storm's cost that
+   wasn't its foam - user Nov 18 18:58). The same crossings in the same order, so the same answer as dwSpans column by column */
+function dwSpansRun(w, X, n, L) {
+  for (let i = 0; i < n; i++) { const S = L[i]; S.m = 0; S.n = 0; S.top = -Infinity; }
+  if (!w.n || n < 1) return;
+  const C = w.C, xa = w.xa, xb = w.xb, ra = w.run[0], rb = w.run[1], X0 = X[0], inv = n > 1 && X[n - 1] > X0 ? (n - 1) / (X[n - 1] - X0) : 0;
+  for (let k = 0; k < w.n - 1; k++) {
+    const xA = C[2 * k], xB = C[2 * k + 2]; if (xA === xB) continue;
+    const lo = xA < xB ? xA : xB, hi = xA < xB ? xB : xA;
+    // (the columns that may cross it - a column to spare each side; each still asked dwSpans' own question)
+    const i0 = inv ? Math.max(0, Math.floor((lo - X0) * inv) - 1) : 0, i1 = inv ? Math.min(n - 1, Math.ceil((hi - X0) * inv) + 1) : n - 1;
+    for (let i = i0; i <= i1; i++) {
+      const x = X[i]; if ((xA <= x) === (xB <= x) || !(x >= xa && x <= xb) || x < ra || x > rb) continue;
+      dwSpanPut(L[i], C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), xB > xA ? 1 : -1, k);
+    }
+  }
+  for (let i = 0; i < n; i++) dwSpanWind(L[i]);
+}
+let DW_CX = new Float64Array(512);   // (a run's places - dwSpansRun)
+const dwRunX = n => (DW_CX.length >= n ? DW_CX : (DW_CX = new Float64Array(n + 256)));
 // which gaps of a run of columns (L[0..n), side by side) reach the open air: a gap beside a column's sky (above its top), or beside a gap that does;
 // the run's ends are open (the sea beyond them). Two gaps side by side are one air - (user Nov 18 13:28, ref-hollow-gone-nov18: a narrow hollow
 // slanting steeply had gaps that didn't overlap column to column, read as shut in and filled) - when the same pieces of the curve are over and under
@@ -10926,16 +10962,21 @@ function dwTrapMark(L, n, tol) {
 // and that wave's gaps (user Nov 18 12:16, ref-many-waves-nov18). F: eight numbers a column of the view (o = the column + 3): the top's row, then
 // each gap's first and last rows; none: -1e9, 1e9 ...
 const DW_COLS = [];
+let DW_SY = new Float64Array(0);   // (the surface at each column of the view, asked once a laying however many waves stand over it - dwGapCols)
 function dwGapCols(F, nOut) {
   for (let o = 0; o < nOut; o++) { F[8 * o] = -1e9; for (let q = 1; q < 8; q++) F[8 * o + q] = 1e9; }
+  let SY = null;
   for (const w of DW.live) {
     if (!(w.fb >= w.fa)) continue;                                  // (not folded: its surface is the stepped columns' own)
     const o0 = Math.max(0, Math.floor(w.xa * SV - CAMPX) + 3), o1 = Math.min(nOut - 1, Math.ceil(w.xb * SV - CAMPX) + 3), n = o1 - o0 + 1; if (n < 1) continue;
     while (DW_COLS.length < n) DW_COLS.push(dwSpanNew());
-    for (let o = o0; o <= o1; o++) dwSpans(w, (o - 3 + CAMPX + 0.5) / SV, DW_COLS[o - o0]);
+    const X = dwRunX(n); for (let o = o0; o <= o1; o++) X[o - o0] = (o - 3 + CAMPX + 0.5) / SV;
+    dwSpansRun(w, X, n, DW_COLS);
+    if (!SY) { if (DW_SY.length < nOut) DW_SY = new Float64Array(nOut + 64); SY = DW_SY; SY.fill(NaN, 0, nOut); }
     for (let o = o0; o <= o1; o++) {
       const S = DW_COLS[o - o0]; if (S.top === -Infinity) continue;
-      const x = (o - 3 + CAMPX + 0.5) / SV, base = surfaceY0(x) + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(S.top);
+      const x = X[o - o0]; if (SY[o] !== SY[o]) SY[o] = surfaceY0(x);
+      const base = SY[o] + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(S.top);
       const hi = F[8 * o] === -1e9 || rt <= F[8 * o]; if (!hi) continue;
       F[8 * o] = rt; for (let q = 1; q < 8; q++) F[8 * o + q] = 1e9;
       let g = 0;
@@ -10951,7 +10992,7 @@ function dwTrapFoam(w, dt) {
   if (!(w.fb >= w.fa) || SIM_ONLY) return;
   const st = Math.max(DX, w.H * 0.02), n = Math.min(400, Math.floor((w.xb - w.xa) / st) + 1), c = w.c * w.dir, H = w.H;
   while (DW_TC.length < n) DW_TC.push(dwSpanNew());
-  for (let i = 0; i < n; i++) dwSpans(w, w.xa + i * st, DW_TC[i]);
+  { const X = dwRunX(n); for (let i = 0; i < n; i++) X[i] = w.xa + i * st; dwSpansRun(w, X, n, DW_TC); }
   dwTrapMark(DW_TC, n, st);
   let A = 0; for (let i = 0; i < n; i++) { const S = DW_TC[i]; for (let k = 0; k < S.n; k++) if (!S.open[k]) A += (S.g[2 * k] - S.g[2 * k + 1]) * st; }
   if (!(A > 0)) return;
@@ -11158,7 +11199,27 @@ function dwFoamFrom(w, dt) {
    a step, mostly for the same few hundred columns). While the foam steps (dwFoamStep), each water column's surface (surfaceY0) is worked out once,
    the first time a bit asks for it, and read between two columns along a straight line - as the water's own columns (simAt) and a wave's tables
    (dwTab) are read. The foam is only drawn (the simulation worker never runs it - SIM_ONLY): the physics still gets the exact surface */
-const DWS = { on: false, st: 0, y: new Float64Array(0), s: new Int32Array(0) };
+const DWS = { on: false, st: 0, y: new Float64Array(0), s: new Int32Array(0), cs: new Int32Array(0), cn: new Uint8Array(0), cw: new Int16Array(0) };
+/* WHICH WAVES STAND OVER A COLUMN, laid once a step of the foam (dwCover): a bit asked every live wave whether it stood over it - three times a
+   step (the water's top, its speed, whether the sea's own foam may be left there), ten waves in a storm, most of them far along the sea. Each
+   wave is put down on the water columns of its reach (cw: up to DW_CW of them a column, cn how many; more than that: every wave asked, as
+   before), and a bit asks only the waves of its column - each still by its own reach, so the same answer. dwAbout(x): how many, their places in
+   DW.live in DW_AB; -1: ask them all */
+const DW_CW = 4, DW_AB = new Int16Array(DW_CW);
+function dwCover() {
+  const S = DWS, L = DW.live, st = S.st, cs = S.cs, cn = S.cn, cw = S.cw;
+  for (let q = 0; q < L.length; q++) {
+    const w = L[q], a = Math.max(0, Math.floor(wCol(w.xa))), b = Math.min(N - 1, Math.floor(wCol(w.xb)));
+    for (let i = a; i <= b; i++) { if (cs[i] !== st) { cs[i] = st; cn[i] = 0; } const n = cn[i]; if (n < DW_CW) cw[i * DW_CW + n] = q; if (n < 255) cn[i] = n + 1; }
+  }
+}
+function dwAbout(x) {
+  const S = DWS, c = Math.floor(wCol(x)); if (!(c >= 0 && c < N)) return -1;
+  if (S.cs[c] !== S.st) return 0;
+  const n = S.cn[c]; if (n > DW_CW) return -1;
+  for (let i = 0, o = c * DW_CW; i < n; i++) DW_AB[i] = S.cw[o + i];
+  return n;
+}
 function dwSurfCol(i) { const S = DWS; if (S.s[i] !== S.st) { S.s[i] = S.st; S.y[i] = surfaceY0(WX0 + i * DX); } return S.y[i]; }
 function dwSurf(x) {
   if (!DWS.on) return surfaceY0(x);
@@ -11170,12 +11231,17 @@ function dwSurf(x) {
 function dwTopY(x) { return dwTopOf(x, dwSurf(x)); }
 // (the same with the surface there, s, already asked)
 function dwTopOf(x, s) {
-  const L = DW.live; let y = s;
-  for (let i = 0; i < L.length; i++) { const w = L[i]; if (x >= w.xa && x <= w.xb) { const v = s - (dwTab(w, x, false) - dwTab(w, x, true)); if (v < y) y = v; } }
+  const L = DW.live, n = DWS.on ? dwAbout(x) : -1; let y = s;
+  if (n < 0) for (let i = 0; i < L.length; i++) y = dwTopW(L[i], x, s, y); else for (let i = 0; i < n; i++) y = dwTopW(L[DW_AB[i]], x, s, y);
   return y;
 }
+const dwTopW = (w, x, s, y) => { if (x >= w.xa && x <= w.xb) { const v = s - (dwTab(w, x, false) - dwTab(w, x, true)); if (v < y) return v; } return y; };
 // whether any wave's outline stands over x
-function dwOver(x) { const L = DW.live; for (let i = 0; i < L.length; i++) if (x >= L[i].xa && x <= L[i].xb) return true; return false; }
+function dwOver(x) {
+  const L = DW.live, n = DWS.on ? dwAbout(x) : -1;
+  if (n < 0) { for (let i = 0; i < L.length; i++) if (x >= L[i].xa && x <= L[i].xb) return true; } else for (let i = 0; i < n; i++) { const w = L[DW_AB[i]]; if (x >= w.xa && x <= w.xb) return true; }
+  return false;
+}
 // a lip's leading edge: its foremost point, 7 to 10 (a lip that hooks back under itself throws its water from its front, not its end in the tube)
 function dwLead(w) { let fi = 8; for (let i = 7; i <= 10; i++) if (dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i; return fi; }
 // WHERE A LIP COMES DOWN ON THE WATER: the foremost point of its front low on the wave (under a quarter of its height, points 7 to 11 - the curtain
@@ -11209,9 +11275,9 @@ function dwSplash(w, x, y) {   // (x, its world y)
 // foam (k 3) stays in the water's body under its top (vy: how deep), carried on, rising as it thins; what ends on the open water leaves the sea's
 // own foam (spawnFoam)
 function dwFoamStep(dt) {
-  const S = DWS; if (S.s.length !== N) { S.y = new Float64Array(N); S.s = new Int32Array(N); S.st = 0; }   // (the water's reach grown: its columns again)
-  S.st = (S.st + 1) | 0 || 1; S.on = true;                            // (a new step: every column's surface asked afresh)
-  try { dwFoamRun(dt); } finally { S.on = false; }
+  const S = DWS; if (S.s.length !== N) { S.y = new Float64Array(N); S.s = new Int32Array(N); S.cs = new Int32Array(N); S.cn = new Uint8Array(N); S.cw = new Int16Array(N * DW_CW); S.st = 0; }   // (the water's reach grown: its columns again)
+  S.st = (S.st + 1) | 0 || 1; S.on = true;                            // (a new step: every column's surface asked afresh, the waves laid on their columns again)
+  try { dwCover(); dwFoamRun(dt); } finally { S.on = false; }
 }
 function dwFoamRun(dt) {
   // (the columns themselves, and nothing made a bit: no list, no function - what a bit asks of the water it asks once)
@@ -11255,15 +11321,18 @@ function dwFoamRun(dt) {
 function dwDrawFoam(x0, x1, WH, PALE, AER) {
   const F = DWF, n = F.n, c = F.c, K = c.k, FX = c.x, FY = c.y, VX = c.vx, VY = c.vy, AGE = c.age, LIFE = c.life, RD = c.r;
   const pb = Math.max(1, PBV), g = Math.max(1, PB);   // (user 13:28: "very low res and blocky in relation to the rest" - the field at the game's own pixel)
-  foamFieldBegin(g);
-  for (let i = 0; i < n; i++) {
-    const x = FX[i], r = RD[i]; if (offViewR(x, r, x0, x1)) continue;
-    const X = x * SV - CAMPX, Y = FY[i] * SV - TOPPX, u = AGE[i] / LIFE[i], k = K[i];
-    if (k === 0) { if (r * SV >= 1.5 * pb) foamBitDisc(X, Y, r * SV, 0, 0.95);   // (a clump - the break's jet)
-      else { const s = Math.max(pb, Math.round(r * SV / pb) * pb), v = Math.hypot(VX[i], VY[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
-        if (l > 2 * pb) foamBitSeg(X, Y, -VX[i] / v * l, -VY[i] / v * l, s, 0.9); else foamBitSq(X, Y, s, 0.95); } continue; }
-    if (k === 1) { foamBitDisc(X, Y, Math.max(pb, r * SV), 1, 0.32 * (1 - u) * Math.min(1, u * 6)); continue; }
-    foamFieldAdd(X, Y, Math.max(g, r * SV * 1.3), 1 - u * u, k === 3 && VY[i] * SV > 6 * g);   // (well under the water's top: aerated water)
+  // (gathered once a view a frame: the waterline's light draws the same foam again in its own colours - foamFieldHeld)
+  if (!foamFieldHeld(g, x0, x1)) {
+    foamFieldBegin(g, x0, x1);
+    for (let i = 0; i < n; i++) {
+      const x = FX[i], r = RD[i]; if (offViewR(x, r, x0, x1)) continue;
+      const X = x * SV - CAMPX, Y = FY[i] * SV - TOPPX, u = AGE[i] / LIFE[i], k = K[i];
+      if (k === 0) { if (r * SV >= 1.5 * pb) foamBitDisc(X, Y, r * SV, 0, 0.95);   // (a clump - the break's jet)
+        else { const s = Math.max(pb, Math.round(r * SV / pb) * pb), v = Math.hypot(VX[i], VY[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
+          if (l > 2 * pb) foamBitSeg(X, Y, -VX[i] / v * l, -VY[i] / v * l, s, 0.9); else foamBitSq(X, Y, s, 0.95); } continue; }
+      if (k === 1) { foamBitDisc(X, Y, Math.max(pb, r * SV), 1, 0.32 * (1 - u) * Math.min(1, u * 6)); continue; }
+      foamFieldAdd(X, Y, Math.max(g, r * SV * 1.3), 1 - u * u, k === 3 && VY[i] * SV > 6 * g);   // (well under the water's top: aerated water)
+    }
   }
   // (the drops and the mist, then the mass over them - thick: white; thin: see-through white; aerated: thick, thin - pale)
   foamFieldPut(WH, 0.95, 0.5, AER, 0.5, 0.28, PALE);
@@ -12758,8 +12827,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1094;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 22:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1095;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 23:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25098,6 +25167,7 @@ function swColTable(t, full, drawn, bufs) {
       else { const x = X[i], r = (R ? Math.abs(R[i]) : 0) + SW_MARGIN; lo = x - r; hi = x + r; }
       for (let k = 0; k < sp.length; k += 2) if (hi >= sp[k] && lo <= sp[k + 1]) { sel[m++] = i; break; }
     }
+    if (m === n) sel = null;   // (every row near: the columns go as they stand, a copy each - not gathered a row at a time; a storm's foam is all about the views)
   }
   const P = T.pack(drawn && t.drawn ? t.drawn : T.sent(), SWCB.spare[t.name], sel, m);
   SWCB.spare[t.name] = null; bufs.push(P.buf);
@@ -41270,17 +41340,30 @@ function firePut(F) {
    THE DROPS AND THE MIST are one instanced draw, a bit an instance, in the table's order (a later bit over an earlier one, as its rectangles
    were): the shader lays each bit's own rectangles - a disc's rows (PB high, each as wide as the disc there in whole PBs), a streak's squares along its way (dwSeg's), a square - by the same
    sums, a pixel asking which of them hold it; a streak's squares overlap, each laid at its alpha: as many as hold a pixel, that many times.
-     foamFieldBegin(g)                       a view's foam begun: g the field's cell in the view's pixels (PB - a disc's rows are as high)
+   A VIEW'S FOAM IS GATHERED AND SUMMED ONCE A FRAME: it is drawn twice a view (the day's pass, then again in the waterline's light) from
+   the same bits - the second drawing lays the same sums and the same instances in other colours (foamFieldHeld: the same frame, view and
+   table, as the pixel layers keep a frame's columns - ARENA.gen). A view of the screen has its own gathering and its own grid: the views'
+   first drawings all come before their second ones
+     foamFieldHeld(g, x0, x1)                whether this view's foam is still as gathered this frame (then: foamFieldPut alone)
+     foamFieldBegin(g, x0, x1)               a view's foam begun: g the field's cell in the view's pixels (PB - a disc's rows are as high)
      foamFieldAdd(X, Y, R, m, deep)          a bit of the mass: its centre and radius in the view's pixels, its share (0..1); deep: the pale field's
      foamBitDisc(X, Y, r, ci, a)             a disc in rows: its centre, radius, colour (0 or 1 of foamFieldPut's two) and alpha
      foamBitSeg(X, Y, dx, dy, s, a)          a streak as dwSeg lays it: from (X, Y) to (X + dx, Y + dy), squares of s, colour 0
      foamBitSq(X, Y, s, a)                   a square of s at (X, Y) rounded, colour 0
-     foamFieldPut(colS, aS1, aS0, colD, aD1, aD0, colM)   all of it into the current context C - the drops and the mist, then the mass over
+     foamFieldPut(colS, aS1, aS0, colD, aD1, aD0, colM)   all of it into the current context C (again, in other colours, while it's held) - the drops and the mist, then the mass over
                                              them: the white field's colour (0-255; the bits' colour 0) and its thick and thin alphas, the pale
                                              field's, the mist's colour (the bits' colour 1)
    ================================================================ */
-const FOAMF = { f: new Float32Array(4 * 4096), n: 0, g: 2, fw: 1, fh: 1, x0: 0, y0: 0, x1: 0, y1: 0, buf: null, cells: 0, ep: -1, col: new Map(), hb: new Map(), cb: new Map(),
-  b: new Float32Array(12 * 1024), nb: 0, bp: new Map(), bh: new Float32Array(16), BMAX: 65536 };   // (b: the drops and the mist, 12 numbers a bit)
+// (what's shared: the pipelines and layouts; v: a record a view of the screen - foamFieldView; cur: the one being gathered or laid)
+const FOAMF = { ep: -1, col: new Map(), bp: new Map(), bh: new Float32Array(16), BMAX: 65536, v: [], cur: null };
+// a view's own: f - the mass's bits (4 numbers each, n of them) and their box (x0..y1); b - the drops and the mist (12 numbers each, nb); g, fw,
+// fh - the field's cell and its cells across and down; st - what the gathering was of; laid - the submit its numbers went up in; pc - the drops'
+// pieces there; buf, cells - its grid on the GPU; hb, cb - the bind groups with it
+function foamFieldView(i) {
+  const Q = FOAMF; while (Q.v.length <= i) Q.v.push(null);
+  return Q.v[i] || (Q.v[i] = { f: new Float32Array(4 * 4096), n: 0, g: 2, fw: 1, fh: 1, x0: 0, y0: 0, x1: 0, y1: 0, b: new Float32Array(12 * 1024), nb: 0,
+    st: new Float64Array(12).fill(NaN), laid: -1, pc: [], buf: null, cells: 0, hb: new Map(), cb: new Map() });
+}
 const FOAMF_M = 3;                          // (the margin: cells of the field past each edge of the view - as the fire's)
 const FOAMF_S = 1048576;                    // (the fixed point: 2^20 to a density of 1 - the fire's reasoning, FIRE_S)
 const FOAMF_THIN = Math.floor(0.2 * FOAMF_S), FOAMF_THICK = Math.floor(0.55 * FOAMF_S);   // (a cell is thin over 0.2, thick over 0.55: the greatest sums not over them)
@@ -41409,26 +41492,31 @@ function foamFieldShared() {
   Q.cm = gpuModule(FOAMF_COL_WGSL, 'foam field looks'); Q.cpl = gpuPipeLayout([Q.cbgl], 'foam field looks');
   Q.bbgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }], 'foam bits');
   Q.bm = gpuModule(FOAMF_BIT_WGSL, 'foam bits'); Q.bpl = gpuPipeLayout([Q.bbgl], 'foam bits');
-  if (Q.buf) gpuBufFree(Q.buf);   // (the old device's: counted out, not destroyed)
-  Q.col.clear(); Q.bp.clear(); Q.hb.clear(); Q.cb.clear(); Q.buf = null; Q.cells = 0; Q.ep = GPU.ep;
+  for (const V of Q.v) if (V) { if (V.buf) gpuBufFree(V.buf); V.buf = null; V.cells = 0; V.hb.clear(); V.cb.clear(); V.laid = -1; }   // (the old device's grids: counted out, not destroyed)
+  Q.col.clear(); Q.bp.clear(); Q.ep = GPU.ep;
 }
-// the grid: one buffer, the two fields of a whole view's cells (in steps of 65536 cells - asked by the view's size, not by how far the foam
-// reaches in it: made once, at the first foam, and again only for a larger view) - the passes run in order, so every view of the frame uses
-// it in turn. The 'dwFoam' pool of the GPU's memory: 4 bytes a cell, two fields - 2 MB for a 1280 x 720 view at PB 2, 17 MB for 3840 x 2160
-function foamFieldGrid(cells) {
-  const Q = FOAMF; if (Q.buf && Q.cells >= cells) return Q.buf;
+// a view's grid: one buffer, the two fields of the view's cells (in steps of 65536 cells - asked by the view's size, not by how far the foam
+// reaches in it: made once, at the view's first foam, and again only when the view is larger). A view its own: the sums stay for the view's
+// second drawing while the other views are drawn. The 'dwFoam' pool of the GPU's memory: 4 bytes a cell, two fields - 1 MB for each half of a
+// 1281 x 657 split screen at PB 2, 2 MB for a 1280 x 720 view, 17 MB for 3840 x 2160
+function foamFieldGrid(V, cells) {
+  if (V.buf && V.cells >= cells) return V.buf;
   const n = Math.ceil(cells / 65536) * 65536;
-  if (Q.buf) gpuBufFree(Q.buf);
-  Q.hb.clear(); Q.cb.clear(); Q.cells = n;
-  return (Q.buf = gpuBuf(n * 4, 'dwFoam'));
+  if (V.buf) gpuBufFree(V.buf);
+  V.hb.clear(); V.cb.clear(); V.cells = n;
+  return (V.buf = gpuBuf(n * 4, 'dwFoam'));
 }
-function foamFieldBegin(g) {
-  const Q = FOAMF; Q.n = 0; Q.nb = 0; Q.g = g;
+// (what a view's gathering depends on: the frame, the view's place and scale, the table as it stands)
+function foamFieldStamp(g, x0, x1, T) { T[0] = renderTick; T[1] = ARENA.gen; T[2] = GPU.ep; T[3] = g; T[4] = x0; T[5] = x1; T[6] = SV; T[7] = CAMPX; T[8] = TOPPX; T[9] = VWP * 65536 + bh; T[10] = DWF.ver; T[11] = DWF.n * 64 + PBV; }
+const FOAMF_ST = new Float64Array(12);
+function foamFieldHeld(g, x0, x1) { const a = (FOAMF.cur = foamFieldView(viewIdx)).st, b = FOAMF_ST; foamFieldStamp(g, x0, x1, b); for (let i = 0; i < 12; i++) if (a[i] !== b[i]) return false; return true; }
+function foamFieldBegin(g, x0, x1) {
+  const Q = FOAMF.cur = foamFieldView(viewIdx); Q.n = 0; Q.nb = 0; Q.g = g; Q.laid = -1; foamFieldStamp(g, x0, x1, Q.st);
   Q.fw = Math.ceil(VWP / g) + 2 * FOAMF_M; Q.fh = Math.ceil(bh / g) + 2 * FOAMF_M;
   Q.x0 = Q.y0 = 1e9; Q.x1 = Q.y1 = -1e9;
 }
 function foamFieldAdd(X, Y, R, m, deep) {
-  const Q = FOAMF, g = Q.g, cx = X / g + FOAMF_M, cy = Y / g + FOAMF_M, r = R / g;
+  const Q = FOAMF.cur, g = Q.g, cx = X / g + FOAMF_M, cy = Y / g + FOAMF_M, r = R / g;
   if (!(m > 0) || cx + r < 0 || cy + r < 0 || cx - r > Q.fw || cy - r > Q.fh) return;   // (none of it in the view's field)
   if ((Q.n + 1) * 4 > Q.f.length) { const f = new Float32Array(Q.f.length * 2); f.set(Q.f); Q.f = f; }   // (grown in steps, never shrunk)
   const o = Q.n++ * 4, f = Q.f;
@@ -41436,18 +41524,18 @@ function foamFieldAdd(X, Y, R, m, deep) {
   if (cx - r < Q.x0) Q.x0 = cx - r; if (cy - r < Q.y0) Q.y0 = cy - r; if (cx + r > Q.x1) Q.x1 = cx + r; if (cy + r > Q.y1) Q.y1 = cy + r;
 }
 // (room for one more drop or puff: where its 12 numbers go - grown in steps, never shrunk)
-function foamBitRoom() { const Q = FOAMF; if ((Q.nb + 1) * 12 > Q.b.length) { const f = new Float32Array(Q.b.length * 2); f.set(Q.b); Q.b = f; } return Q.nb++ * 12; }
+function foamBitRoom() { const Q = FOAMF.cur; if ((Q.nb + 1) * 12 > Q.b.length) { const f = new Float32Array(Q.b.length * 2); f.set(Q.b); Q.b = f; } return Q.nb++ * 12; }
 // (a bit's place: its whole part and its fraction apart - the shader rounds as the processor did, to the same pixel, anywhere on a wide view)
-function foamBitAt(o, X, Y, shape, size, a) { const f = FOAMF.b, xi = Math.floor(X), yi = Math.floor(Y); f[o] = xi; f[o + 1] = yi; f[o + 2] = X - xi; f[o + 3] = Y - yi; f[o + 4] = shape; f[o + 5] = size; f[o + 6] = f[o + 7] = 0; f[o + 8] = a; f[o + 9] = f[o + 10] = f[o + 11] = 0; }
+function foamBitAt(o, X, Y, shape, size, a) { const f = FOAMF.cur.b, xi = Math.floor(X), yi = Math.floor(Y); f[o] = xi; f[o + 1] = yi; f[o + 2] = X - xi; f[o + 3] = Y - yi; f[o + 4] = shape; f[o + 5] = size; f[o + 6] = f[o + 7] = 0; f[o + 8] = a; f[o + 9] = f[o + 10] = f[o + 11] = 0; }
 function foamBitDisc(X, Y, r, ci, a) { if (a > 0 && r > 0) foamBitAt(foamBitRoom(), X, Y, 4 * ci, r, a); }
 function foamBitSeg(X, Y, dx, dy, s, a) {
   if (!(a > 0 && s > 0)) return;
-  const o = foamBitRoom(), f = FOAMF.b; foamBitAt(o, X, Y, 1, s, a);
+  const o = foamBitRoom(), f = FOAMF.cur.b; foamBitAt(o, X, Y, 1, s, a);
   f[o + 6] = dx; f[o + 7] = dy; f[o + 9] = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));   // (dwSeg's steps)
 }
 function foamBitSq(X, Y, s, a) { if (a > 0 && s > 0) foamBitAt(foamBitRoom(), X, Y, 2, s, a); }
 function foamFieldPut(colS, aS1, aS0, colD, aD1, aD0, colM) {
-  const Q = FOAMF, n = Q.n, nb = Q.nb, ctx = C; Q.n = 0; Q.nb = 0;
+  const G = FOAMF, Q = G.cur, n = Q.n, nb = Q.nb, ctx = C;
   if (!(n || nb) || !GPU.on || GPU.lost || GLR.lost || !frameDrawable(ctx)) return;
   // (the mass's bits' box, inside the view's field)
   const bx0 = clamp(Math.floor(Q.x0), 0, Q.fw - 1), by0 = clamp(Math.floor(Q.y0), 0, Q.fh - 1), bx1 = clamp(Math.ceil(Q.x1), 1, Q.fw), by1 = clamp(Math.ceil(Q.y1), 1, Q.fh);
@@ -41455,36 +41543,44 @@ function foamFieldPut(colS, aS1, aS0, colD, aD1, aD0, colM) {
   if (!mass && !nb) return;
   const X = frameDrawBegin(ctx); if (!X) return;
   foamFieldShared();
-  const cells = W * H, grid = mass ? foamFieldGrid(2 * Q.fw * Q.fh) : null, t = ctx.target, s = ctx.s, key = frameDrawKey(X);
-  // 1. the mass's sums: the grid cleared, then the bits in pieces of at most 65535 (a workgroup each - each piece's block in the arena, 16 bytes
-  // a bit after its 32-byte head)
-  if (mass) {
-    const cp = gpuComputeBegin([grid], 'dwaves');
-    for (let a = 0; a < n; a += 65535) {
-      const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(32 + k * 16, 256), w0 = off >> 2, Wd = arenaWords(c), Fl = Wd.f, U = Wd.u;
-      U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 32) >> 4; U[w0 + 3] = k; Fl[w0 + 4] = bx0; Fl[w0 + 5] = by0; Fl[w0 + 6] = Fl[w0 + 7] = 0;
-      Fl.set(Q.f.subarray(a * 4, (a + k) * 4), w0 + 8);
-      cp.setBindGroup(0, fireBind(Q.hb, Q.hbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 32 } }, { binding: 1, resource: { buffer: c.gb } }, { binding: 2, resource: { buffer: grid.gb } }]), [off]);
-      if (!a) { const wg = Math.ceil(2 * cells / 64); cp.setPipeline(Q.clear); cp.dispatchWorkgroups(Math.min(wg, 1024), Math.ceil(wg / 1024)); cp.setPipeline(Q.add); }
-      cp.dispatchWorkgroups(k);
+  const cells = W * H, grid = mass ? foamFieldGrid(Q, 2 * Q.fw * Q.fh) : null, t = ctx.target, s = ctx.s, key = frameDrawKey(X);
+  if (Q.laid !== ARENA.gen) {
+    // 1. once a gathering: the mass's sums - the grid cleared, then the bits in pieces of at most 65535 (a workgroup each - each piece's block in
+    // the arena, 16 bytes a bit after its 32-byte head) ...
+    if (mass) {
+      const cp = gpuComputeBegin([grid], 'dwaves');
+      for (let a = 0; a < n; a += 65535) {
+        const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(32 + k * 16, 256), w0 = off >> 2, Wd = arenaWords(c), Fl = Wd.f, U = Wd.u;
+        U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 32) >> 4; U[w0 + 3] = k; Fl[w0 + 4] = bx0; Fl[w0 + 5] = by0; Fl[w0 + 6] = Fl[w0 + 7] = 0;
+        Fl.set(Q.f.subarray(a * 4, (a + k) * 4), w0 + 8);
+        cp.setBindGroup(0, fireBind(Q.hb, G.hbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 32 } }, { binding: 1, resource: { buffer: c.gb } }, { binding: 2, resource: { buffer: grid.gb } }]), [off]);
+        if (!a) { const wg = Math.ceil(2 * cells / 64); cp.setPipeline(G.clear); cp.dispatchWorkgroups(Math.min(wg, 1024), Math.ceil(wg / 1024)); cp.setPipeline(G.add); }
+        cp.dispatchWorkgroups(k);
+      }
+      cp.end();
+      GPU.stats.computes = (GPU.stats.computes || 0) + 1;
     }
-    cp.end();
-    GPU.stats.computes = (GPU.stats.computes || 0) + 1;
+    // ... and the drops' and the mist's numbers into the arena (pieces of BMAX, 48 bytes a bit): where each piece is (pc: its chunk, its place, how many)
+    Q.pc.length = 0;
+    for (let i0 = 0; i0 < nb; i0 += G.BMAX) {
+      const k = Math.min(G.BMAX, nb - i0), bytes = k * 48, [rc, ro] = arenaAlloc(bytes, 256);
+      rc.cpu.set(new Uint8Array(Q.b.buffer, i0 * 48, bytes), ro); Q.pc.push(rc, ro, k);
+    }
+    Q.laid = ARENA.gen;
   }
   const pass = frameDrawPass(X, 'dwaves');
-  // 2. the drops and the mist, in their order (pieces of BMAX in the arena, 48 bytes a bit)
+  // 2. the drops and the mist, in their order
   if (nb) {
-    const m = s.m, Hd = Q.bh;
+    const m = s.m, Hd = G.bh;
     Hd[0] = X.T.w; Hd[1] = X.T.h; Hd[2] = g; Hd[3] = 0; Hd[4] = m[0]; Hd[5] = m[3]; Hd[6] = m[4]; Hd[7] = m[5];
     Hd[8] = colS[0] / 255; Hd[9] = colS[1] / 255; Hd[10] = colS[2] / 255; Hd[11] = 1; Hd[12] = colM[0] / 255; Hd[13] = colM[1] / 255; Hd[14] = colM[2] / 255; Hd[15] = 1;
-    let pipe = Q.bp.get(key);
-    if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: Q.bpl, label: 'foam bits', vertex: { module: Q.bm, entryPoint: 'vs' }, fragment: { module: Q.bm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-strip' } }, frameDrawStencil(X))); Q.bp.set(key, pipe); }
+    let pipe = G.bp.get(key);
+    if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G.bpl, label: 'foam bits', vertex: { module: G.bm, entryPoint: 'vs' }, fragment: { module: G.bm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-strip' } }, frameDrawStencil(X))); G.bp.set(key, pipe); }
     const [hc, ho] = arenaAlloc(64, 256); hc.cpu.set(new Uint8Array(Hd.buffer), ho);
     pass.setPipeline(pipe);
-    for (let i0 = 0; i0 < nb; i0 += Q.BMAX) {
-      const k = Math.min(Q.BMAX, nb - i0), bytes = k * 48, [rc, ro] = arenaAlloc(bytes, 256);
-      rc.cpu.set(new Uint8Array(Q.b.buffer, i0 * 48, bytes), ro);
-      pass.setBindGroup(0, gpuBindGroup(Q.bbgl, [{ binding: 0, resource: { buffer: hc.gb, offset: ho, size: 64 } }, { binding: 1, resource: { buffer: rc.gb, offset: ro, size: bytes } }], 'foam bits'));
+    for (let q = 0; q < Q.pc.length; q += 3) {
+      const rc = Q.pc[q], ro = Q.pc[q + 1], k = Q.pc[q + 2];
+      pass.setBindGroup(0, gpuBindGroup(G.bbgl, [{ binding: 0, resource: { buffer: hc.gb, offset: ho, size: 64 } }, { binding: 1, resource: { buffer: rc.gb, offset: ro, size: k * 48 } }], 'foam bits'));
       pass.draw(4, k); GPU.stats.draws++;
     }
   }
@@ -41498,10 +41594,10 @@ function foamFieldPut(colS, aS1, aS0, colD, aD1, aD0, colM) {
     Wc.u[w0 + 12] = FOAMF_THIN; Wc.u[w0 + 13] = FOAMF_THICK; Wc.u[w0 + 14] = Wc.u[w0 + 15] = 0;
     const look = (o, col, al) => { Fc[o] = col[0] / 255 * al; Fc[o + 1] = col[1] / 255 * al; Fc[o + 2] = col[2] / 255 * al; Fc[o + 3] = al; };   // (premultiplied, as a rectangle's - 61-rects.js)
     look(w0 + 16, colS, aS1); look(w0 + 20, colS, aS0); look(w0 + 24, colD, aD1); look(w0 + 28, colD, aD0);
-    let pipe = Q.col.get(key);
-    if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: Q.cpl, label: 'foam field looks', vertex: { module: Q.cm, entryPoint: 'vs' }, fragment: { module: Q.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); Q.col.set(key, pipe); }
+    let pipe = G.col.get(key);
+    if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G.cpl, label: 'foam field looks', vertex: { module: G.cm, entryPoint: 'vs' }, fragment: { module: G.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); G.col.set(key, pipe); }
     pass.setPipeline(pipe);
-    pass.setBindGroup(0, fireBind(Q.cb, Q.cbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 128 } }, { binding: 1, resource: { buffer: grid.gb } }]), [off]);
+    pass.setBindGroup(0, fireBind(Q.cb, G.cbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 128 } }, { binding: 1, resource: { buffer: grid.gb } }]), [off]);
     pass.draw(6); GPU.stats.draws++;
   }
   gpuPassEnd();
