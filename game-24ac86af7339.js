@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1186;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 13:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1187;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 13:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74739,7 +74739,7 @@ function strEdDraw() {
     // peopleEdDraw: 50-zzzzz-story-work.js)
     const F = { on: SE.sel.includes(o.id), bad: strPlaceBad(o), col: strRGB(o.hue), name: strName(o), icons: STORY_WORLD && typeof strPlaceIcons === 'function' ? strPlaceIcons(o) : null };
     let top = edFrame(X0, Y0, X1, Y1, F);
-    if (STORY_WORLD && typeof peopleEdDraw === 'function') top = peopleEdDraw(o, X0, X1, top, q, F);
+    if (STORY_WORLD && typeof peopleEdDraw === 'function') top = peopleEdDraw(o, X0, X1, top, q);
     // (user Nov 3 12:03: what it spawns shown above it - each spot's vehicle, SPOT n by it, not its names in text - 50-zzzz-spots.js; over its name)
     const st = spotsEdDraw(o, X0, X1, top, q);
     if (STORY_WORLD && typeof assignEdDraw === 'function') assignEdDraw(o, X0, X1, st, q);   // (the characters' and workplaces' vehicles where they'll start - 50-zzzzz-story-work.js)
@@ -79938,7 +79938,7 @@ function folkDrive(v, T, dt) {
 }
 function folkStep(dt) {
   if (!STORY) return;
-  ownVehStep();                                                            // (each one's own vehicle at home - 50-zzzzz-story-work.js)
+  keptVehStep();                                                           // (each one's own vehicle at home, each worker's kept outside at work - 50-zzzzz-story-work.js)
   for (const c of OWNERS) {
     if (stGone(c.id)) continue;
     const S = FOLK.c[c.id] || (FOLK.c[c.id] = { at: (stHome(c) || {}).id || 0, in: 0, j: -1, day: 0, k: c.coins || 0 });   // (k: their coins - COINS, STORY > CHARACTERS)
@@ -80427,9 +80427,8 @@ function stockBox(el, css, o, save) {
      through the day; no routine: on duty there till the end. Its standing duties are routine steps too, done when they're called for, not
      as the day's trips: TOW (an impounded vehicle back to its owner) and ANSWER THEFTS (its work vehicles chase a thief - folkAlarm);
    - WAGE (o.wage): coins a day of work pays, whatever there was to do; 0 - paid only by what they sell (a fisherman);
-   - WORK VEHICLE (o.wv): a car or boat type made for each worker as they start (START WORK) at a free spot of the workplace, or of a
-     structure joined to it that takes it (a fishery's boats at its dock), and put away again (gone) as they finish (END WORK). A day's
-     work vehicle lost: no other till the next morning.
+   - WORK VEHICLE (o.wv): a car or boat type, one for each worker, always there from the story's start (keptVehStep) - in its garage, or at a
+     structure joined to it that takes it (a fishery's boats at its dock). A day's work vehicle lost: no other till the next morning.
    A worker's day (famDecide's WORK, 50-zzzzz-story-family.js): START WORK at the workplace - there on foot, their own vehicle put away
    where it's taken nearest it (a parking) - the routine in their work vehicle, END WORK there on foot (paid), home in their own vehicle.
    The player is a worker like any (PLAYER_C.work): his work vehicle is made as he's at his workplace in its hours, and a day there pays
@@ -80485,30 +80484,36 @@ function workVehMake(W, who, sv = W.wv, tag = { wk: W.id }) {
 const workVehsOf = who => [...storyCars, ...jetboats].filter(v => v.wfor === who && v.wk != null);
 const ownVehsOf = who => [...storyCars, ...jetboats].filter(v => v.wfor === who && v.cv != null);
 function workVehGone(v) { const t = tableOf(v); if (t) emit('tableRemove', { t, o: v }); }
-// a work vehicle can be lost (sunk, wrecked): that day none other - the lost one's row taken away the next morning
-function workLostToday(who) { return workVehsOf(who).some(v => v.state !== 'run' && v.lostDay === W.day); }
-/* ---- A CHARACTER'S OWN VEHICLE (user Nov 20 09:50: "when we create a character, we would assign them their default vehicle. So if you place a character in a
-   residence, their default vehicle will appear in their residence parking location or hangar"; 09:38: "As long as their house exists, when they respawn they
-   get their vehicle again"): VEHICLE (c.veh - STORY > CHARACTERS, the player's too), made at a free spot of their HOME or of a structure joined to it as a
-   story starts; lost, a new one there the next morning - while their home stands. ---- */
-function ownVehStep() {
+/* ---- KEPT VEHICLES - A CHARACTER'S OWN, AND A WORKER'S KEPT OUTSIDE (user Nov 20 09:50: "when we create a character, we would assign them their default
+   vehicle. So if you place a character in a residence, their default vehicle will appear in their residence parking location or hangar"; 09:38: "As long
+   as their house exists, when they respawn they get their vehicle again"; 12:46: "the vehicles have to exist and be there if they're outside. So if there
+   are two fishermen, there has to be two boats for them, ready to be used and visible. They don't spawn when you enter the fishery"):
+   - VEHICLE (c.veh - STORY > CHARACTERS, the player's too): made at a free spot of their HOME or of a structure joined to it as a story starts;
+   - a worker's WORK VEHICLE: one for each worker (12:48: "This would also apply to police cars. At the police station, if there's 3 [police officers]"),
+     made at a free spot of their workplace - its garage - or of its DOCK / PARKING as a story starts, and always there: taken out by its worker,
+     brought back; START / END WORK neither make nor put away one. Anyone's can be stolen from where you are (folkStealable, storyTargets' joins).
+   Lost: a new one there the next morning - while the home / workplace stands. A work vehicle whose worker no longer works there (the editor moved them):
+   put away, unless it's out. ---- */
+const keptMissing = L => !L.some(v => v.state === 'run') && !L.some(v => v.state !== 'run' && (v.lostDay === W.day || env.time < STORY_WAKE_H));   // (lost: the next morning)
+const whoOf = c => c === PLAYER_C ? 'player' : c.id;
+function keptVehStep() {
   for (const c of charsAll()) {
-    const sv = c.veh; if (!sv || !STR_VEHS[sv] || (c !== PLAYER_C && stGone(c.id))) continue;
-    const who = c === PLAYER_C ? 'player' : c.id, H = stHome(c); if (!H || strDown(H)) continue;
-    const L = ownVehsOf(who); if (L.some(v => v.state === 'run')) continue;
-    if (L.some(v => v.state !== 'run' && (v.lostDay === W.day || env.time < STORY_WAKE_H))) continue;   // (lost: the next morning)
-    workVehMake(H, who, sv, { cv: 1 });
+    if (c !== PLAYER_C && stGone(c.id)) continue;
+    const who = whoOf(c), H = stHome(c), W0 = workOf(c);
+    if (c.veh && STR_VEHS[c.veh] && H && !strDown(H) && keptMissing(ownVehsOf(who))) workVehMake(H, who, c.veh, { cv: 1 });
+    if (W0 && !strDown(W0) && workVehD(W0) && keptMissing(workVehsOf(who).filter(v => v.wk === W0.id))) workVehMake(W0, who);
+  }
+  for (const v of [...storyCars, ...jetboats]) if (v.wk != null && v.state === 'run' && v.driven == null && !folkTrip(v) && !folkMine(v)) {
+    const c = charsAll().find(q => whoOf(q) === v.wfor); if (!c || c.work !== v.wk) workVehGone(v);
   }
 }
-// START WORK: at the workplace, on foot - their work vehicle made (one a day; lost today: none)
+// START WORK: at the workplace, on foot - their work vehicle is there already (keptVehStep)
 function workIn(c, S, W0) {
   S.wk = W0.id; S.paid = 0;
-  if (!workVehsOf(c.id).some(v => v.state === 'run') && !workLostToday(c.id)) workVehMake(W0, c.id);
   folkLog({ t: 'job', who: c.id, verb: 'START WORK', k: '', n: 0, at: slPlaceName(W0) });
 }
-// END WORK: back at the workplace, on foot - the work vehicle put away (gone), the day's WAGE
+// END WORK: back at the workplace, on foot - the work vehicle left where they brought it, the day's WAGE
 function workOut(c, S, W0) {
-  for (const v of workVehsOf(c.id)) if (v.state === 'run' && v.driven == null && !folkTrip(v) && !folkMine(v)) workVehGone(v);
   const w = Math.max(0, W0.wage | 0); if (w && !S.paid) { S.k = (S.k || 0) + w; S.paid = 1; }
   S.wk = 0; folkLog({ t: 'job', who: c.id, verb: 'END WORK', k: '', n: w, at: slPlaceName(W0) });
 }
@@ -80533,15 +80538,12 @@ function workAgain(c, S, W0) {
   if (R.length && !S.fail && !(time - (S.lt || -1e9) < 20)) { S.j = 1; S.lt = time; return true; }   // (at most once in 20 s: a routine done in no time waits)
   S.duty = 1; S.nx = time + 5; return true;
 }
-// ---- the player's own (STORY): at his workplace in its hours, his work vehicle is made (one a day); a day there pays its WAGE at its end
+// ---- the player's own (STORY): a day at his workplace in its hours pays its WAGE at its end (his work vehicle is always there - keptVehStep)
 function workPlayerStep() {
   const W0 = workOf(PLAYER_C), P = FOLK.pw || (FOLK.pw = { day: 0, paid: 0 });
   if (W0 && STORY && !ui.title) {
     const at = storyAt(), here = at && (at === W0 || folkHops(at, W0));
-    if (here && workOn(W0)) {
-      P.day = W.day;
-      if (workVehD(W0) && !workVehsOf('player').some(v => v.state === 'run') && !workLostToday('player')) workVehMake(W0, 'player');
-    }
+    if (here && workOn(W0)) P.day = W.day;
     if (P.day === W.day && P.paid !== W.day && !workOn(W0) && env.time >= placeH(W0)[1]) { P.paid = W.day; const w = Math.max(0, W0.wage | 0); if (w) story.coins += w; }
   }
   // (a lost work vehicle's or own vehicle's row, the next morning: taken away - its new one made)
@@ -80675,11 +80677,11 @@ function workLinksDraw(q) {
    it in the editor but you can see its correctly assigned (that is how the world would be when it starts)"; "For locations that have hangars or
    store vehicles inside (e.g. police station) the vehicle would appear above as we do for hangars"; 11:04: one work vehicle shown, "That shows what
    kind of vehicle that structure spawns"; 11:06: "it can tell us immediately if the parking lot is big enough"; 11:12: three workers - three spaces).
-   Two plans, as ownVehStep / workIn make them:
+   Two plans, as keptVehStep / workIn make them:
    - the start: every character's VEHICLE at the spot it's made at near their home - drawn there (an open place: at its spot; an enclosed one: over
      it, as its spots are); none free: over the home in red, NO SPOT;
-     and each workplace's WORK VEHICLE where it's made: at its PARKING / DOCK one for each worker at its own spot, the worker's name over it (none
-     free: over the workplace in red, NAME: NO SPOT); in a garage (its own: over it) once;
+     and each workplace's WORK VEHICLES, one for each worker at its own spot (its garage: over it; its PARKING / DOCK: at the spot), the worker's
+     name by it (none free: over the workplace in red, NAME: NO SPOT);
    - a shift: the workers' own vehicles parked by their workplace (folkPark - never in a workplace) and a work vehicle for each worker (workSpot).
    A place that would have to hold more than its spots in either (the first that takes it on the way out from the home / workplace) is short:
    its frame red, N SPOTS SHORT (strPlaceBad). Never picked: only drawn. ---- */
@@ -80708,16 +80710,13 @@ function assignPlan() {
   const live = charsAll().filter(c => c === PLAYER_C || !stGone(c.id));
   { const used = new Map(), miss = new Map();   // (the start)
     for (const c of live) { const H = stHome(c); if (!c.veh || !H) continue; const r = place(used, H, c.veh, null, miss); if (!r) continue; if (r[0]) put(r[0], { sv: c.veh, who: nm(c), s: r[1] }); else put(H, { sv: c.veh, who: nm(c), s: -1, red: 1 }); }
-    // (its WORK VEHICLE where it's made - user 11:20: "so that the fishing boat would appear there"; 12:27: one a worker, "Otherwise how do you know if
-    // they all fit? Its ok for garages, but not if the physical object must be visible": at a dock or parking each worker's at its own spot with
-    // their name - yours is the one you take there; in a garage, once - it's made inside. No workers: once, no name)
+    // (its WORK VEHICLES where they're kept - user 11:20: "so that the fishing boat would appear there"; 12:27: one a worker, "Otherwise how do you know
+    // if they all fit?"; 12:46-12:48: they all exist, police cars too - keptVehStep): each worker's at its own spot with their name - yours is the one
+    // you take there. No workers: one, no name - what the place uses)
     for (const W0 of strsUsed()) if (workVehD(W0)) {
       const ws = workers(W0); for (const c of ws.length ? ws : [null]) {
-        const r = place(used, W0, W0.wv, W0, new Map()), who = c ? nm(c) : '';
-        if (!(r && r[0])) { put(W0, { sv: W0.wv, who, s: -1, red: 1 }); continue; }
-        const inside = !!(STR_KINDS[r[0].k] || {}).enclosed;
-        put(r[0], { sv: W0.wv, who: inside ? (r[0] === W0 ? '' : strName(W0)) : who, s: r[1] });   // (over its own garage: no name - it's its parent's)
-        if (inside) break;
+        const r = place(used, W0, W0.wv, W0, c ? miss : new Map()), who = c ? nm(c) : '';   // (the no-workers one: only a picture - not counted)
+        if (r && r[0]) put(r[0], { sv: W0.wv, who, s: r[1] }); else put(W0, { sv: W0.wv, who, s: -1, red: 1 });
       }
     }
     for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); }
@@ -80735,11 +80734,11 @@ const assignShort = o => { if (!STORY_WORLD || !strTakes(o)) return ''; const n 
    should have either ... an icon of a house, or an icon of a [wrench], meaning it's either a residence or a work location. And then above the name
    has the people who are assigned to that location. So we can visually see quickly who does what where") a place's icons by its name (edFrame's
    icons: a house - a residence, a wrench - a workplace), and over the name its people, one a line: its residents and its workers (a workplace
-   with none: NO WORKERS in red). Shown where its name is (edFrame's named). Returns the top of what it drew */
+   with none: NO WORKERS in red) - always, its name or not (a name too wide for its box isn't drawn - edFrame). Returns the top of what it drew */
 const strPlaceIcons = o => [strIsRes(o) && 'home', strWork(o) && 'work'].filter(Boolean);
 const residents = o => charsAll().filter(c => c.home === o.id && !stGone(c.id));
-function peopleEdDraw(o, X0, X1, Y0, q, F) {
-  const res = strIsRes(o), work = strWork(o); if (!(res || work) || !F.named) return Y0;
+function peopleEdDraw(o, X0, X1, Y0, q) {
+  const res = strIsRes(o), work = strWork(o); if (!(res || work)) return Y0;
   const nm = c => c === PLAYER_C ? 'PLAYER' : String(c.name || '').toUpperCase(), W = work ? workers(o) : [];
   const P = [...new Set([...(res ? residents(o) : []), ...W])].map(nm);
   const L = P.length ? P : work ? ['NO WORKERS'] : [], col = P.length || !work ? [150, 220, 255] : [255, 120, 110];
@@ -80764,7 +80763,7 @@ function assignEdDraw(o, X0, X1, Y0, q) {
     if (inside || e.red) {
       y -= Math.max(h, 7 * q); const ix = cx - (w >> 1), iy = y + Math.max(h, 7 * q) - h;
       one(e, ix, iy, w, h, P, o.flip);
-      const lab = e.red ? (e.who ? e.who + ': NO SPOT' : 'NO SPOT') : e.who;   // (the work vehicle: no word - its picture over its workplace)
+      const lab = e.red ? (e.who ? e.who + ': NO SPOT' : 'NO SPOT') : e.who;
       if (lab) drawText(C, lab, ix - gap - textWidth(lab) * q, y + (Math.max(h, 7 * q) >> 1) - 3 * q, e.red ? [255, 120, 110] : [150, 220, 255], q, 'left');
       y -= gap; continue;
     }
