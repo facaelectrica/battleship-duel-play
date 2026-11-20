@@ -12950,8 +12950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1134;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 20:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1135;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 20:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -68224,7 +68224,8 @@ fn texel(I: u32, B: bool, t: vec2i) -> vec4f {
      NOBODY, TEAM 1, TEAM 2, these, PLAYER (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
    - The CARGO list itself: 50-zz-cargo.js (CARGO). The tabs: STORY > CHARACTERS, CARGO, STORY SETTINGS (50-zzz-story-tab.js).
    ================================================================ */
-const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, rentStep: 100, fishM: 10 };   // (rentStep: RENT DISTANCE - metres a rented vehicle's RENT COST pays for; fishM: FISH A MINUTE - a character's boat fishing out of view, 50-zzzzz-story-folk.js)
+const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, rentStep: 100, fishM: 10, farM: 400 };   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
+//   // (rentStep: RENT DISTANCE - metres a rented vehicle's RENT COST pays for; fishM: FISH A MINUTE - a character's boat fishing out of view, 50-zzzzz-story-folk.js)
 let STORY_CFG = JSON.parse(JSON.stringify(STORY_CFG_DEF));
 function storyClockBuild() {
   const C = STORY_CFG, m = k => Math.max(0.1, +C[k] || STORY_CFG_DEF[k]);
@@ -70538,8 +70539,17 @@ const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false, s
    browser (bd_story_zoom: { type: [close, medium] }); unset, from the vehicle's length */
 let STORY_ZW = {};
 worldLoad(() => { STORY_ZW = {}; try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if (o && typeof o === 'object') STORY_ZW = o; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
-function storyZoomDef(sv) { if (sv === 'cessna') return [70, 420]; const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? strTypeLenM('motor') : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
-const storyZoomOf = sv => STORY_ZW[sv] || storyZoomDef(sv);
+function storyZoomDef(sv) { if (sv === 'cessna') return [70, 420, 900]; const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? strTypeLenM('motor') : 11.3, m = Math.round(Math.max(130, 12 * L)); return [Math.round(Math.max(45, 4 * L)), m, 2 * m]; }
+// [CLOSE, MEDIUM, FARTHEST] (user Nov 19 19:39: "lets limit the zoom distance per vehicle. Right now you can zoom really far in story mode and that
+// breaks immersion"): FARTHEST - the widest view zooming out by hand; one saved before it had none: twice its MEDIUM
+const storyZoomOf = sv => { const z = STORY_ZW[sv]; if (!z) return storyZoomDef(sv); return z.length > 2 ? z : [z[0], z[1], 2 * z[1]]; };
+// the widest view Story allows now: the vehicle you're in (its FARTHEST), at a structure STORY SETTINGS' FARTHEST VIEW AT A PLACE
+function storyFarWidth() {
+  const c = crew[0];
+  if (c.mode === 'civ' && c.civ && c.civ.story) return Math.max(storyZoomOf(c.civ.sv)[1], storyZoomOf(c.civ.sv)[2]) * UPM;
+  if (c.mode === 'dock' && storyAt()) return Math.max(60, +STORY_CFG.farM || 400) * UPM;
+  return null;
+}
 function storyZoomWidth() {
   const c = crew[0], ow = storyOpenWidth(); if (ow) return ow;   // (Story's opening shot: wider, on the structure - 50-zzzz-story-open.js)
   if (c.mode === 'civ' && c.civ && c.civ.story) { const z = storyZoomOf(c.civ.sv); return (STORY_ZOOM.moving ? z[1] : z[0]) * UPM; }
@@ -70555,12 +70565,13 @@ function storyZoom(dt) {
   // takes it back (it did: every new vehicle or structure the automatic zoom set its own again). A new story starts automatic
   // (storyReset). One rule for Story played from the menu and from the GAME EDITOR's PLAY
   if (Z.lv != null && scopes[0].level !== Z.lv) Z.manual = true;
-  if (Z.manual) return;
+  const lvOf = w => clamp(zoomLevelOf(clamp(VIEW_W / w, ZOOM_PLAY_MIN, ZOOM_TOP)), 1, ZN);
+  // zoomed by hand: never wider than what you're in allows (storyFarWidth) - pulled back to it; the opening shot is its own
+  if (Z.manual) { const fw = storyOpenWidth() ? null : storyFarWidth(), lo = fw ? Math.max(1, lvOf(fw)) : 1; if (scopes[0].level < lo) setScope(0, lo); return; }
   const v = c.mode === 'civ' ? c.civ : null, fast = !!v && Math.abs(v.vDrive || 0) > (v.v || 60) * 0.15;
   if (fast !== Z.moving) { Z.mv += dt; if (Z.mv > 0.8) { Z.moving = fast; Z.mv = 0; } } else Z.mv = 0;
   const w = storyZoomWidth(); if (!w) return;
   // (Medium at least a step further out than Close: the stepped zoom's levels near the top are far apart)
-  const lvOf = w => clamp(zoomLevelOf(clamp(VIEW_W / w, ZOOM_PLAY_MIN, ZOOM_TOP)), 1, ZN);
   let lv = lvOf(w);
   if (Z.moving && c.civ) lv = Math.min(lv, lvOf(storyZoomOf(c.civ.sv)[0] * UPM) - 1);
   lv = Math.max(1, lv);
@@ -70865,22 +70876,27 @@ function vehCargoSet(v, k, n) {
 const vehHasCargoRec = v => !!v && (!!placedRec(v) || (v.hb != null && v.hs != null && !!strById(v.hb)));
 // ---- MARKETS
 // a structure is a market: its own (a prefab edited since copies it), else its prefab's, else its kind's
-/* (user Nov 4 17:28: "a property can either be Hangar (stores stuff) Market (sells stuff) Residential (people can live there) or NONE ... For now
-   it should be override on a single copy") a structure's USE, one of STR_USES: the copy's own (o.use, WORLD EDITOR > OBJECTS) or what its kind and
-   prefab make it - MARKET a market prefab, RESIDENTIAL a home kind (hut, houses), else NONE. Market: sells your cargo (its sheet - the Story's
-   only menu); residential: you can enter it when it's yours (storyEnterable). The chimney's smoke and the gate's drawing stay with the kind's
-   picture. (HANGAR, whose one use was a showroom of its vehicles, went with it - user Nov 19 19:26: "Its always the arrow between things";
-   a structure's vehicles each wear their own arrow; an old copy's 'hangar' reads as its kind's) */
-const STR_USES = [['market', 'MARKET'], ['res', 'RESIDENTIAL'], ['none', 'NONE']];
-// what each TYPE does, for the editor's help line (WORLD EDITOR > OBJECTS > TYPE)
-const STR_USE_HELP = {
-  market: 'Buys cargo, and sells what SELLS picks, between OPENS and CLOSES. In Story, stop a vehicle beside it to trade (prices: STORY > CARGO).',
-  res: 'A home. Owned by the player (OWNER: Player), it can be entered; the last one entered becomes CURRENT, where you sleep.',
-  none: 'Just a building: no hangar, market or home.',
-};
-const strUse = o => { if (!o) return 'none'; if (o.use && STR_USES.some(u => u[0] === o.use)) return o.use; const K = STR_KINDS[o.k] || {}; return strMarket0(o) ? 'market' : K.res ? 'res' : 'none'; };
-const strMarket = o => strUse(o) === 'market';
-const strMarket0 = o => { if (!o) return false; if (o.market !== undefined) return !!o.market; const p = typeof pfGet === 'function' ? pfGet(o.pf) : null; return p && p.market !== undefined ? !!p.market : !!(STR_KINDS[o.k] || {}).market; };
+/* ---- WHAT A STRUCTURE DOES (user Nov 19 19:32-19:39: "how do you define if it can have vehicles? Like the world map?" - "yes, definitely"):
+   the World Plan's structure properties, each on or off on its own - STORES VEHICLES (the families it takes: VALID VEHICLES, its SPOTS),
+   STORES GOODS (it keeps a stock: its CARGO, MAKES, what's delivered there), SELLS GOODS (a market: its sheet - the Story's only menu),
+   IS RESIDENCE (a home: yours you can enter; its chimney smokes). As the World Plan's live on a structure's subcategory, these live on
+   the PREFAB (GAME EDITOR > PREFABS - pfStructBox); a copy carries its prefab's (pfApply), and its panel in OBJECTS says what it does.
+   (Was a copy's one TYPE - market, residential, none, hangar - o.use: an old copy's is read once into these, strsFix.) A prefab that never
+   said: its kind's (STR_KINDS takes / market / res / noGoods). ---- */
+const strProp = (o, key, def) => { if (!o) return false; if (o[key] !== undefined) return !!o[key]; const p = typeof pfGet === 'function' ? pfGet(o.pf) : null; return p && p[key] !== undefined ? !!p[key] : def(STR_KINDS[o.k] || {}); };
+const strMarket = o => strProp(o, 'market', K => !!K.market);
+const strRes = o => strProp(o, 'res', K => !!K.res);
+const strStores = o => strProp(o, 'stores', K => !K.noGoods && !K.prop);   // (by default every building; not a runway, road, lamp, gun, crane, windsock, buoy, pad - STR_KINDS noGoods)
+const strHoldsVehs = o => !!o && (strTakes(o) || []).length > 0;
+// what it does, in a line (the OBJECTS panel; WP: "A placed thing's panel shows these read only")
+function strDoesLine(o) {
+  const L = [];
+  if (strHoldsVehs(o)) L.push('STORES ' + strTakes(o).map(f => (STR_FAMS.find(q => q[0] === f) || [f, f])[1]).join(', '));
+  if (strStores(o)) L.push('STORES GOODS');
+  if (strMarket(o)) L.push('SELLS GOODS');
+  if (strRes(o)) L.push('RESIDENCE');
+  return L.length ? L.join(' · ') : 'NOTHING';
+}
 // your vehicles at rest by a market (or by a structure touching it) - the one you're in too, once it's stopped
 function marketSellers(o) {
   const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, cur = storyCur();
@@ -72702,7 +72718,7 @@ function vehLookOf(sv) {
      STR_VEHS as its own type, 'vp<n>', so a spot's list and the game take it as any other).
    Kept in bd_prefabs - not a world key: both worlds use the same prefabs (and a SNAPSHOT carries them, WORLD_PACK.game).
    ================================================================ */
-const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl'];
+const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js)
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
@@ -72710,7 +72726,7 @@ worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = J
 function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v;   // (a list of records - its PLANTS: each its own)
-const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl').map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
+const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && q !== 'res' && q !== 'stores').map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
 // the kinds' own prefabs and the old switches' variants: what SPAWN made of each before
 function pfBases() {
   const L = [];
@@ -72718,6 +72734,7 @@ function pfBases() {
     const K = STR_KINDS[k], p = { id: 'k:' + k, name: K.lab, k, base: true };
     if (k === 'dock') p.spr = 'dock-wood'; else if (K.takes) p.n = 1;
     if (K.market) p.market = true;
+    if (K.res) p.res = true;
     L.push(p);
     if (k === 'hangarAir' || k === 'hangarSea') L.push(Object.assign({}, p, { id: 'k:' + k + ':L', name: K.lab + ' (LARGE)', big: true }));
     if (k === 'dock') L.push(Object.assign({}, p, { id: 'k:dock:pier', name: 'PIER', spr: 'pier' }));
@@ -72733,7 +72750,7 @@ function pfAllS() {
   for (const b of pfBases()) if (!PF_S.some(p => p.id === b.id)) PF_S.push(b);
   // (user Nov 3 10:00: MARKET - "the current market object should have it on by default") a prefab that never said: its kind's; the
   // old ACCEPTS FISH gone (a catch is sold at a MARKET now - 50-zz-cargo.js)
-  for (const p of PF_S) { if (p.market === undefined && STR_KINDS[p.k].market) p.market = true; delete p.fish; }
+  for (const p of PF_S) { if (p.market === undefined && STR_KINDS[p.k].market) p.market = true; if (p.res === undefined && STR_KINDS[p.k].res) p.res = true; delete p.fish; }
   return PF_S;
 }
 const pfGet = id => id ? pfAllS().find(p => p.id === id) || null : null;
@@ -72853,13 +72870,21 @@ function pfStructBox(p, box, el, css) {
   if (p.k === 'gunTower') sw(c, 'LIGHTHOUSE', 'lh', 'Drawn as a lighthouse');
   if (p.k === 'runway') { sw(c, 'LANDING STRIP', 'strip', 'Drawn as a grass landing strip'); sw(c, 'SMALL PLANES ONLY', 'small', 'Only small planes may use it'); }
   sw(c, 'HOSPITAL', 'hosp', 'Story: the player wakes here after dying');
-  { const t = T.toggle(p.market ? 1 : 0); t.addEventListener('input', () => { p.market = !!+t.value; ed(); }); const r = row('MARKET', t); r.title = 'Story: cargo can be sold here'; c.appendChild(r); }   // (kept as false too: a market's own default is on - pfAllS)
   box.appendChild(c);
-  const v = el('div', 'cat'); v.appendChild(el('h4', '', 'VALID VEHICLES'));
+  // WHAT IT DOES (user Nov 19 19:39: the World Plan's structure properties, each on or off - 50-zz-cargo.js); a bool kept false too:
+  // a kind's own default may be on (pfAllS)
+  const d = el('div', 'cat'); d.appendChild(el('h4', '', 'WHAT IT DOES'));
   const takes = (p.takes || K.takes || []);
+  { const t = T.toggle(takes.length ? 1 : 0); t.addEventListener('input', () => { if (+t.value) { p.takes = (K.takes && K.takes.length ? K.takes : ['car']).slice(); if (!Number.isInteger(p.n) && p.k !== 'dock') p.n = 1; } else p.takes = []; ed(); pfSync(); });
+    const r = row('STORES VEHICLES', t); r.title = 'Vehicles are put away here (which ones: VALID VEHICLES, how many: SPOTS)'; d.appendChild(r); }
+  for (const [lab, key, def, tip] of [['STORES GOODS', 'stores', !K.noGoods && !K.prop, 'It keeps a stock of goods: its CARGO, what it MAKES, what is delivered here'], ['SELLS GOODS', 'market', !!K.market, 'A market: trades cargo through its sheet (SELLS, OPENS / CLOSES on a copy)'], ['IS RESIDENCE', 'res', !!K.res, 'A home: the player can enter one of his, sleep there; its chimney smokes']]) {
+    const t = T.toggle((p[key] ?? def) ? 1 : 0); t.addEventListener('input', () => { p[key] = !!+t.value; ed(); }); const r = row(lab, t); r.title = tip; d.appendChild(r); }
+  box.appendChild(d);
+  if (!takes.length) return;
+  const v = el('div', 'cat'); v.appendChild(el('h4', '', 'VALID VEHICLES'));
   for (const [f, lab] of STR_FAMS) {
     const t = T.toggle(takes.includes(f) ? 1 : 0);
-    t.addEventListener('input', () => { const L = new Set(p.takes || K.takes || []); if (+t.value) L.add(f); else L.delete(f); p.takes = STR_FAMS.map(q => q[0]).filter(q => L.has(q)); if (p.takes.length && !Number.isInteger(p.n) && p.k !== 'dock') p.n = 1; ed(); });
+    t.addEventListener('input', () => { const L = new Set(p.takes || K.takes || []); if (+t.value) L.add(f); else L.delete(f); p.takes = STR_FAMS.map(q => q[0]).filter(q => L.has(q)); if (p.takes.length && !Number.isInteger(p.n) && p.k !== 'dock') p.n = 1; ed(); if (!p.takes.length) pfSync(); });   // (none left: STORES VEHICLES off)
     v.appendChild(row(lab, t));
   }
   if (takes.length) {
@@ -72892,7 +72917,7 @@ function pfVehBox(sv, box, el, css) {
     pi.onchange = () => { const v = pi.value.trim(); if (v === '') delete STORY_PRICES[sv]; else STORY_PRICES[sv] = Math.max(0, Math.round(+v)); try { if (Object.keys(STORY_PRICES).length) localStorage.setItem('bd_prices', JSON.stringify(STORY_PRICES)); else localStorage.removeItem('bd_prices'); } catch (e) { } strSync(); };
     row('PRICE', pi, el('span', '', 'COINS')).title = 'Story price in coins (empty: default)';
   }
-  if (typeof storyZoomOf === 'function') for (const [lab, i, lo, hi, tip] of [['STORY ZOOM STOPPED', 0, 20, 200, 'Story view width when stopped, metres'], ['STORY ZOOM MOVING', 1, 40, 600, 'Story view width when moving, metres']]) {
+  if (typeof storyZoomOf === 'function') for (const [lab, i, lo, hi, tip] of [['STORY ZOOM STOPPED', 0, 20, 200, 'Story view width when stopped, metres'], ['STORY ZOOM MOVING', 1, 40, 600, 'Story view width when moving, metres'], ['STORY ZOOM FARTHEST', 2, 60, 2000, 'Story: the widest view zooming out by hand in this vehicle, metres']]) {
     const inp = el('input'), z = storyZoomOf(sv), out = el('output', '', z[i] + ' M'); inp.type = 'range'; inp.min = lo; inp.max = hi; inp.step = 5; inp.value = z[i];
     inp.oninput = () => { const q = storyZoomOf(sv).slice(); q[i] = +inp.value; STORY_ZW[sv] = q; out.textContent = inp.value + ' M'; try { localStorage.setItem('bd_story_zoom', JSON.stringify(STORY_ZW)); } catch (e) { } STORY_ZOOM.key = null; };
     row(lab, inp, out).title = tip;
@@ -72993,8 +73018,8 @@ function storyCur() {
   if (c.mode === 'dock') { const o = storyAt(); if (o) return { o }; }
   return null;
 }
-// (user Nov 4 17:28) a home you can be in: a RESIDENTIAL structure (its USE - strUse) the player owns - entering it makes it your MAIN
-const storyEnterable = o => !!o && strUse(o) === 'res' && o.own === 'player';
+// (user Nov 4 17:28) a home you can be in: a RESIDENCE (IS RESIDENCE - strRes, 50-zz-cargo.js) the player owns - entering it makes it your MAIN
+const storyEnterable = o => !!o && strRes(o) && o.own === 'player';
 // has the vehicle you're in come to rest (the speed storyParks asks to tie up)
 function storyStill(v) {
   if (!v) return false;
@@ -73463,7 +73488,7 @@ const STR_KINDS = {
   // other pictures - each its own prefab, LIGHTHOUSE 2... (pfBases), and a PICTURE any of its prefabs can take; a new lighthouse is one more
   lighthouse: { lab: 'LIGHTHOUSE', art: 'lighthouse', arts: ['lighthouse-2'] },
   bldg1: { lab: 'BUILDING 1', art: 'building-1' }, bldg2: { lab: 'BUILDING 2', art: 'building-2' },
-  windsock: { lab: 'WINDSOCK', art: 'windsock' },
+  windsock: { lab: 'WINDSOCK', noGoods: true, art: 'windsock' },
   // (user Nov 3 16:53: "a buoy should be an object I place manually ... Lets add a PROPS category that contains small objects ... Lets also
   // make 'street lamps' another object (the ones that piers place) that we can add manually") PROPS: small things placed by hand -
   // structures like any other (picked, dragged, red where they can't be, DELETE, DUPLICATE, groups, saved), listed under OBJECTS > PROPS
@@ -73472,12 +73497,12 @@ const STR_KINDS = {
   buoy: { lab: 'BUOY', prop: true, water: true, buoy: 'orange' }, buoyRed: { lab: 'RED BUOY', prop: true, water: true, buoy: 'red' },
   streetLamp: { lab: 'STREET LAMP', prop: true, lamp: true },
   terminal: { lab: 'TERMINAL', term: true },
-  gunTower: { lab: 'TOWER', gun: true },   // (Nov 1 22:35: the tower's body; its weapons are GUN structures on it - 50-zz-structh.js)
-  gun: { lab: 'GUN', mount: true },   // (user Nov 1 22:19-22:35: MISSILE CANNON - the tower's gun - or MACHINE GUN CANNON, on a tower, lighthouse or pier)   // (the gun towers - its owner's; drawn and fought as the game's towers: landTowersBuild, 50-land-tshape.js - Nov 1)   // (an airport's terminal with its control tower, windsock and flag - the built-in airport's picture, its owner's colours: drawTerminalAt, 50-land-airport.js)
-  runway: { lab: 'RUNWAY', runway: true },
-  crane: { lab: 'CRANE', crane: true },   // (a harbour's crane - only on a pier; rolls along it - 50-zz-structh.js, 50-land-crane.js)
-  road: { lab: 'ROAD', road: true },
-  launchPad: { lab: 'LAUNCH PAD', pad: true, takes: ['space'] },   // (user Oct 31 09:05: 'The rocket launcher is the launch pad structure, and a rocket vehicle that has the shuttle vehicle connected to it')                        // (the spec section 8: 'Tropical Road - road for cars')                  // (user Oct 31 09:05: an airport is a hangar + a runway of its own length + a terminal)
+  gunTower: { lab: 'TOWER', noGoods: true, gun: true },   // (Nov 1 22:35: the tower's body; its weapons are GUN structures on it - 50-zz-structh.js)
+  gun: { lab: 'GUN', noGoods: true, mount: true },   // (user Nov 1 22:19-22:35: MISSILE CANNON - the tower's gun - or MACHINE GUN CANNON, on a tower, lighthouse or pier)   // (the gun towers - its owner's; drawn and fought as the game's towers: landTowersBuild, 50-land-tshape.js - Nov 1)   // (an airport's terminal with its control tower, windsock and flag - the built-in airport's picture, its owner's colours: drawTerminalAt, 50-land-airport.js)
+  runway: { lab: 'RUNWAY', noGoods: true, runway: true },
+  crane: { lab: 'CRANE', noGoods: true, crane: true },   // (a harbour's crane - only on a pier; rolls along it - 50-zz-structh.js, 50-land-crane.js)
+  road: { lab: 'ROAD', noGoods: true, road: true },
+  launchPad: { lab: 'LAUNCH PAD', noGoods: true, pad: true, takes: ['space'] },   // (user Oct 31 09:05: 'The rocket launcher is the launch pad structure, and a rocket vehicle that has the shuttle vehicle connected to it')                        // (the spec section 8: 'Tropical Road - road for cars')                  // (user Oct 31 09:05: an airport is a hangar + a runway of its own length + a terminal)
 };
 /* ---- what a structure takes in, and the vehicles that start at it (user Oct 31, the spec section 2: "docking spots with
    size and type restrictions"; 12:06: "if it's a home, if it can repair vehicles, etc. If I can spawn a vehicle there").
@@ -73578,7 +73603,8 @@ let STRS = [], STR_GEN = 0;   // (STR_GEN: bumped at every save - what's derived
 // (Story) a structure the player's CURRENT home - where a new story starts: its CURRENT mark, and a HOME whose mark was never set counts as on
 // (user Nov 13 15:20: the toggle showed only the mark - off on a HOME that was the start). The game and the editor's toggle both read this
 const strIsHome = o => o.home ?? o.k === 'home';
-function strsFix(L) { for (const o of L) if (strIsHome(o) && o.own === undefined) o.own = 'player'; for (const o of L) if (o.fac !== undefined) { if (o.own === undefined && (o.fac === 'civ1' || o.fac === 'civ2')) o.own = o.fac === 'civ1' ? 0 : 1; delete o.fac; } return L; }
+function strsFix(L) { for (const o of L) if (o.use !== undefined) { if (o.use === 'market') o.market = true; else if (o.use === 'res') o.res = true; else if (o.use === 'none') { o.market = false; o.res = false; } delete o.use; }   // (a copy's old TYPE - 50-zz-cargo.js, WHAT A STRUCTURE DOES)
+  for (const o of L) if (strIsHome(o) && o.own === undefined) o.own = 'player'; for (const o of L) if (o.fac !== undefined) { if (o.own === undefined && (o.fac === 'civ1' || o.fac === 'civ2')) o.own = o.fac === 'civ1' ? 0 : 1; delete o.fac; } return L; }
 function strsValid(L) { return Array.isArray(L) && L.every(o => o && STR_KINDS[o.k] && Number.isFinite(o.x)); }
 /* (user Nov 3 19:3x, the GPU check: "how much runway do we need? lets add it" - "Move airports 330 m inland") the 747 lifts off
    near its runway's end and climbs at about 8 degrees; the seaplane hangar on each coast, 290 m past the end, stood in its way and
@@ -74000,7 +74026,7 @@ function nearViews(x, pad) {
 function strChimneys(dt) {
   if (SIM_ONLY) return;
   for (const o of strsUsed()) {
-    if (strUse(o) !== 'res' || strDown(o) || !strSmokes(o)) continue;     // (Nov 7: every RESIDENTIAL, by its own rule - 50-zzzz-struct-act.js)
+    if (!strRes(o) || strDown(o) || !strSmokes(o)) continue;     // (Nov 7: every RESIDENTIAL, by its own rule - 50-zzzz-struct-act.js)
     const B = strBox(o), P = B.P, M = P && P._chim; if (!M || !nearViews(o.x, 300)) continue;
     let t = STR_SMOKE.get(o.id); if (t === undefined) t = strSmkRnd(0, 1);
     t -= dt;
@@ -74226,13 +74252,8 @@ function strFill() {
     q.value = o.pf; q.onchange = () => { const p = pfGet(q.value); if (!p) return; o.pf = p.id; pfApply(o, p); if (strTakes(o)) dockRefit(o); strSave(); if (typeof hplChanged === 'function') hplChanged(); strSync(); };   // (its plants are the new prefab's - laid again)
     const lp = el('label', '', 'PREFAB'); lp.title = 'Which prefab this is (edit in PREFABS)'; r.append(lp, q); c.appendChild(r); }
   const sw = (lab, key, f, tip, on = () => o[key]) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(on() ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); if (f) f(); }); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, t); c.appendChild(r); };
-  // TYPE (was USE - user Nov 5 09:04: "lets call it TYPE ... just below Prefab and it should say what each type does"): what the copy is for in
-  // Story; the editor's help line explains the type picked (STR_USE_HELP, 50-zz-cargo.js)
-  { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss;
-    for (const [val, lab] of STR_USES) { const z = document.createElement('option'); z.value = val; z.textContent = lab; z.title = STR_USE_HELP[val]; q.appendChild(z); }
-    const l = el('label', '', 'TYPE'), help = () => { const h = btnVar(STR_USES.find(u => u[0] === q.value)[1]) + ': ' + STR_USE_HELP[q.value]; l.dataset.help = q.dataset.help = h; l.title = q.title = h; return h; };
-    q.value = strUse(o); help(); q.onchange = () => { o.use = q.value; NSKY.editor.TUNE.help('TYPE', help()); strSave(); strSync(); };
-    r.append(l, q); c.appendChild(r); }
+  // what it does - its prefab's, read only here (user Nov 19 19:39: the World Plan's properties; edit them in PREFABS - strDoesLine, 50-zz-cargo.js)
+  { const r = el('div', 'row'), l = el('label', '', 'DOES'), t = el('output', '', strDoesLine(o)); l.title = t.title = 'What its prefab does (edit in PREFABS: STORES VEHICLES, STORES GOODS, SELLS GOODS, IS RESIDENCE)'; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c.appendChild(r); }
   sw('CURRENT', 'home', () => { if (o.home) { o.own = 'player'; for (const q of STRS) if (q !== o) q.home = false; } strSave(); strSync(); }, 'Story: the player\'s current home - a new story starts here', () => strIsHome(o));   // (Nov 7, user: "MAIN should be renamed CURRENT" - in play, the last home of yours entered is the current one)   // (user Nov 4 17:28: HOME BASE is MAIN - one at a time; in play the last residence of yours entered)
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of STR_OWNERS) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = strOwnerVal(o); q.onchange = () => { const v = q.value; if (v === 'player') o.own = 'player'; else if (+v < 0) delete o.own; else o.own = +v; strSave(); }; const l = el('label', '', 'OWNER'); l.title = 'Owner (armies start only at their own hangars)'; r.append(l, q); c.appendChild(r); }
   if (isGunS(o)) { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of GUN_TYPES) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = o.wt || 'cannon'; q.onchange = () => { o.wt = q.value; strChanged(); }; const l = el('label', '', 'WEAPON'); l.title = 'Which gun it carries'; r.append(l, q); c.appendChild(r); }   // (a GUN's weapon - 50-zz-structh.js)
@@ -74252,8 +74273,8 @@ function strFill() {
   }
   U.box.appendChild(c);
   { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
-  U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js)
-  U.box.appendChild(stockBox(el, U.selCss, o, strSave));   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
+  if (strStores(o)) { U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js; STORES GOODS)
+    U.box.appendChild(stockBox(el, U.selCss, o, strSave)); }   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
   // (Nov 7, user: "select any structure and choose what they sell if they have the market property") a market's SELLS: each kind of cargo on or off
   if (strMarket(o)) { const c2 = el('div', 'cat'); c2.appendChild(el('h4', '', 'SELLS'));
     // (Nov 7: OPENS / CLOSES - the hours it trades; the same hour both: always open; closed it's dark at night)
@@ -74267,7 +74288,7 @@ function strFill() {
     U.box.appendChild(c2); }
   // what starts at each spot (what's allowed there: its prefab's VALID VEHICLES, SIZE, MAX SIZE, RESTRICT): its SPOTS - ADD SPOT, REMOVE;
   // each spot's own properties are the spot's, picked over the world (user Nov 3 12:03 - 50-zzzz-spots.js)
-  if ((strTakes(o) || []).length) spotsBox(o, U);
+  if (strHoldsVehs(o)) spotsBox(o, U);
 }
 // (tools) where a world point is on the page, in CSS pixels - for tests that press and drag in the editor's view
 window.__ed = { strs: () => STRS, box: o => strBox(o), box0: o => strBox0(o), bad: o => strPlaceBad(o), used: () => strsUsed(), spawn: id => strSpawn(id), save: () => strSave(), snap: () => STR_SNAP, prefabs: () => pfAllS(), pick: ids => { SE.sel = ids; strSync(); return !!SE.pane; }, pane: () => SE.pane, toWorld: (cx, cy) => screenToWorld(cx, cy), toClient: (x, y) => { const a = screenToWorld(0, 0), b = screenToWorld(1000, 1000); return [(x - a[0]) * 1000 / (b[0] - a[0]), (y - a[1]) * 1000 / (b[1] - a[1])]; } };
@@ -75712,7 +75733,8 @@ function storyTabSync() {
     slider(c, 'SUNSET', 'set', 0.5, 20, 0.5, 'MIN', 'Minutes from 4:30PM to 7:12PM');
     slider(c, 'NIGHT', 'night', 0.5, 60, 0.5, 'MIN', 'Minutes from 7:12PM to 5AM');
     slider(c, 'RENT DISTANCE', 'rentStep', 10, 2000, 10, 'M', 'Metres a rented vehicle\'s RENT COST pays for');
-    slider(c, 'FISH A MINUTE', 'fishM', 1, 100, 1, '', 'Fish a character\'s boat catches a minute out of view'); }
+    slider(c, 'FISH A MINUTE', 'fishM', 1, 100, 1, '', 'Fish a character\'s boat catches a minute out of view');
+    slider(c, 'FARTHEST VIEW AT A PLACE', 'farM', 100, 2000, 10, ' M', 'The widest view zooming out by hand at a structure, metres (in a vehicle: its own STORY ZOOM FARTHEST, PREFABS)'); }
   // PLAYER
   { const c = cat('PLAYER');
     num(c, 'COINS', () => STORY_CFG.coins, v => { STORY_CFG.coins = v; storyCfgSave(); }, 'Coins a new story starts with');
@@ -77724,11 +77746,10 @@ function strSmokes(o) {
 }
 // its lights at night (strLit): the home you're in by its LIGHT; any other of yours dark; the town's till bedtime; a market while open
 function strLightsOn(o) {
-  const u = strUse(o);
   if (o.empty) return false;                               // (nobody lives there: dark)
   if (strIsLh(o)) { const C = lhCtlId(o.id); return !(C && C.off); }   // (a lighthouse: its windows with its light - BEAM)
-  if (u === 'res') { if (stInHome(o)) return !!story.light; if (STORY && o.own === 'player') return false; return hourIn(env.time, 17, HOME_BED_H) || env.time < 5; }
-  if (u === 'market') return strOpen(o);
+  if (strRes(o)) { if (stInHome(o)) return !!story.light; if (STORY && o.own === 'player') return false; return hourIn(env.time, 17, HOME_BED_H) || env.time < 5; }
+  if (strMarket(o)) return strOpen(o);
   return true;
 }
 // ---- MARKET hours: OPENS / CLOSES (the hour; the same both: always open)
@@ -79109,9 +79130,9 @@ window.__slines = { lines: () => SLINES, obj: () => story.obj, say: () => story.
 const STOCK = { s: {}, u: {}, gone: {}, h: null };   // (s: structure id -> goods in play; u: structure id -> { m: the share of the next one made } and 'c' + character id -> { f: the share of the one being used up, g: grace days used }; gone: character ids; h: the clock's last game hour)
 defTable('strStock', () => [STOCK], { make: () => STOCK });
 function stockReset() { STOCK.s = {}; STOCK.u = {}; STOCK.gone = {}; STOCK.h = null; }
-const stGoods = o => STOCK.s[o.id] || o.goods || null;
+const stGoods = o => strStores(o) ? STOCK.s[o.id] || o.goods || null : null;   // (STORES GOODS off: none - 50-zz-cargo.js)
 const stN = (o, k) => { const g = stGoods(o); return (g && g[k]) || 0; };
-function stAdd(o, k, n) { const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, o.goods || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
+function stAdd(o, k, n) { if (!strStores(o)) return; const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, o.goods || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
 const stU = key => STOCK.u[key] || (STOCK.u[key] = { f: 0, g: 0, m: 0 });
 const stGone = id => !!STOCK.gone[id];
 const stMakes = o => o.makes && cargoKind(o.makes.k) && o.makes.per > 0 ? o.makes : null;
@@ -79155,6 +79176,7 @@ function stockStep() {
    by it), it wears a DELIVER arrow (storyTargets 'd:<id>'); A hands it all into the place's stock and pays its price for each (stDeliver). A
    market takes goods through its own sheet (SELL - marketSell), into its stock too. ---- */
 function stTakes(o) {
+  if (!strStores(o)) return [];
   const K = new Set(), M = stMakes(o);
   if (M) for (const q of (cargoKind(M.k).needs || [])) if (cargoKind(q.k)) K.add(q.k);
   for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id) && !slHousehold(c)) K.add(c.needs.k);
@@ -81028,7 +81050,7 @@ async function start(data) {
   } });
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   // (tests: Story's save and LOAD without the slots - the game's text kept by the tool, the vehicles and where you are - 50-story-saves.js)
-  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, main: story.main }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), use: strUse(o), own: o.own, home: o.home })) } });
+  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, main: story.main }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), does: strDoesLine(o), own: o.own, home: o.home })) } });
   Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test') });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
