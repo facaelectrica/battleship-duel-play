@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1143;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 21:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1144;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 22:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -45140,7 +45140,7 @@ const CIVAIR = {
 };
 // what's out there to drive: [class, the vehicle]
 function civList() {
-  if (STORY) return storyVehs().filter(j => j.own).map(j => [civClass(j), j]);   // (STORY: only your own - 50-story.js)
+  if (STORY) return storyVehs().filter(storyYours).map(j => [civClass(j), j]);   // (STORY: only yours - your own, or taken: 50-zzzzz-story-folk.js)
   const L = [];
   for (const f of traffic) if (f.state === 'fly' || f.state === 'free') L.push(['air', f]);
   for (const c of civShips) if (c.state === 'sail') L.push(['ship', c]);
@@ -70043,29 +70043,19 @@ function storySubs(dt) {
    structures, prices, saves, the home's next-day sun, fuel - is built on this, one version at a time (work note
    story-mode-oct31.md). The old wave defence it replaces is in git (before Version 401).
    ================================================================ */
-const story = { coins: 0, at: 0, saveN: 0, wake: 0, main: 0, cp: 0, dead: 0, inv: {}, cook: true, light: true, lh: {}, obj: null, said: {}, say: null };   // (cook / light: the home you're in - its smoke and lights; lh: lighthouses' LIGHT / ANGLE by structure id - 50-zzzz-struct-act.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (main: your MAIN - the last residence of yours you entered: you sleep there; 0 none yet)   // (cp: the checkpoint - the structure of yours last entered, where the story was saved and resumes; dead: how many times you've died - 50-story-saves.js)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
+const story = { coins: 0, at: 0, saveN: 0, wake: 0, cp: 0, dead: 0, inv: {}, cook: true, light: true, lh: {}, obj: null, said: {}, say: null };   // (cook / light: the home you're in - its smoke and lights; lh: lighthouses' LIGHT / ANGLE by structure id - 50-zzzz-struct-act.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (cp: the checkpoint - the lighthouse last entered, where the story was saved and resumes; dead: how many times you've died - 50-story-saves.js)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
 const storyR = sysRng('story');
-const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], main: [() => story.main, v => { story.main = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }] });   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
+const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }] });   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { story.coins = STORY_CFG.coins; story.inv = Object.assign({}, STORY_CFG.inv); story.at = 0; story.saveN = 0; story.wake = 0; story.main = 0; story.cp = 0; story.dead = 0; story.obj = null; story.said = {}; story.say = null; stockReset(); folkReset(); storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
-// where a story opens: the HOME structure, else a house, else nothing (the harbour's view, as ever)
-let storyHomeO;                                          // (the base this story opened at: picked once - storyReset)
-const storyMainO = () => story.main ? strsUsed().find(o => o.id === story.main) || null : null;
-// your MAIN, else the structure marked MAIN in the editor this story opened at (picked once - storyReset)
-const storyHome = () => storyMainO() || (storyHomeO !== undefined ? storyHomeO : (storyHomeO = storyPickHome()));
-function storyPickHome() {
-  const L = strsUsed();
-  // (user Nov 4 17:28: HOME BASE is MAIN now - the same mark, o.home) (user Oct 31 13:07: "The game starts at the only structure that is set as the home base for the player. If more than one
-  // is set, then it's picked randomly. If there's a save game, it should load at the last base" - story.at, in its table)
-  const H = L.filter(strIsHome);
-  if (H.length) return H[Math.floor(storyR() * H.length) % H.length];
-  return L.find(o => /^house/.test(o.k)) || null;
-}
+function storyReset() { story.coins = STORY_CFG.coins; story.inv = Object.assign({}, STORY_CFG.inv); story.at = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.dead = 0; story.obj = null; story.said = {}; story.say = null; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
+// (user Nov 19 20:54: "when the game starts, you and the grandfather live in the lighthouse") where you live: the player's HOME (STORY >
+// CHARACTERS - PLAYER_C, 50-zz-struct.js); a new story opens there, you sleep there
+const storyHome = () => PLAYER_C.home != null ? strsUsed().find(o => o.id === PLAYER_C.home) || null : null;
 function storyStart() {
   const c = crew[0], o = storyHome();
   story.opened = { home: o ? o.k : null, n: (story.opened ? story.opened.n : 0) + 1 };   // (for the tools: what it opened on)
   civUI[0] = true;
-  story.main = o ? o.id : 0; story.cp = o ? o.id : 0;
+  story.cp = o ? o.id : 0;
   if (o) storyGo(0, o.id); else cutTo(0);
   story.saveN++;                                         // (a new story is saved at once, in its slot: its first checkpoint)
 }
@@ -70082,17 +70072,17 @@ function storyGo(p, id, any, glide, quiet) {   // (quiet: put back there - no ch
   const o = strsUsed().find(q => q.id === id); if (!o || !STORY) return;
   const here = storyAt(); if (!any && here && here !== o && !storyLinks(here).includes(o)) return;   // (only to a connected one)
   const arrived = story.at !== o.id || crew[p].mode !== 'dock'; story.at = o.id;   // (back from a vehicle to where you got into it: arrived too)
-  if (storyEnterable(o) && (arrived || story.main !== o.id)) story.main = o.id;   // (your MAIN: where you sleep)
-  // (user Nov 9: "Every time you enter a location that you own, the game gets saved there, and that's your checkpoint. If you die or quit
-  // the game, it will resume from that checkpoint") the one moment a story is saved: arriving at a structure of yours - 50-story-saves.js
-  if (arrived && !quiet && o.own === 'player') { story.cp = o.id; story.saveN++; }
+  // (user Nov 9: "Every time you enter a location ... the game gets saved there, and that's your checkpoint. If you die or quit the game, it
+  // will resume from that checkpoint"; Nov 19: "lighthouses are the only place where you can save your progress") the one moment a story is
+  // saved: arriving at a lighthouse, whoever's it is - 50-story-saves.js
+  if (arrived && !quiet && strIsLh(o)) { story.cp = o.id; story.saveN++; }
   if (storyEnterable(o) && arrived) { story.cook = true; story.light = true; }   // (Nov 7: in a home of yours, its stove and lights on as you come in - COOK / LIGHT)   // (user Nov 4 17:28 / Nov 7: a home of yours entered is your CURRENT one - the save checkpoint, saved every time you enter it)
   const c = crew[p], B = strBox(o); c.mode = 'dock'; c.watch = null; c.look = { x: o.x, y: (B.top + B.foot) / 2 };
   if (arrived && !quiet && p === 0) slineArrive(o);       // (user Nov 19: a place's line on arriving - 50-zzzzz-story-lines.js)
   if (glide) cam.glide = STORY_GLIDE; else cutTo(p);      // (a swap: the camera eases over - 50-zz-story-swap.js)
 }
 ACTS.storyGo = (p, id) => storyGo(p, id);
-// (user Nov 9) a loaded story goes on at its checkpoint - the structure of yours it was saved at (a story is saved only there, never
+// (user Nov 9) a loaded story goes on at its checkpoint - the lighthouse it was saved at (a story is saved only there, never
 // aboard a vehicle: every vehicle is where it was then). Already there: no new save
 const storyCpO = () => story.cp ? strsUsed().find(o => o.id === story.cp) || null : null;
 function storyResume(p) {
@@ -70142,7 +70132,7 @@ function storyBoats() {
       jetboats.addRow(j);
     }
   }
-  if (STORY && !owned) { const j = jetboats.find(q => q.story); if (j) j.own = true; }   // (none marked OWNED: the first at the dock nearest home is yours)
+  if (STORY && !owned && !famList(PLAYER_C).length) { const j = jetboats.find(q => q.story && !OWNERS.some(c => c.id === facOf(q))); if (j) j.own = true; }   // (none marked OWNED and no FAMILY whose vehicles you use: the first nobody's at the dock nearest home is yours)
 }
 // aboard one of yours at the structure you're at
 function storyBoard(p, sid) {
@@ -71167,7 +71157,7 @@ function strDoesLine(o) {
 function marketSellers(o) {
   const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, cur = storyCur();
   return storyVehs().filter(v => {
-    if (!v.own || !cargoAny(v)) return false;
+    if (!storyYours(v) || !cargoAny(v)) return false;   // (yours, or one you've taken - your family's: 50-zzzzz-story-folk.js)
     if (v.driven != null && !(cur && cur.v === v && storyStill(v))) return false;
     const [a, b] = vehBox({ v }); return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; });
   });
@@ -71186,7 +71176,7 @@ function marketLines(o) {
 // what you buy goes to you (a PLAYER INVENTORY kind) or into the vehicle of yours you're in, stopped by the market
 function marketBuyer(o, k) {
   if (cargoInv(k)) return 'inv';
-  const cur = storyCur(), v = cur && cur.v; if (!v || !v.own || !storyStill(v)) return null;
+  const cur = storyCur(), v = cur && cur.v; if (!v || !storyYours(v) || !storyStill(v)) return null;
   const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, [a, b] = vehBox({ v });
   return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; }) ? v : null;
 }
@@ -72973,7 +72963,7 @@ function vehLookOf(sv) {
    only places copies of them.
    - A structure prefab: its kind (what the code does with it), its picture and what it is (PF_KEYS). A placed copy (STRS, its
      o.pf) takes these from its prefab - copied onto it (pfApply), so the game reads a copy as it always did; the copy's own:
-     where it is, FLIP, OWNER, CURRENT, its LENGTH / HEIGHT and what starts at each spot (50-zz-struct.js strSync).
+     where it is, FLIP, OWNER, its LENGTH / HEIGHT and what starts at each spot (50-zz-struct.js strSync).
    - Its PLANTS (pl - user Nov 19 19:20: "a building also has flowers and plants, not just a landscape"): the hand-placed plants' records with
      their place along it from its middle (dx) instead of a place in the world - every copy has them, mirrored with its FLIP, moving with it
      (laid by hplLay, edited as any hand-placed plant: 50-zzzz-hand-plants.js).
@@ -73287,7 +73277,9 @@ function storyCur() {
   return null;
 }
 // (user Nov 4 17:28) a home you can be in: a RESIDENCE (IS RESIDENCE - strRes, 50-zz-cargo.js) the player owns - entering it makes it your MAIN
-const storyEnterable = o => !!o && strRes(o) && o.own === 'player';
+// a structure you can go into (its arrow): your HOME, a home of your FAMILY's (user Nov 19), a lighthouse - where a story is saved -, or a
+// residence you own
+const storyEnterable = o => !!o && (o.id === PLAYER_C.home || strIsLh(o) || OWNERS.some(c => c.home === o.id && famOf('player', c.id)) || (strRes(o) && o.own === 'player'));
 // has the vehicle you're in come to rest (the speed storyParks asks to tie up)
 function storyStill(v) {
   if (!v) return false;
@@ -73320,7 +73312,7 @@ function storyTargets() {
     if (q.o) { const B = strBox(q.o); x0 = B.x0; x1 = B.x1; y0 = B.top; y1 = B.foot; }
     else [x0, x1, y0, y1] = vehBox({ v: q.v });
     const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: (x0 + x1) / 2, wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, box: [x0, x1, y0, y1], name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
-    if (q.v && !q.v.own && q.v.rentBy == null && !folkMine(q.v)) { if (folkOwner(q.v)) { if (folkStealable(q.v)) T.steal = true; } else { if (dealBuy(q.v)) T.price = storyVehPrice(q.v); if (dealRent(q.v)) T.rent = dealRentCost(q.v); } }   // (user Nov 19: a character's vehicle is never for sale - STEAL, 50-zzzzz-story-folk.js)   // (Nov 7: BUY / RENT - 50-zzzz-veh-deal.js; one you're renting: yours to take)
+    if (q.v && !q.v.own && q.v.rentBy == null && !folkMine(q.v) && !folkFamFree(q.v)) { if (folkOwner(q.v)) { if (folkStealable(q.v)) T.steal = true; } else { if (dealBuy(q.v)) T.price = storyVehPrice(q.v); if (dealRent(q.v)) T.rent = dealRentCost(q.v); } }   // (user Nov 19: a character's vehicle is never for sale - STEAL, 50-zzzzz-story-folk.js)   // (Nov 7: BUY / RENT - 50-zzzz-veh-deal.js; one you're renting: yours to take)
     return T;
   };
   const out = [mk(cur, true)];
@@ -73338,7 +73330,7 @@ function storyTargets() {
   if (swaps) for (const v of storyVehs()) {
     if (v === cur.v || v.driven != null) continue;
     if (!v.own && v.rentBy == null && v.berth == null && !(v.placed != null && v.fac == null)) continue;   // (one you're renting: yours while you drive it)
-    if (!v.own && v.rentBy == null && !folkMine(v) && !(folkOwner(v) ? folkStealable(v) : dealBuy(v) || dealRent(v))) continue;   // (a character's: only while it can be stolen)   // (neither for sale nor to rent: no arrow - 50-zzzz-veh-deal.js)   // (one that isn't yours is for sale at its spot, or wherever it was placed if it's nobody's - user Nov 2 15:40)
+    if (!v.own && v.rentBy == null && !folkMine(v) && !(folkOwner(v) ? folkStealable(v) || folkFamFree(v) : dealBuy(v) || dealRent(v))) continue;   // (a character's: only while it can be stolen)   // (neither for sale nor to rent: no arrow - 50-zzzz-veh-deal.js)   // (one that isn't yours is for sale at its spot, or wherever it was placed if it's nobody's - user Nov 2 15:40)
     if (near(v)) out.push(mk({ v }));   // (in a hangar too - its own arrow, user Nov 19 19:26)
   }
   for (const T of out) { const P = S.find(o => T.v ? T.v.berth === o.id : T.o === o) || S[0]; T.at = P ? P.id : null; }   // (the structure it's at: story.at once you're in it)
@@ -73390,10 +73382,10 @@ function storyEnterVeh(p, v) {
 function storySwap(p, key) {
   if (!STORY || p !== 0) return;                         // (one playing out is replaced - no wait)
   const L = storyTargets(), T = L.find(q => q.key === key), C0 = L.find(q => q.cur); if (!T || T.cur) return;
-  if (T.v && (!(T.v.own || T.v.rentBy === p || folkMine(T.v)) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }   // (or one you've stolen - 50-zzzzz-story-folk.js)   // (yours, or one you've just rented - 50-zzzz-veh-deal.js)
+  if (T.v && (!(T.v.own || T.v.rentBy === p || folkMine(T.v) || folkFamFree(T.v)) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }   // (or one you've stolen - 50-zzzzz-story-folk.js)   // (yours, or one you've just rented - 50-zzzz-veh-deal.js)
   const c = crew[p], leaving = c.mode === 'civ' ? c.civ : null;
   if (leaving) storyLeave(p, leaving);
-  if (T.v) { storyEnterVeh(p, T.v); if (T.at != null) storyArrive(T.at); }
+  if (T.v) { folkFamTake(T.v); storyEnterVeh(p, T.v); if (T.at != null) storyArrive(T.at); }   // (one of your family's: kept as taken - 50-zzzzz-story-folk.js)
   else storyGo(p, T.o.id, true, true);
   cam.glide = STORY_GLIDE; storySel = null;
   Object.assign(STSW, { n: (STSW.n | 0) + 1, on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v ? T.v.sid : null, oi: T.o ? T.o.id : null, step: 0, chim: 0 });
@@ -73841,9 +73833,24 @@ pfVehRegister();                                              // (the NEW vehicl
 let STR_OWNERS = [[-1, 'NOBODY'], [0, 'TEAM 1'], [1, 'TEAM 2'], ['player', 'PLAYER']];
 // ---- the world's owners
 let OWNERS = [];
+/* (user Nov 19 20:54-20:57: "you and the grandfather live in the lighthouse ... he is a relative of yours, so that should be a property that you
+   care about him living"; "Grandfather is just a character name. Then you should have a field called family ... Other characters can have
+   families too") THE PLAYER IS A CHARACTER: PLAYER_C - their HOME (where a new story opens) and FAMILY, kept in bd_owners beside the
+   others as the row with id 'player' (the game's own: never deleted, its name PLAYER). A character's FAMILY (c.fam: ids) is both ways -
+   famOf(a, b): either lists the other. */
+let PLAYER_C = { id: 'player', name: 'PLAYER' };
+const charOf = id => id === 'player' ? PLAYER_C : OWNERS.find(o => o.id === id) || null;
+const charsAll = () => [PLAYER_C, ...OWNERS];
+const famOf = (a, b) => { if (a === b) return false; const A = charOf(a), B = charOf(b); return !!A && !!B && ((A.fam || []).includes(b) || (B.fam || []).includes(a)); };
 function ownersBuild() { STR_OWNERS = [[-1, 'NOBODY'], [0, 'TEAM 1'], [1, 'TEAM 2'], ...OWNERS.map(o => [o.id, o.name]), ['player', 'PLAYER']]; }
-worldLoad(() => { let L = null; try { L = JSON.parse(localStorage.getItem('bd_owners') || 'null'); } catch (e) { } OWNERS = Array.isArray(L) ? L.filter(o => o && o.id >= 2 && typeof o.name === 'string') : []; ownersBuild(); });
-function ownersSave() { try { if (OWNERS.length) localStorage.setItem('bd_owners', JSON.stringify(OWNERS)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
+worldLoad(() => {
+  let L = null; try { L = JSON.parse(localStorage.getItem('bd_owners') || 'null'); } catch (e) { }
+  OWNERS = Array.isArray(L) ? L.filter(o => o && o.id >= 2 && typeof o.name === 'string') : [];
+  const P = Array.isArray(L) ? L.find(o => o && o.id === 'player') : null;
+  PLAYER_C = Object.assign({}, P || {}, { id: 'player', name: 'PLAYER' });
+  ownersBuild();
+});
+function ownersSave() { const L = [...OWNERS]; if (PLAYER_C.home != null || (PLAYER_C.fam || []).length) L.push(PLAYER_C); try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
 
 // (user Nov 1 21:11-21:15: "Every vehicle or structure, I should be able to set the owner"; "PLAYER should be a possible owner. a home
 // base is automatically set as Owner Player") o.own 'player': the person playing's - as a faction / team, player 0's side
@@ -73890,11 +73897,11 @@ function strVehs(o) {
 const DOCK_ABOVE = 1.4;
 let STRS = [], STR_GEN = 0;   // (STR_GEN: bumped at every save - what's derived from the structures made again, structsLocal)
 // (an older world: its FACTION is its OWNER - CIV 1 team 1, CIV 2 team 2)
-// (Story) a structure the player's CURRENT home - where a new story starts: its CURRENT mark, and a HOME whose mark was never set counts as on
-// (user Nov 13 15:20: the toggle showed only the mark - off on a HOME that was the start). The game and the editor's toggle both read this
-const strIsHome = o => o.home ?? o.k === 'home';
+// (an older world) the CURRENT mark a structure had - the player's home before the player was a character with a HOME (PLAYER_C.home - read
+// once from it, 50-zzzzz-story-family.js); a HOME BASE whose mark was never set counted as on
+const strOldHome = o => o.home ?? o.k === 'home';
 function strsFix(L) { for (const o of L) if (o.use !== undefined) { if (o.use === 'market') o.market = true; else if (o.use === 'res') o.res = true; else if (o.use === 'none') { o.market = false; o.res = false; } delete o.use; }   // (a copy's old TYPE - 50-zz-cargo.js, WHAT A STRUCTURE DOES)
-  for (const o of L) if (strIsHome(o) && o.own === undefined) o.own = 'player'; for (const o of L) if (o.fac !== undefined) { if (o.own === undefined && (o.fac === 'civ1' || o.fac === 'civ2')) o.own = o.fac === 'civ1' ? 0 : 1; delete o.fac; } return L; }
+  for (const o of L) if (strOldHome(o) && o.own === undefined) o.own = 'player'; for (const o of L) if (o.fac !== undefined) { if (o.own === undefined && (o.fac === 'civ1' || o.fac === 'civ2')) o.own = o.fac === 'civ1' ? 0 : 1; delete o.fac; } return L; }
 function strsValid(L) { return Array.isArray(L) && L.every(o => o && STR_KINDS[o.k] && Number.isFinite(o.x)); }
 /* (user Nov 3 19:3x, the GPU check: "how much runway do we need? lets add it" - "Move airports 330 m inland") the 747 lifts off
    near its runway's end and climbs at about 8 degrees; the seaplane hangar on each coast, 290 m past the end, stood in its way and
@@ -74382,7 +74389,7 @@ function strSpawn(id) {
   if (k === 'gun') o.wt = p.wt || 'cannon';
   if (k === 'road') o.len = 80;
   if (k === 'dock') o.len = p.spr === 'pier' ? PIER_M : 24;
-  if (k === 'home') { o.home = true; o.own = 'player'; }   // (a home base is the player's - user Nov 1 21:15)
+  if (k === 'home') o.own = 'player';   // (a home base is the player's - user Nov 1 21:15; where they live is their HOME, STORY > CHARACTERS)
   pfApply(o, p);
   if (strTakes(o)) { o.veh = []; dockRefit(o); }   // (its spots empty: what starts there is picked in its panel - user Nov 1 21:24, "why would you be spawning boats for no reason?")
   { const B0 = strBox0(o), want = Math.round(my + (B0.foot - B0.top) / 2); strLayAt(o, want); const B = strBox0(o); if (Math.abs(want - B.foot) > STR_SNAP * mr) o.fy = want; }   // (its middle at the view's)
@@ -74532,7 +74539,7 @@ const maxStrId = () => STRS.reduce((a, q) => Math.max(a, q.id || 0), 0);
    to a hospital, so we need to have a hospital. If you're at sea and you have no more fuel, an helicopter comes. So we need a
    helipad in the world") WORLD CHECK, over the STRUCTURES section in the Story world: each thing Story needs, OK or MISSING */
 const STORY_NEEDS = [
-  ['CURRENT', 'The player\'s home a new story starts at', L => L.some(strIsHome)],
+  ['PLAYER HOME', 'Where the player lives - a new story starts there (STORY > CHARACTERS)', L => L.some(o => o.id === PLAYER_C.home)],
 ];
 function strWorldCheck(U) {
   if (!U.chk) return;
@@ -74552,7 +74559,7 @@ function strFill() {
   U.box.textContent = '';
   if (!o) { if (SP.sel) spotFill(U); return; }   // (a spot picked over the world: its own panel - 50-zzzz-spots.js)
   // (user Nov 1 21:57: "I never edit anything in the world apart from very specific properties") this copy's own: its prefab (what
-  // it is - the PREFABS tab), where it stands and which way, its owner, CURRENT, its length, what starts at each spot
+  // it is - the PREFABS tab), where it stands and which way, its owner, its length, what starts at each spot
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PROPERTIES'));
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; q.title = 'Which prefab this is (edit in PREFABS)';
     for (const p of pfSorted().filter(p => p.k === o.k)) { const z = document.createElement('option'); z.value = p.id; z.textContent = p.name; q.appendChild(z); }
@@ -74561,7 +74568,6 @@ function strFill() {
   const sw = (lab, key, f, tip, on = () => o[key]) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(on() ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); if (f) f(); }); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, t); c.appendChild(r); };
   // what it does - its prefab's, read only here (user Nov 19 19:39: the World Plan's properties; edit them in PREFABS - strDoesLine, 50-zz-cargo.js)
   { const r = el('div', 'row'), l = el('label', '', 'DOES'), t = el('output', '', strDoesLine(o)); l.title = t.title = 'What its prefab does (edit in PREFABS: STORES VEHICLES, STORES GOODS, SELLS GOODS, IS RESIDENCE)'; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c.appendChild(r); }
-  sw('CURRENT', 'home', () => { if (o.home) { o.own = 'player'; for (const q of STRS) if (q !== o) q.home = false; } strSave(); strSync(); }, 'Story: the player\'s current home - a new story starts here', () => strIsHome(o));   // (Nov 7, user: "MAIN should be renamed CURRENT" - in play, the last home of yours entered is the current one)   // (user Nov 4 17:28: HOME BASE is MAIN - one at a time; in play the last residence of yours entered)
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of STR_OWNERS) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = strOwnerVal(o); q.onchange = () => { const v = q.value; if (v === 'player') o.own = 'player'; else if (+v < 0) delete o.own; else o.own = +v; strSave(); }; const l = el('label', '', 'OWNER'); l.title = 'Owner (armies start only at their own hangars)'; r.append(l, q); c.appendChild(r); }
   if (isGunS(o)) { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of GUN_TYPES) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = o.wt || 'cannon'; q.onchange = () => { o.wt = q.value; strChanged(); }; const l = el('label', '', 'WEAPON'); l.title = 'Which gun it carries'; r.append(l, q); c.appendChild(r); }   // (a GUN's weapon - 50-zz-structh.js)
   if (o.k !== 'dock' || isPierS(o)) sw('FLIP', 'flip', null, 'Face the other way');
@@ -75888,7 +75894,7 @@ function storyTabSync() {
   const cat = name => { const c = el('div', 'cat'); c.appendChild(el('h4', '', name)); const P = STY.panes[STY_TABS[name]]; if (P) P.appendChild(c); return c; };
   // a tab's one-paragraph guide at its top (what it's for, how to start)
   const guide = (tab, txt) => { const P = STY.panes[tab]; if (!P) return; const d = el('div', 'help'); d.textContent = txt; d.style.cssText = 'color:#9aa3b8;padding:6px 8px 10px;line-height:1.4;font-size:11px'; P.appendChild(d); };
-  guide('CHARACTERS', 'The people of your story. Each can live somewhere (HOME), need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. Their vehicles are the ones whose OWNER they are (OBJECTS). The places and vehicles they own are theirs.');
+  guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER, in OBJECTS) are theirs.');
   guide('LINES', 'What characters say. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
   guide('SIMULATE', 'Runs a new story fast - only its clock, stock and characters, every vehicle unseen - for so many days, and lists what happened: each trip and how long it took, each job done or skipped, who waited, and every place\'s stock at the end of each day. Nothing in the world is changed.');
   guide('CARGO', 'Every good in the world: its price at a market, whether the player carries it himself (INVENTORY), and what one is MADE FROM. Places make goods in OBJECTS (MAKES).');
@@ -75921,13 +75927,30 @@ function storyTabSync() {
     for (const C of CARGO.filter(q => q.inv)) num(c, C.name, () => STORY_CFG.inv[C.k] || 0, v => { STORY_CFG.inv[C.k] = v; storyCfgSave(); }, C.name.charAt(0) + C.name.slice(1).toLowerCase() + ' a new story starts with'); }
   // OWNERS
   { const c = cat('CHARACTERS');
+    const sub = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
+    const pick = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
+    const cid = v => v === 'player' ? 'player' : +v;
+    // (user Nov 19 20:57: "you should have a field called family, and you can add them") FAMILY: who they care about - both ways (famOf)
+    const famRow = o => {
+      const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'FAMILY'); help(l, 'Who they care about: their needs come first, their vehicles can be used'); r.appendChild(l);
+      for (const q of famList(o)) { const t = el('span', '', q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = 'Not family'; x.onclick = () => { famDrop(o.id, q.id); ownersSave(); storyTabSync(); }; r.append(t, x); }
+      const can = charsAll().filter(q => q !== o && !famOf(o.id, q.id));
+      if (can.length) r.appendChild(pick([['', '+ FAMILY'], ...can.map(q => [q.id, q.name])], '', v => { if (v !== '') (o.fam || (o.fam = [])).push(cid(v)); }, 110, 'Add someone to their family'));
+      c.appendChild(r);
+    };
+    // the player's own rows: where you live (a new story starts there) and your family
+    const famRows = o => {
+      const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'HOME'); help(l, 'Where you live - a new story starts there'); r.append(l, pick([['', 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home ?? '', v => { if (v !== '') o.home = +v; else delete o.home; }, 130, 'Where you live')); c.appendChild(r);
+      famRow(o);
+    };
     for (const [id, name] of STR_OWNERS) {
-      const r = el('div', 'row'), o = OWNERS.find(q => q.id === id);
+      const r = el('div', 'row'), o = id === 'player' ? PLAYER_C : OWNERS.find(q => q.id === id);
       if (!o) { const l = el('label', '', name), t = el('span', '', 'LOCKED'); help(l, 'The game\'s own owner'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); continue; }
+      if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); famRows(o, true); continue; }
       const i = el('input'); i.type = 'text'; i.value = o.name; i.style.cssText = css + ';width:140px'; i.title = 'Owner\'s name';
       i.onchange = () => { o.name = (i.value.trim() || o.name).toUpperCase(); i.value = o.name; ownersSave(); };
       const del = el('button', '', 'DELETE'); del.title = 'Remove this owner (its things become NOBODY\'s)';
-      del.onclick = () => { OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
+      del.onclick = () => { for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
       r.append(i, del); c.appendChild(r);
       // (user Nov 19: "we can set any entity as sick") where they live, and what they need a day from its stock (50-zzzzz-story-stock.js)
       const r2 = el('div', 'row'); r2.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
@@ -75937,7 +75960,7 @@ function storyTabSync() {
       r2.append(L('HOME', 'Where they live'), S([[0, 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
       r2.append(L('NEEDS', 'A good they need from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
       if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), L('A DAY, WITHOUT IT', 'Days they last once there is none'), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
-      c.appendChild(r2);
+      c.appendChild(r2); famRow(o);
       // (user Nov 19: "The fisherman leaves in his car ... goes fish ... drops the fish at the cargo place. And then he drives home") their
       // ROUTINE: the hour they leave home, and their jobs in order - the way there is worked out (50-zzzzz-story-folk.js)
       const r3 = el('div', 'row'); r3.style.cssText = r2.style.cssText;
@@ -76358,7 +76381,7 @@ function wedSync() {
    it - the game that was going on is dropped), with a person on player 0, who is put in the vehicle (vehBoard: DRIVE's way in)
    or at the structure (STORY: there as its dots take you; elsewhere the view on it, nothing driven). The vehicle or structure is
    found again in the new world by what it is (its army kind; a structure's id; a parked one's class and number). */
-const strMine = o => o.own === 'player' || strIsHome(o) || strVehs(o).some(q => q && q.own) || (!STORY && strOwner(o) >= 0 && teamPlayer(strOwner(o)) === 0);
+const strMine = o => o.own === 'player' || o.id === PLAYER_C.home || strVehs(o).some(q => q && q.own) || (!STORY && strOwner(o) >= 0 && teamPlayer(strOwner(o)) === 0);
 // (user Nov 3 12:40: PLAY from any picked vehicle - "of course") every vehicle: yours, another team's, one for sale, a placed one
 const vehMine = e => !!e && !!e.v && e.k !== 'crane';
 function edPlayKey() {
@@ -78662,6 +78685,32 @@ window.addEventListener('keydown', e => {
   e.preventDefault(); e.stopImmediatePropagation(); wedDuplicate();
 }, { capture: true });
 
+//@src 50-zzzzz-story-family.js:1
+/* ================================================================
+   FAMILY (user Nov 19 20:54-20:59, story-family chat; task-story-family.md): "there's the owner and there's the people that are in there
+   when the game starts ... you and the grandfather live in the lighthouse. And it must be because he is a relative of yours, so that
+   should be a property that you care about him living, and he has the property of being sick"; "Grandfather is just a character name.
+   Then you should have a field called family, and you can add them. Other characters can have families too that they would care about
+   just like you, but you control what your character does"; "The car and the boat are your grandfather's, but family is allowed to use
+   them if they need".
+   Three things kept apart, one rule for every character (the player is one - PLAYER_C, 50-zz-struct.js):
+   - where they live: HOME (a new story opens at the player's - storyHome);
+   - who they care about: FAMILY (c.fam, both ways - famOf): a family member's needs are your objectives (slHousehold,
+     50-zzzzz-story-lines.js); their vehicles are yours to use while free (folkFamFree, 50-zzzzz-story-folk.js);
+   - what they own: OWNER (a vehicle's, a shop's) - nothing about where you live or save reads it.
+   ================================================================ */
+// (an older world) the player's HOME from the structure marked CURRENT (the mark the player's home was before - strOldHome), else the first
+// house, as a story opened then; kept until the player's HOME is set and saved in STORY > CHARACTERS
+worldLoad(() => {
+  if (PLAYER_C.home != null) return;
+  const L = STRS.filter(o => o.home === true), H = L.length ? L : STRS.filter(o => o.k === 'home' && o.home !== false);
+  const o = H[0] || STRS.find(q => /^house/.test(q.k)); if (o) PLAYER_C.home = o.id;
+});
+// a character's family, both ways (the editor's FAMILY row)
+const famList = c => charsAll().filter(q => q !== c && famOf(c.id, q.id));
+// one taken off: off both lists
+function famDrop(a, b) { const A = charOf(a), B = charOf(b); for (const [X, y] of [[A, b], [B, a]]) if (X && X.fam) { X.fam = X.fam.filter(q => q !== y); if (!X.fam.length) delete X.fam; } }
+
 //@src 50-zzzzz-story-folk.js:1
 /* ================================================================
    CHARACTERS WHO LIVE IN THE WORLD (user Nov 19 15:22-15:37, story-systems chat; task-story-characters.md): "a building that contains
@@ -78671,7 +78720,7 @@ window.addEventListener('keydown', e => {
    but nothing is being rendered".
    One rule, the player's: the one who acts is a CHARACTER (one of the OWNERS), with a HOME and a ROUTINE (STORY > CHARACTERS: the hour they
    LEAVE and their JOBS - FISH at a fish area, COLLECT or DELIVER a good at a place). Their vehicles are the placed ones whose OWNER they
-   are. How they get there is worked out, never written (folkPlan): on foot between places joined (storyLinks); a vehicle that can go all
+   are. How they get there is worked out, never written (folkPlan): a hop from a structure to one touching it, as your arrow hops (storyLinks - nobody walks: people are only vehicles); a vehicle that can go all
    the way (a car over land, a boat over water - folkReach) from where it's put away here; else one that takes them to the vehicle that
    can. A vehicle is left only where it's put away (a structure that takes it with a free spot - folkPark), the player's rule. When the
    jobs are done they go home the same way.
@@ -78730,16 +78779,16 @@ function folkTarget(c, J) {
   if (J.do === 'fish') { const a = NATURE.find(q => q.id === J.at); return a ? { x: (a.x0 + a.x1) / 2, a } : null; }
   const o = slStr(J.at); return o ? { x: o.x, o } : null;
 }
-// on foot from one place to another: the same, joined, or joined through one between (the lighthouse between its dock and its parking)
-// (user Nov 19 20:44: "you jump from one to the other. You go from A to the parking to B. You cannot go from A to B") on foot as the player
-// goes: one hop at a time from a structure to one touching it (storyLinks) - a character makes the hops out of sight, as many as it takes
-function folkWalk(A, B) {
+// (user Nov 19 20:44: "you jump from one to the other. You go from A to the parking to B. You cannot go from A to B") hops as the player's
+// arrow does: one at a time from a structure to one touching it (storyLinks) - a character makes them out of sight, as many as it takes.
+// Nobody walks (user 20:50: people exist only as vehicles): a hop is being at the next place, as your arrow is
+function folkHops(A, B) {
   if (!A || !B) return false; if (A === B) return true;
   const seen = new Set([A]), Q = [A];
   while (Q.length) for (const q of storyLinks(Q.shift())) { if (q === B) return true; if (!seen.has(q)) { seen.add(q); Q.push(q); } }
   return false;
 }
-const folkAtPlace = (P, T) => !!T.o && folkWalk(P, T.o);
+const folkAtPlace = (P, T) => !!T.o && folkHops(P, T.o);
 // stopped by a place: within STORY_PARK_M of it (a market's sellers' rule)
 const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
 // send vehicle v off to x, to tie up at structure park (or to a fish area)
@@ -78765,7 +78814,17 @@ function folkCarry(S, v, J) { if (!J || J.do !== 'deliver') return; const n = ca
    vehicle or at the place (S.wait) - angry (drawFolkAngry), and goes on as soon as it's put away where they can walk to it. ---- */
 const folkOwner = v => { const o = vehOwnerVal(v); return OWNERS.find(c => c.id === o) || null; };
 const folkMine = v => !!v && !!FOLK.st[v.sid];
-const folkStealable = v => !!folkOwner(v) && !folkMine(v) && v.driven == null && !folkTrip(v) && !Object.values(FOLK.c).some(S => S.in === v.sid);
+// nobody in it or taking it anywhere
+const folkFree = v => v.driven == null && !folkTrip(v) && !Object.values(FOLK.c).some(S => S.in === v.sid);
+// (user Nov 19 20:59: "The car and the boat are your grandfather's, but family is allowed to use them") one of your FAMILY's: yours to use
+// while it's free - no STEAL, no alarm, its owner not angry; taken, it's kept in FOLK.st (fam) like a stolen one till its owner gets back in
+const folkFam = v => { const c = folkOwner(v); return !!c && famOf('player', c.id); };
+const folkFamFree = v => !!v && folkFam(v) && !folkMine(v) && folkFree(v);
+const folkStealable = v => !!folkOwner(v) && !folkFam(v) && !folkMine(v) && folkFree(v);
+// a vehicle that's yours to use: your own, or one you've taken - stolen, or your family's (selling from it, what you carry, your objectives)
+const storyYours = v => !!v && (!!v.own || folkMine(v));
+// boarding one of your family's: kept as taken (folkMine) - where it was, to tell its owner
+function folkFamTake(v) { if (folkFamFree(v)) FOLK.st = Object.assign({}, FOLK.st, { [v.sid]: { berth: v.berth, spot: v.spot, x: v.x, fam: 1 } }); }
 ACTS.storySteal = (p, sid) => {
   if (p !== 0 || !STORY) return; const v = storyVehs().find(q => q.sid === sid);
   if (!v || !folkStealable(v) || !storyTargets().some(T => T.v === v)) return;   // (from where you are - its arrow)
@@ -78775,7 +78834,8 @@ ACTS.storySteal = (p, sid) => {
 // one of theirs taken from them: someone else at its wheel, or stolen and not yet back where they can reach it
 const folkTaken = (c, V) => V.some(q => FOLK.st[q.sid] || FOLK.imp[q.sid] || (q.driven != null));   // (stolen, impounded where its thief was stopped, or someone else at the wheel)
 // no way on while a vehicle of theirs is taken: they wait for it (true), angry, and look again in a second
-function folkWait(c, S, V) { if (!folkTaken(c, V)) return false; if (!S.wait) folkLog({ t: 'wait', who: c.id }); S.wait = 1; S.nx = time + 1; return true; }
+// (angry - mad - only when it's taken by someone who isn't family: stolen, impounded, someone else at the wheel)
+function folkWait(c, S, V) { if (!folkTaken(c, V)) return false; if (!S.wait) folkLog({ t: 'wait', who: c.id }); S.wait = 1; S.mad = V.some(q => { const T = FOLK.st[q.sid]; return T ? !T.fam : !!FOLK.imp[q.sid] || (q.driven != null && !folkMine(q)); }) ? 1 : 0; S.nx = time + 1; return true; }
 /* ---- THE POLICE (user Nov 19 18:34: "if you steal someone's vehicle, if the island that the vehicle belongs to, which means the owner and his
    building, has a police station, that police station will send a vehicle if that vehicle is able to get you ... If the police car gets you,
    it stops you, are forced into the police car and he takes you to the police station. A day passes and next morning you leave the jail").
@@ -78811,8 +78871,8 @@ function folkCops() {
 function folkArrest(q, st) {
   const c = crew[0], C0 = storyTargets().find(T => T.cur);
   if (c.mode === 'civ') civRelease(0);
-  for (const sid in FOLK.st) { const B = FOLK.st[sid]; if (B && B.berth != null) FOLK.imp = Object.assign({}, FOLK.imp, { [sid]: { berth: B.berth } }); }   // (stolen ones stay where they are - impounded, towed back by a mechanic: TOW)
-  FOLK.st = {}; FOLK.cop = null;
+  const fam = {}; for (const sid in FOLK.st) { const B = FOLK.st[sid]; if (B && B.fam) fam[sid] = B; else if (B && B.berth != null) FOLK.imp = Object.assign({}, FOLK.imp, { [sid]: { berth: B.berth } }); }   // (stolen ones stay where they are - impounded, towed back by a mechanic: TOW; a family's stays as it was)
+  FOLK.st = fam; FOLK.cop = null;
   c.mode = 'dock'; c.watch = null; story.at = 0;                            // (in the back of the police car: you control nothing, the view rides with it)
   FOLK.ride = { sid: q.sid, st: st.id };
   Object.assign(STSW, { n: (STSW.n | 0) + 1, on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: 'v:' + q.sid, kind: 'car', vs: q.sid, oi: null, step: 0, chim: 0 });
@@ -78900,14 +78960,14 @@ function folkPlan(c, S) {
       }
       if (can(v)) { folkGo(v, T.x, null); return; }
     }
-    // home: put away where it's taken nearest home, then on foot
+    // home: put away where it's taken nearest home, then a hop
     if (!J) {
       if (here && folkAtPlace(here, T)) { S.in = 0; S.at = T.o.id; S.j = -1; folkLog({ t: 'home', who: c.id }); return; }
       if (can(v)) { const P = folkPark(v, T.x); if (P && P !== here && folkAtPlace(P, T)) { folkGo(v, P.x, P); return; } }
     }
     // this vehicle can't get there: to one of theirs that can, and out of this one there
-    // (a place this one ties up at, from which the other is reached on foot)
-    const u = V.find(q => q !== v && can(q) && q.berth != null && (() => { const P = folkPark(v, q.x); return P && folkWalk(P, slStr(q.berth)); })());
+    // (a place this one ties up at, from which the other is reached by hops)
+    const u = V.find(q => q !== v && can(q) && q.berth != null && (() => { const P = folkPark(v, q.x); return P && folkHops(P, slStr(q.berth)); })());
     if (u) { const P = folkPark(v, u.x); if (P && P !== here) { folkGo(v, P.x, P); return; } if (here) { folkCarry(S, v, J); S.in = 0; S.at = here.id; return; } }
     if (folkWait(c, S, V)) return;                                          // (stuck in this one, waiting for the other)
     if (!J) { if (!wasStuck) folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.stuck = 1; S.nx = time + 5; S.j = jobs.length; return; }   // (no way home from here: they stay in it, and look again now and then)
@@ -78916,9 +78976,9 @@ function folkPlan(c, S) {
   const P = slStr(S.at); if (!P) { S.at = (stHome(c) || {}).id || 0; return; }
   if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; folkLog({ t: 'home', who: c.id }); return; } if (J.do === 'deliver' && S.carry && S.carry.k === J.k) { stAdd(T.o, J.k, S.carry.n); S.carry = null; } S.j++; return; }   // (on foot: what they carry handed over; nothing to collect it in)
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
-  const near = V.filter(q => q.berth != null && folkWalk(P, slStr(q.berth)) && !FOLK.v[q.sid]);
+  const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
-  const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkWalk(B, slStr(u.berth)); })()));
+  const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkHops(B, slStr(u.berth)); })()));
   if (go) { if (FOLK.st[go.sid]) { const st = Object.assign({}, FOLK.st); delete st[go.sid]; FOLK.st = st; } S.in = go.sid; S.at = 0; if (S.carry) { cargoAdd(go, S.carry.k, S.carry.n); S.carry = null; } return; }   // (what they carried, loaded)
   if (folkWait(c, S, V)) return;                                            // (their vehicle taken: they wait for it)
   if (!J) { folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.j = -1; return; }   // (no way home: they stay)
@@ -78979,7 +79039,7 @@ const FOLK_SKULL = ['.###.', '#####', '#.#.#', '#####', '.#.#.'], FOLK_BOLT = ['
 function drawFolkAngry() {
   if (!STORY || ui.title) return; const w = storyToUI();
   for (const c of OWNERS) {
-    const S = FOLK.c[c.id]; if (!S || !S.wait) continue;
+    const S = FOLK.c[c.id]; if (!S || !S.wait || !S.mad) continue;   // (waiting for family to bring it back: not angry)
     let x, y; const v = S.in ? [...storyCars, ...jetboats].find(q => q.sid === S.in) : null;
     if (v) { const b = vehBox({ v }); x = (b[0] + b[1]) / 2; y = b[2]; } else { const o = slStr(S.at); if (!o) continue; const B = strBox(o); x = o.x; y = B.top; }
     const p = w(x, y), k = 3, bob = Math.round(2 * Math.abs(Math.sin(time * 5 + c.id))), X0 = Math.round(p.X) - 7 * k, Y0 = Math.round(p.Y) - 8 * k - 6 - bob;
@@ -79080,13 +79140,13 @@ function slTo(to) {
   if (to[0] === 's') { const o = slStr(+to.slice(2)); return o ? { o, name: slPlaceName(o), x: o.x } : null; }
   if (to[0] === 'k') {
     const sv = to.slice(2), cur = storyCur(), cx = cur ? (cur.v ? cur.v.x : cur.o.x) : 0;
-    const L = storyVehs().filter(v => v.own && v.sv === sv).sort((a, b) => Math.abs(a.x - cx) - Math.abs(b.x - cx));
+    const L = storyVehs().filter(v => storyYours(v) && v.sv === sv).sort((a, b) => Math.abs(a.x - cx) - Math.abs(b.x - cx));
     return { v: L[0] || null, sv, name: slVehName(sv), x: L[0] ? L[0].x : null };
   }
   return null;
 }
 // what you carry of a good: yours (story.inv) and what your vehicles hold
-const slCarry = k => storyInvN(k) + storyVehs().filter(v => v.own).reduce((s, v) => s + cargoN(v, k), 0);
+const slCarry = k => storyInvN(k) + storyVehs().filter(storyYours).reduce((s, v) => s + cargoN(v, k), 0);
 const slId = k => /^-?\d+$/.test(String(k)) ? +k : k;
 const slCmp = (a, op, b) => op === '>' ? a > b : op === '>=' ? a >= b : op === '=' ? a === b : op === '<' ? a < b : a <= b;
 function slHolds(c, o) {
@@ -79119,10 +79179,10 @@ function slineFor(o, freshOnly) {
    - NEED: less than one whole of what they need left at home ("I NEED MEDICINE. 3 DAYS LEFT.").
    - EMPTY: a market of theirs out of something it sells ("WE HAVE NO MEDICINE LEFT.").
    - MISSING: a place of theirs that makes something, short of what it's made from ("WE NEED FLOWER TO MAKE MEDICINE.").
-   Whose wants are your objectives: your HOUSEHOLD's - those whose HOME is yours (storyHome). Theirs set the objective - bring it home if
+   Whose wants are your objectives: your FAMILY's (user Nov 19 20:57 - famOf, wherever they or you are). Theirs set the objective - bring it home if
    you carry it, else buy it where it's sold and in stock; with none set, the most pressing of them is the objective (slAutoObj). Anyone
    else's are only said. ---- */
-const slHousehold = c => { const h = storyHome(); return !!h && !!c && c.home === h.id; };
+const slHousehold = c => !!c && famOf('player', c.id);   // (your FAMILY - STORY > CHARACTERS, 50-zzzzz-story-family.js)
 function slWantOf(c) {
   const out = [], N = stNeeds(c), home = stHome(c);
   if (N && !stGone(c.id)) {
@@ -79194,11 +79254,11 @@ function slHere(to) {
 function storyObjStep() {
   if (STORY && !story.obj && !(story.say && story.say.open) && !story.wake) slAutoObj();
   const g = story.obj; if (!STORY || !g || (story.say && story.say.open) || story.wake) return;
-  if (g.do === 'collect' || g.do === 'fish') { if (g.k && slCarry(g.k) > 0 && (g.to[0] !== 'k' || storyVehs().some(v => v.own && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) slObjDone(); return; }
+  if (g.do === 'collect' || g.do === 'fish') { if (g.k && slCarry(g.k) > 0 && (g.to[0] !== 'k' || storyVehs().some(v => storyYours(v) && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) slObjDone(); return; }
   if (!slHere(g.to)) return;
   if (g.do === 'go') { slObjDone(); return; }
   if (g.do === 'deliver' || g.do === 'bring') {
-    const o = g.to[0] === 's' ? slStr(+g.to.slice(2)) : null, cur = storyCur(), v = cur && cur.v && cur.v.own ? cur.v : null;
+    const o = g.to[0] === 's' ? slStr(+g.to.slice(2)) : null, cur = storyCur(), v = cur && cur.v && storyYours(cur.v) ? cur.v : null;
     const n = storyInvN(g.k) + (v ? cargoN(v, g.k) : 0); if (!o || !g.k || n <= 0) return;
     stAdd(o, g.k, n); if (story.inv[g.k]) story.inv[g.k] = 0; if (v) cargoPut(v, g.k, 0);   // (handed over: into the place's own stock - 50-zzzzz-story-stock.js)
     slObjDone();
@@ -79374,7 +79434,7 @@ function stTakes(o) {
 // what you could hand over here: [good, how many] - carried, and in your vehicles stopped by it
 function stOffer(o) {
   const ks = stTakes(o); if (!ks.length) return [];
-  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => (v.own || folkMine(v)) && storyStill(v) && (() => { const [a, b] = vehBox({ v }); return b > B.x0 - r && a < B.x1 + r; })());
+  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => storyYours(v) && storyStill(v) && (() => { const [a, b] = vehBox({ v }); return b > B.x0 - r && a < B.x1 + r; })());
   return ks.map(k => [k, storyInvN(k) + V.reduce((s, v) => s + cargoN(v, k), 0), V]).filter(q => q[1] > 0);
 }
 function stDeliver(p, id) {
@@ -81239,7 +81299,7 @@ async function start(data) {
   } });
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   // (tests: Story's save and LOAD without the slots - the game's text kept by the tool, the vehicles and where you are - 50-story-saves.js)
-  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, main: story.main }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), does: strDoesLine(o), own: o.own, home: o.home })) } });
+  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, home: PLAYER_C.home }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), does: strDoesLine(o), own: o.own, home: o.home })) } });
   Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test') });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
