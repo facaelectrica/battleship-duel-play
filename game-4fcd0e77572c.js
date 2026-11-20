@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1167;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 11:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1168;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 11:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -59860,6 +59860,14 @@ function terrainSyncSecs() {
   if (S.cave) S.cave.hidden = !ks.some(k => k === 'H');
   if (S.cwater) S.cwater.hidden = !caveRooms().length;   // (a cave - not a tunnel - picked)
   if (S.land) { S.land.hidden = !ks.some(k => k !== 'H'); if (typeof landNameSync === 'function') landNameSync(); }   // (LAND: a terrain shape - 50-zzzzz-story-cities.js)
+  // (user Nov 20 10:30: "the segment actions are available and not grayed out if I don't have any segment selected") SEGMENT TYPE and SEGMENT
+  // ACTIONS greyed till what each acts on is picked: a type, SPLIT SHAPE, ADD LAYER, SEAM, ROAD - segments (or whole shapes for a type); DETACH -
+  // a point; FLIP - a shape, any way it's picked (SPLIT SEGMENT: terrainSyncSplit)
+  const seg = !!(s && s.I != null), any = !!(s || q), need = { 'SPLIT SHAPE': seg, 'ADD LAYER': seg, SEAM: seg, ROAD: seg, DETACH: !!q, FLIP: any };
+  const grey = (b, on) => { b.disabled = !on; b.style.opacity = on ? '' : '0.4'; };
+  for (const [b] of TERRAIN_ED.skinBtns || []) grey(b, !!s);
+  const A = TERRAIN_ED.seamBtn && TERRAIN_ED.seamBtn.parentNode;
+  if (A) for (const b of A.querySelectorAll('button')) { const k = Object.keys(need).find(t => b.textContent.trim().startsWith(t)); if (k) grey(b, need[k]); }
 }
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
@@ -76666,7 +76674,7 @@ function wedAfter(moved) {
   const T = NSKY.editor.TUNE; if (!T.world()) return;
   let k = WED.claim;
   if (!k && moved && TERRAIN_ED.sel && JSON.stringify(TERRAIN_ED.sel) !== WED.lineSig) k = 'line';   // (a box drawn round pieces of line)
-  if (!k) { if (!WED.shift && !moved) for (const id in WK) WK[id].clear(); }
+  if (!k) { if (!WED.shift && !moved) { for (const id in WK) WK[id].clear(); edScrollHome(); } }
   else if (k !== 'none') {
     if (!WED.shift) for (const id in WK) if (id !== k) WK[id].clear();
     const K = WK[k], tab = K ? K.tab : WK_TAB[k];
@@ -76679,6 +76687,14 @@ function wedAfter(moved) {
     }
   }
   wedSync();
+}
+// (user Nov 20 10:33: "If I select the terrain shape and then I deselect, the create terrain section completely disappears. I need to change to
+// another tab to have it show up again") a pick scrolls the panel to its sections (cat.scrollIntoView above) - TERRAIN's below TERRAIN SHAPES;
+// nothing picked any more: the panel back at its top, where the tab's own tools are
+function edScrollHome() {
+  if (wedPicked().length) return;
+  const R = document.getElementById('skyEd'); if (!R) return;
+  for (const el of R.querySelectorAll('*')) if (el.scrollTop > 0 && el.offsetParent !== null) el.scrollTop = 0;
 }
 // ---- DELETE: everything picked
 function wedPicked() { const L = []; for (const id in WK) for (const it of WK[id].items()) L.push(it); return L; }
