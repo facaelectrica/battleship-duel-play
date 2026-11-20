@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1180;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 12:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1181;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 12:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71286,8 +71286,8 @@ const cargoMine = v => !!v && (v.own || v.driven === 0);
 function cargoGive(v, k, n) { if (STORY && cargoInv(k) && cargoMine(v)) storyInvAdd(k, n); else cargoAdd(v, k, n); }
 const cargoCoins = (k, n) => Math.floor(n * cargoPrice(k) + 1e-9);
 // ---- the editor: a CARGO box, one row per kind (the structures', the vehicles', the wrecks' panels)
-function cargoBox(el, css, get, set) {
-  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'CARGO'));
+function cargoBox(el, css, get, set, head = 'CARGO') {
+  const c = el('div', 'cat'); c.appendChild(el('h4', '', head));
   for (const [k, lab] of CARGO_KINDS) {
     const r = el('div', 'row'), i = el('input'), l = el('label', '', lab); i.type = 'number'; i.min = '0'; i.step = '1'; i.style.cssText = css + ';width:80px'; i.value = String(get(k));
     i.onchange = () => { set(k, Math.max(0, Math.floor(+i.value || 0))); i.value = String(get(k)); };
@@ -73174,15 +73174,15 @@ function vehLookOf(sv) {
      STR_VEHS as its own type, 'vp<n>', so a spot's list and the game take it as any other).
    Kept in bd_prefabs - not a world key: both worlds use the same prefabs (and a SNAPSHOT carries them, WORLD_PACK.game).
    ================================================================ */
-const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js; sells... its MARKET; work...: its WORK - 50-zzzzz-story-work.js)
-const PF_USE = ['res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt'];   // (what it does - not what it is: left out of a copy's prefab found from its looks, pfSig)
+const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt', 'makes'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js; sells... its MARKET; work...: its WORK - 50-zzzzz-story-work.js)
+const PF_USE = ['res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt', 'makes', 'goods'];   // (what it does - not what it is: left out of a copy's prefab found from its looks, pfSig)
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
 function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
-const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v;   // (a list of records - its PLANTS: each its own)
+const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v && typeof v === 'object' ? Object.assign({}, v) : v;   // (a record - its MAKES: its own too)   // (a list of records - its PLANTS: each its own)
 const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && !PF_USE.includes(q)).map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
 // the kinds' own prefabs and the old switches' variants: what SPAWN made of each before
 function pfBases() {
@@ -73352,6 +73352,12 @@ function pfStructBox(p, box, el, css) {
     const r = row('HOURS', s1, to, s2); r.title = 'When its workers are on and its market trades'; d.appendChild(r);
   }
   box.appendChild(d);
+  // (user Nov 20 11:55) MAKES - "This should be part of the structure design"; STARTING GOODS - "defined with a default value at the structure design but
+  // we can customize it in the world editor": p.goods, each copy's own o.goods over it (strGoods0, 50-zzzzz-story-stock.js)
+  if (p.stores ?? (!K.noGoods && !K.prop)) {
+    box.appendChild(cargoBox(el, css, k => cargoN(p, k), (k, n) => { cargoPut(p, k, n); ed(); }, 'STARTING GOODS'));
+    box.appendChild(stockBox(el, css, p, () => { ed(); pfSync(); }));
+  }
   // its MARKET (SELLS GOODS): what it SELLS and what it BUYS - every copy's (was each copy's own, user Nov 20 09:49); it trades in the place's HOURS (above)
   if (p.market ?? K.market) {
     const m = el('div', 'cat'); m.appendChild(el('h4', '', 'MARKET'));
@@ -74901,8 +74907,10 @@ function strFill() {
   if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));
   if (STORY_WORLD && typeof lotBox === 'function') { const b = lotBox(o, el, U.selCss); if (b) U.box.appendChild(b); }   // (VEHICLES KEPT AT: its PARKING / DOCK - 50-zzzzz-story-work.js)   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
   { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
-  if (strStores(o)) { U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js; STORES GOODS)
-    U.box.appendChild(stockBox(el, U.selCss, o, strSave)); }   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
+  if (strStores(o)) { const g0 = () => strGoods0(o) || {}, gb = cargoBox(el, U.selCss, k => g0()[k] || 0, (k, n) => { cargoPut(o, k, n); strSave(); }, 'STARTING GOODS');   // (its design's, its own over them - user Nov 20 11:55)
+    if (o.goods && Object.keys(o.goods).length) { const r = el('div', 'row'), b = el('button', '', 'USE DESIGN\'S'); b.title = 'Start with its design\'s goods again'; b.onclick = () => { delete o.goods; strSave(); strSync(); }; r.append(el('label', '', ''), b); gb.appendChild(r); }
+    U.box.appendChild(gb);   // (what it holds - 50-zz-cargo.js; STORES GOODS)
+    if (o.makes && o.makes.k) { const c3 = el('div', 'cat'), r = el('div', 'row'), l = el('label', '', 'MAKES'), t = el('output', '', (o.makes.per || 0) + ' ' + ((CARGO.find(C => C.k === o.makes.k) || {}).name || o.makes.k) + ' A DAY'); l.title = t.title = 'Its design\'s: STORY > STRUCTURE DESIGNS'; c3.appendChild(el('h4', '', 'MAKES')); r.append(l, t); c3.appendChild(r); U.box.appendChild(c3); } }   // (its design's MAKES, read only)   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
   // (Nov 7, user: "select any structure and choose what they sell if they have the market property") a market's SELLS: each kind of cargo on or off
   // its MARKET: its prefab's (PREFABS > MARKET), read only here
   if (strMarket(o)) { const c2 = el('div', 'cat'); c2.appendChild(el('h4', '', 'MARKET'));
@@ -80202,9 +80210,11 @@ window.__slines = { lines: () => SLINES, obj: () => story.obj, say: () => story.
 const STOCK = { s: {}, u: {}, gone: {}, h: null };   // (s: structure id -> goods in play; u: structure id -> { m: the share of the next one made } and 'c' + character id -> { f: the share of the one being used up, g: grace days used }; gone: character ids; h: the clock's last game hour)
 defTable('strStock', () => [STOCK], { make: () => STOCK });
 function stockReset() { STOCK.s = {}; STOCK.u = {}; STOCK.gone = {}; STOCK.h = null; }
-const stGoods = o => strStores(o) ? STOCK.s[o.id] || o.goods || null : null;   // (STORES GOODS off: none - 50-zz-cargo.js)
+// what it starts holding: its design's STARTING GOODS, its own over them (user Nov 20 11:55)
+const strGoods0 = o => { const p = typeof pfGet === 'function' ? pfGet(o.pf) : null, g = Object.assign({}, p && p.goods || {}, o.goods || {}); return Object.keys(g).length ? g : null; };
+const stGoods = o => strStores(o) ? STOCK.s[o.id] || strGoods0(o) : null;   // (STORES GOODS off: none - 50-zz-cargo.js)
 const stN = (o, k) => { const g = stGoods(o); return (g && g[k]) || 0; };
-function stAdd(o, k, n) { if (!strStores(o)) return; const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, o.goods || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
+function stAdd(o, k, n) { if (!strStores(o)) return; const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, strGoods0(o) || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
 const stU = key => STOCK.u[key] || (STOCK.u[key] = { f: 0, g: 0, m: 0 });
 const stGone = id => !!STOCK.gone[id];
 const stMakes = o => o.makes && cargoKind(o.makes.k) && o.makes.per > 0 ? o.makes : null;
@@ -80450,7 +80460,7 @@ worldLoad(() => {
   if (typeof pfGet !== 'function') return;
   for (const o of STRS) {
     const p = pfGet(o.pf); if (!p) continue;
-    for (const key of [...WORK_KEYS, 'startH', 'endH', 'sells', 'buys', 'openH', 'closeH']) {
+    for (const key of [...WORK_KEYS, 'startH', 'endH', 'sells', 'buys', 'openH', 'closeH', 'makes']) {   /* (MAKES: the design's since Nov 20 11:55) */
       if (o[key] === undefined || p[key] !== undefined) continue;
       p[key] = key === 'rt' ? o.rt.map(J => { const q = Object.assign({}, J); if (J.do === 'fish') q.to = 'near'; else if (J.do !== 'tow') { const t = STRS.find(z => z.id === J.at); q.to = t === o ? 'self' : t ? 'k:' + t.k : 'self'; } delete q.at; return q; }) : pfClone(o[key]);
       p.base = false;
