@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1174;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 12:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1175;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 12:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74046,7 +74046,7 @@ worldLoad(() => {
   PLAYER_C = Object.assign({}, P || {}, { id: 'player', name: 'PLAYER' });
   ownersBuild();
 });
-function ownersSave() { const L = [...OWNERS]; if (PLAYER_C.home != null || (PLAYER_C.fam || []).length) L.push(PLAYER_C); try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
+function ownersSave() { if (typeof lotAuto === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on && lotAuto()) strSave();   /* (who lives / works where changed what needs a PARKING / DOCK) */ const L = [...OWNERS]; if (PLAYER_C.home != null || (PLAYER_C.fam || []).length) L.push(PLAYER_C); try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
 
 // (user Nov 1 21:11-21:15: "Every vehicle or structure, I should be able to set the owner"; "PLAYER should be a possible owner. a home
 // base is automatically set as Owner Player") o.own 'player': the person playing's - as a faction / team, player 0's side
@@ -74124,7 +74124,7 @@ const strsUsed = () => EDMODE.on ? STRS : strsPlay();   // (online: the host's w
 // (play: those off their ground left out - strFree; the editor shows them all, red)
 const STR_PLAY = { gen: -1, src: null, L: [] };
 function strsPlay() { const c = STR_PLAY; if (c.gen !== STR_GEN || c.src !== STRS) { c.gen = STR_GEN; c.src = STRS; c.L = STRS.some(strFree) ? STRS.filter(o => !strFree(o)) : STRS; } return c.L; }
-function strSave() { STR_GEN++; if (typeof buoysBuild === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) buoysBuild();   /* (the placed buoys at once - 31-sailboats-buoys.js) */ try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); if (typeof liveEdit === 'function') liveEdit(); try { wedSync(); } catch (e) { } if (typeof spotsHead === 'function') spotsHead(); }   // (the WORLD CHECK kept up to date; every structure edit - a property, a LOOK, an owner - built as it's made, as a move: 50-zzzz-live-edit.js)
+function strSave() { STR_GEN++; if (typeof lotAuto === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) lotAuto();   /* (a place's missing PARKING / DOCK: the nearest joined - 50-zzzzz-story-work.js) */ if (typeof buoysBuild === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) buoysBuild();   /* (the placed buoys at once - 31-sailboats-buoys.js) */ try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); if (typeof liveEdit === 'function') liveEdit(); try { wedSync(); } catch (e) { } if (typeof spotsHead === 'function') spotsHead(); }   // (the WORLD CHECK kept up to date; every structure edit - a property, a LOOK, an owner - built as it's made, as a move: 50-zzzz-live-edit.js)
 // the editor's own random source for new colours (not the game's: nothing in the world moves for it)
 const strRng = seededRng(7311 + (Date.now() % 9973));
 // where it stands: its box in the world (left, right, top, foot). (user Nov 2: "click and drag any structure ... move it freely and
@@ -74636,7 +74636,9 @@ const strStretchOf = o => o ? STR_STRETCH[isPierS(o) ? 'pier' : o.k] || null : n
 // the ends that stretch: both, a pier its sea end only (away from its land end)
 const strStretchEnds = o => { if (!isPierS(o)) return [-1, 1]; const B = strBox(o), E = pierLandEnd(o); return [Math.abs(B.x0 - E) > Math.abs(B.x1 - E) ? -1 : 1]; };
 function strStretchDraw(q) {
-  SE.hnd = []; if (SE.sel.length !== 1) return; const o = strById(SE.sel[0]); if (!strStretchOf(o)) return;
+  SE.hnd = []; if (SE.sel.length !== 1) return; const o = strById(SE.sel[0]); if (!o) return;
+  if (STORY_WORLD && typeof lotKnobs === 'function') lotKnobs(o, q);   // (its PARKING / DOCK handles - 50-zzzzz-story-work.js)
+  if (!strStretchOf(o)) return;
   const B = strBox(o), R = Math.max(edHandle(6), 7 * q), Y = Math.round(PY((B.top + B.foot) / 2));
   for (const s of strStretchEnds(o)) {
     const E = Math.round(PX(s < 0 ? B.x0 : B.x1)), X = E + s * (R * 2 + 4 * q);
@@ -74666,11 +74668,12 @@ window.addEventListener('pointerdown', ev => {
   if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev) || !(SE.hnd || []).length || edPickLost('struct', ev)) return;
   const [X, Y, r] = vehWorld(ev), H = SE.hnd.find(h => Math.hypot(X - h.x, Y - h.y) < Math.max(h.r, r)); if (!H) return;
   const o = strById(H.o); if (!o) return; const B = strBox(o);
+  if (H.lk) { LOTD.d = { id: ev.pointerId, o, fam: H.lk, x: X, y: Y }; ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct'); return; }   // (a lot's handle: dragged onto its lot)
   SE.str = { id: ev.pointerId, o, s: H.s, fixed: H.s < 0 ? B.x1 : B.x0, off: X - (H.s < 0 ? B.x0 : B.x1) };
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct');
 }, { capture: true, passive: false });
-window.addEventListener('pointermove', ev => { const d = SE.str; if (!d || d.id !== ev.pointerId) return; strStretchTo(d.o, d.s, vehWorld(ev)[0] - d.off, d.fixed); ev.stopImmediatePropagation(); }, { capture: true, passive: true });
-const strStretchUp = ev => { const d = SE.str; if (!d || d.id !== ev.pointerId) return; SE.str = null; if (d.o.k === 'dock') dockRefit(d.o); strSave(); strSync(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); };
+window.addEventListener('pointermove', ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); LOTD.d.x = X; LOTD.d.y = Y; ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; strStretchTo(d.o, d.s, vehWorld(ev)[0] - d.off, d.fixed); ev.stopImmediatePropagation(); }, { capture: true, passive: true });
+const strStretchUp = ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); lotDragEnd(X, Y); ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; SE.str = null; if (d.o.k === 'dock') dockRefit(d.o); strSave(); strSync(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); };
 window.addEventListener('pointerup', strStretchUp, { capture: true });
 window.addEventListener('pointercancel', strStretchUp, { capture: true });
 // ---- the pointer over the world while the tab is open (before the game's own, as the vehicles' tab)
@@ -74706,6 +74709,7 @@ const strRGB = h => { const f = n => { const k = (n + h / 60) % 6; return Math.r
 function strPlaceBad(o) {
   if (strFree(o)) return 'OFF THE GROUND';
   { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }
+  { const n = typeof lotBad === 'function' ? lotBad(o) : ''; if (n) return n; }   // (NEEDS PARKING / NEEDS DOCK - 50-zzzzz-story-work.js)
   { const n = typeof assignShort === 'function' ? assignShort(o) : ''; if (n) return n; }   // (a parking too short for the vehicles it would hold - 50-zzzzz-story-work.js)   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
@@ -74857,7 +74861,8 @@ function strFill() {
   if (strStretchOf(o)) { const r = el('div', 'row'), l = el('label', '', 'LENGTH'), w = el('output', '', Math.round(o.len ?? (o.k === 'runway' ? 260 : o.k === 'road' ? 80 : isPierS(o) ? PIER_M : o.k === 'parking' ? parkLenM(o) : 24)) + ' M'); l.title = w.title = 'Drag the handles at its ends to stretch it'; r.append(l, w); c.appendChild(r); }
   if (o.k === 'runway') sl(c, 'HEIGHT', 'hgt', -10, 40, ' M', 0, null, 'Runway height over the ground, metres');
   U.box.appendChild(c);
-  if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
+  if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));
+  if (STORY_WORLD && typeof lotBox === 'function') { const b = lotBox(o, el, U.selCss); if (b) U.box.appendChild(b); }   // (VEHICLES KEPT AT: its PARKING / DOCK - 50-zzzzz-story-work.js)   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
   { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
   if (strStores(o)) { U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js; STORES GOODS)
     U.box.appendChild(stockBox(el, U.selCss, o, strSave)); }   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
@@ -76262,8 +76267,8 @@ function styFill(el) {
     };
     // the player's own rows: where you live (a new story starts there) and your family
     const famRows = o => {
-      const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'HOME'); help(l, 'Where you live - a new story starts there'); r.append(l, pick([['', 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home ?? '', v => { if (v !== '') o.home = +v; else delete o.home; }, 130, 'Where you live')); c.appendChild(r);
-      { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'WORK'); help(l, 'Where you work: its work vehicle, its wage'); r.append(l, pick([['', 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.work ?? '', v => { if (v !== '') o.work = +v; else delete o.work; }, 130, 'Where you work')); c.appendChild(r); }
+      const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'HOME'); help(l, 'Where you live - a new story starts there'); r.append(l, pick(placeOpts(strIsRes, o.home, ['', 'NOWHERE'], 'A RESIDENCE'), o.home ?? '', v => { if (v !== '') o.home = +v; else delete o.home; }, 130, 'Where you live')); c.appendChild(r);
+      { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'WORK'); help(l, 'Where you work: its work vehicle, its wage'); r.append(l, pick(placeOpts(strWork, o.work, ['', 'NOWHERE'], 'A WORKPLACE'), o.work ?? '', v => { if (v !== '') o.work = +v; else delete o.work; }, 130, 'Where you work')); c.appendChild(r); }
       { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'VEHICLE'); help(l, 'Your own vehicle: at your home, again the morning after it\'s lost'); r.append(l, pick([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh ?? '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Your own vehicle')); c.appendChild(r); }
       famRow(o);
     };
@@ -76284,14 +76289,14 @@ function styFill(el) {
       const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
       const N = (val, set, tip, step) => { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = step; n.value = String(val ?? 0); n.style.cssText = css + ';width:56px'; n.title = tip; n.onchange = () => { set(Math.max(0, +n.value || 0)); ownersSave(); }; return n; };
       const L = (t, tip) => { const l = el('label', '', t); help(l, tip); return l; };
-      r2.append(L('HOME', 'Where they live'), S([[0, 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
+      r2.append(L('HOME', 'Where they live'), S(placeOpts(strIsRes, o.home, [0, 'NOWHERE'], 'A RESIDENCE'), o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
       r2.append(L('NEEDS', 'A good they need from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
       if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), (() => { const t = el('span', '', 'A DAY, WITHOUT IT'); help(t, 'Days they last once there is none'); return t; })(), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
       c.appendChild(r2); famRow(o);
       // (user Nov 19 21:05-21:10) the coins they start with, and where they work - a job is what their WORK place is short of (PRIORITIES)
       const r4 = el('div', 'row'); r4.style.cssText = r2.style.cssText;
       r4.append(L('COINS', 'Coins they start with'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Coins they start with', '1'),
-        L('WORK', 'Where they work: its design\'s WORK is their day'), S([[0, 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'),
+        L('WORK', 'Where they work: its design\'s WORK is their day'), S(placeOpts(strWork, o.work, [0, 'NOWHERE'], 'A WORKPLACE'), o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'),
         L('VEHICLE', 'Their own vehicle: at their home, again the morning after it\'s lost'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh || '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Their own vehicle'));
       c.appendChild(r4);
       // (their ROUTINE: their WORK place's since Nov 20 - STRUCTURES > SELECTED > WORK, 50-zzzzz-story-work.js)
@@ -79218,6 +79223,18 @@ function landNameSync() {
     inp.onchange = () => { const R = landPicked(); if (!R) return; const v = inp.value.trim().toUpperCase(); if (v) R.name = v; else delete R.name; islChanged(); landNameSync(); strSync(); };
     row.append(l, inp); cat.insertBefore(row, b); TERRAIN_ED.landName = { inp }; landNameSync(); }, 0); };
   NSKY.editor.TUNE.buttons('TERRAIN', 'LAND', [clear], { when: terrLand }); }
+// (user Nov 20 11:24: "Only locations marked as work should be available on the drop-down list ... the drop-down list would show me first the
+// country name and then the structure type, so that we have many hospitals and many police stations") a place's name in a list: its land's
+// name first (strName already has it for a service), the list sorted by land; HOME only residences, WORK only workplaces
+const landOf = o => { const L = strLand(o); return L && L.name ? String(L.name).toUpperCase() : ''; };
+const placeLab = o => { const n = strName(o).toUpperCase(), l = landOf(o); return l && !n.startsWith(l + ' ') ? l + ' ' + n : n; };
+const strIsRes = o => strRes(o) || !!(STR_KINDS[o.k] || {}).home;   // (a residence's design - or the lighthouse, a home)
+function placeOpts(ok, val, none, what) {
+  const L = strsUsed().filter(ok).map(o => [o.id, placeLab(o), landOf(o) || '~']).sort((a, b) => a[2].localeCompare(b[2]) || a[1].localeCompare(b[1], undefined, { numeric: true }));
+  const out = [none, ...L.map(q => [q[0], q[1]])], cur = val != null && val !== '' && +val ? strById(+val) : null;
+  if (cur && !ok(cur)) out.push([cur.id, placeLab(cur) + ' (NOT ' + what + ')']);   // (an older pick that isn't one: shown, to be changed)
+  return out;
+}
 
 //@src 50-zzzzz-story-death.js:1
 /* ================================================================
@@ -79690,7 +79707,7 @@ function folkPlan(c, S) {
     // home (or the workplace, on foot): put away where it's taken nearest it, then a hop
     if (foot) {
       if (here && folkAtPlace(here, T)) { folkCarry(S, v); S.in = 0; if (J) { S.at = here.id; return; } S.at = T.o.id; S.j = -1; folkLog({ t: 'home', who: c.id }); return; }
-      if (can(v)) { const P = folkPark(v, T.x, q => folkAtPlace(q, T)); if (P && P !== here) { folkGo(v, P.x, P); return; } }
+      if (can(v)) { const Lt = T.o && typeof lotOf === 'function' ? lotOf(T.o, civCat(v)) : null, P = (Lt && folkPark(v, T.x, q => q === Lt)) || folkPark(v, T.x, q => folkAtPlace(q, T)); if (P && P !== here) { folkGo(v, P.x, P); return; } }   // (its PARKING / DOCK first - 50-zzzzz-story-work.js)
     }
     // this vehicle can't get there: to one of theirs that can, and out of this one there
     // (a place this one ties up at, from which the other is reached by hops)
@@ -80254,19 +80271,14 @@ worldLoad(() => {
 // work vehicles' (user Nov 20 10:55 - a market's van never parked inside the police station)
 const workTakes = (o, sv, fam, W) => (strTakes(o) || []).includes(fam) && strAllows(o, sv) && strFits(o, sv) && (o === W || !strWork(o));
 // where a workplace's work vehicle of type sv goes: a free spot of it or of a structure joined to it (by hops) that takes it - the nearest
-function workSpot(W, v, cat) {   // (cat: its family - it's in no table yet)
-  const seen = new Set([W]), Q = [W], L = [];
-  while (Q.length) { const o = Q.shift(); L.push(o); for (const q of storyLinks(o)) if (!seen.has(q)) { seen.add(q); Q.push(q); } }
-  const ok = o => workTakes(o, v.sv, cat, W);
-  for (const o of L) if (ok(o)) { const s = storyFreeSpot(o, v); if (s >= 0) return [o, s]; }
+function workSpot(W, v, cat) {   // (cat: its family - it's in no table yet; W: a workplace - its own work vehicle - or a home - a character's own)
+  for (const o of lotsFor(W, v.sv, cat, v.wk != null ? W : null)) { const s = storyFreeSpot(o, v); if (s >= 0) return [o, s]; }   // (itself, its PARKING / DOCK - lotsFor)
   return null;
 }
 // the places a workplace's vehicles can stand at (for the editor's check and its lines): [structure...]
 function workSpotsAt(W, sv = W.wv) {
   const D = sv && STR_VEHS[sv]; if (!D || !WORK_FAMS.includes(D.fam)) return [];
-  const seen = new Set([W]), Q = [W], L = [];
-  while (Q.length) { const o = Q.shift(); if (workTakes(o, sv, D.fam, W)) L.push(o); for (const q of storyLinks(o)) if (!seen.has(q)) { seen.add(q); Q.push(q); } }
-  return L;
+  return lotsFor(W, sv, D.fam, W);
 }
 // a vehicle of type sv made for who (a character's id, or 'player') at a free spot of structure W or one joined to it, marked with tag
 // ({ wk } a work vehicle, { cv } a character's own); null: nowhere free for it. Its id: one more than any made so far (70000s)
@@ -80473,8 +80485,8 @@ function workLinksDraw(q) {
    Two plans, as ownVehStep / workIn make them:
    - the start: every character's VEHICLE at the spot it's made at near their home - drawn there (an open place: at its spot; an enclosed one: over
      it, as its spots are); none free: over the home in red, NO SPOT;
+     and each workplace's WORK VEHICLE once, where it's made (its own garage: over it; its PARKING / DOCK: at the spot, its name over it);
    - a shift: the workers' own vehicles parked by their workplace (folkPark - never in a workplace) and a work vehicle for each worker (workSpot).
-     The workplace's WORK VEHICLE drawn once over it, red when one of its workers' finds no spot.
    A place that would have to hold more than its spots in either (the first that takes it on the way out from the home / workplace) is short:
    its frame red, N SPOTS SHORT (strPlaceBad). Never picked: only drawn. ---- */
 const ASG = { t: -9, at: new Map(), short: new Map() };   // (at: structure id -> [{ sv, who, s, red }]; short: structure id -> how many)
@@ -80486,32 +80498,28 @@ function assignPlan() {
   // a vehicle of type sv from structure W out by joins (W: a workplace whose own it is, else null): [the structure, its spot] / [null, the first that takes it]
   const place = (used, from, sv, W, miss) => {
     const D = STR_VEHS[sv]; if (!D || !WORK_FAMS.includes(D.fam)) return null;
-    const seen = new Set([from]), Q = [from]; let want = null;
-    while (Q.length) {
-      const o = Q.shift();
-      if (workTakes(o, sv, D.fam, W)) {
-        want = want || o;
-        const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
-        let best = -1, bd = 1e12;
-        for (let i = 0; i < storyBerths(o); i++) if (!U.has(i)) { const d = Math.abs(storySpotX(o, i) - from.x); if (d < bd) { bd = d; best = i; } }
-        if (best >= 0) { U.add(best); return [o, best]; }
-      }
-      for (const q of storyLinks(o)) if (!seen.has(q)) { seen.add(q); Q.push(q); }
+    const L = lotsFor(from, sv, D.fam, W);
+    for (const o of L) {
+      const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
+      let best = -1, bd = 1e12;
+      for (let i = 0; i < storyBerths(o); i++) if (!U.has(i)) { const d = Math.abs(storySpotX(o, i) - from.x); if (d < bd) { bd = d; best = i; } }
+      if (best >= 0) { U.add(best); return [o, best]; }
     }
-    if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);
+    const want = L[L.length - 1] || null; if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);   // (short: the last it could go to - its lot)
     return [null, want];
   };
   const nm = c => c === PLAYER_C ? 'PLAYER' : (c.name || '').toUpperCase();
   const live = charsAll().filter(c => c === PLAYER_C || !stGone(c.id));
   { const used = new Map(), miss = new Map();   // (the start)
     for (const c of live) { const H = stHome(c); if (!c.veh || !H) continue; const r = place(used, H, c.veh, null, miss); if (!r) continue; if (r[0]) put(r[0], { sv: c.veh, who: nm(c), s: r[1] }); else put(H, { sv: c.veh, who: nm(c), s: -1, red: 1 }); }
+    for (const W0 of strsUsed()) if (workVehD(W0)) { const r = place(used, W0, W0.wv, W0, new Map()); if (r && r[0]) put(r[0], { sv: W0.wv, who: r[0] === W0 ? '' : strName(W0), s: r[1] });   /* (over its own garage: no name - it's its parent's) */ else put(W0, { sv: W0.wv, who: '', s: -1, red: 1 }); }   // (its WORK VEHICLE once, where it's made - user 11:20: "so that the fishing boat would appear there")
     for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); }
-  { const used = new Map(), miss = new Map(), bad = new Set();   // (a shift: the workers at work, everyone else at home)
+  { const used = new Map(), miss = new Map();   // (a shift: the workers at work, everyone else at home)
     const at0 = c => { const W0 = workOf(c); return W0 && !strDown(W0) ? W0 : null; };
     for (const c of live) { const H = stHome(c); if (c.veh && H && !at0(c)) place(used, H, c.veh, null, miss); }
-    for (const c of live) { const W0 = at0(c); if (!W0) continue; if (c.veh) place(used, W0, c.veh, null, miss); if (workVehD(W0)) { const r = place(used, W0, W0.wv, W0, miss); if (r && !r[0]) bad.add(W0.id); } }
+    for (const c of live) { const W0 = at0(c); if (!W0) continue; if (c.veh) place(used, W0, c.veh, null, miss); if (workVehD(W0)) place(used, W0, W0.wv, W0, miss); }
     for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n));
-    for (const W0 of strsUsed()) if (workVehD(W0)) put(W0, { sv: W0.wv, who: '', s: -1, top: 1, red: bad.has(W0.id) || !workSpotsAt(W0).length ? 1 : 0 }); }
+  }
   return ASG;
 }
 // (strPlaceBad) a place too small for the vehicles it would hold - 'N SPOTS SHORT'
@@ -80520,7 +80528,7 @@ function assignEdDraw(o, X0, X1, Y0, q) {
   const L = assignPlan().at.get(o.id); if (!L || !L.length) return;
   spotScan();
   const inside = !!(STR_KINDS[o.k] || {}).enclosed, B = strBox(o), gap = 4 * q, cx = Math.round((X0 + X1) / 2);
-  const pic = e => { const P = !(inside || e.red || e.top) && STR_VEHS[e.sv] && STR_VEHS[e.sv].art && tropPic(STR_VEHS[e.sv].art + '-front') || spotPic(e.sv), F = P && P !== spotPic(e.sv) ? P.width * P._m * UPM : 0, w = Math.max(4, Math.round((F || spotWorldW(e.sv)) * SV)), h = P ? Math.max(2, Math.round(P.height * w / P.width)) : Math.round(w * 0.3); return { P, w, h }; };
+  const pic = e => { const P = !(inside || e.red) && STR_VEHS[e.sv] && STR_VEHS[e.sv].art && tropPic(STR_VEHS[e.sv].art + '-front') || spotPic(e.sv), F = P && P !== spotPic(e.sv) ? P.width * P._m * UPM : 0, w = Math.max(4, Math.round((F || spotWorldW(e.sv)) * SV)), h = P ? Math.max(2, Math.round(P.height * w / P.width)) : Math.round(w * 0.3); return { P, w, h }; };
   const one = (e, ix, iy, w, h, P, flip) => {
     if (e.red) { C.fillStyle = 'rgba(255,60,50,0.28)'; C.fillRect(ix - q, iy - q, w + 2 * q, h + 2 * q); }
     if (P) { if (flip) { C.save(); C.translate(ix + w, iy); C.scale(-1, 1); C.drawImage(P, 0, 0, w, h); C.restore(); } else C.drawImage(P, ix, iy, w, h); }
@@ -80529,7 +80537,7 @@ function assignEdDraw(o, X0, X1, Y0, q) {
   let y = Y0 - gap;   // (the stack over it: enclosed ones and NO SPOT)
   for (const e of L) {
     const { P, w, h } = pic(e);
-    if (inside || e.red || e.top) {
+    if (inside || e.red) {
       y -= Math.max(h, 7 * q); const ix = cx - (w >> 1), iy = y + Math.max(h, 7 * q) - h;
       one(e, ix, iy, w, h, P, o.flip);
       const lab = e.red ? (e.who ? e.who + ': NO SPOT' : 'NO SPOT') : e.who;   // (the work vehicle: no word - its picture over its workplace)
@@ -80542,6 +80550,98 @@ function assignEdDraw(o, X0, X1, Y0, q) {
     one(e, ix, iy, w, h, P, o.flip);
     if (e.who) drawTextC(C, e.who, Math.round(PX(x)), iy - 9 * q, [150, 220, 255], q, 'center', [4, 7, 15]);
   }
+}
+/* ---- A PLACE'S PARKING / DOCK (user Nov 20 11:15: "If I place a job location that requires a parking lot because it doesn't have a garage, then I
+   have to assign a valid close by parking lot to be the one they use. That way the system can calculate if that parking lot allows everything
+   that's getting assigned to it"; 11:20-11:21: the fishery "requires a dock since it doesnt have a garage"). A residence or workplace whose vehicles
+   it can't hold itself - its residents' own, its workers' own (parked there on shift), its WORK VEHICLE - has a lot for each of their families:
+   o.lot = { car: a PARKING's id, boat: a DOCK's id } (the copy's: where it stands), one joined to it (you walk between them). Set by dragging its
+   handle onto the lot (the World Plan's way) or in its panel; filled in with the nearest one joined to it while it has none (lotAuto). Missing:
+   NEEDS PARKING / NEEDS DOCK in red. The vehicles are made at, and parked at, the lot (workSpot, folkPark); the spot check counts by it. ---- */
+const LOT_FAMS = { car: 'PARKING', boat: 'DOCK' };
+// what a structure needs a lot for: family -> a type of it (its residents' / workers' own vehicles, its work vehicle) that it can't hold itself
+function lotNeeds(o) {
+  const F = new Map();
+  const add = (sv, W) => { const D = STR_VEHS[sv]; if (!D || !LOT_FAMS[D.fam] || F.has(D.fam) || workTakes(o, sv, D.fam, W)) return; F.set(D.fam, sv); };
+  for (const c of charsAll()) if (c.veh && (c.home === o.id || c.work === o.id) && (c === PLAYER_C || !stGone(c.id))) add(c.veh, null);
+  if (workVehD(o)) add(o.wv, o);
+  return F;
+}
+// the lots it may use for a family: joined to it (by hops), taking that family and that type, not a workplace
+function lotChoices(o, fam, sv) {
+  const seen = new Set([o]), Q = [o], L = [];
+  while (Q.length) { const q = Q.shift(); if (q !== o && workTakes(q, sv, fam, null)) L.push(q); for (const z of storyLinks(q)) if (!seen.has(z)) { seen.add(z); Q.push(z); } }
+  return L;
+}
+const lotOf = (o, fam) => { const id = o && o.lot ? o.lot[fam] : null, q = id != null ? strsUsed().find(z => z.id === id) : null; return q && (strTakes(q) || []).includes(fam) ? q : null; };
+function lotSet(o, fam, q) { const L = Object.assign({}, o.lot || {}); if (q) L[fam] = q.id; else delete L[fam]; if (Object.keys(L).length) o.lot = L; else delete o.lot; }
+// (strSave, ownersSave) every place missing a lot it needs: the nearest joined to it
+function lotAuto() {   // (true: one set)
+  if (!STORY_WORLD) return false; let n = 0;
+  for (const o of strsUsed()) for (const [fam, sv] of lotNeeds(o)) {
+    if (lotOf(o, fam)) continue;
+    const L = lotChoices(o, fam, sv); if (!L.length) continue;
+    lotSet(o, fam, L.reduce((a, b) => Math.abs(b.x - o.x) < Math.abs(a.x - o.x) ? b : a)); n++;
+  }
+  return n > 0;
+}
+// where vehicles of type sv from structure `from` go (W: the workplace they're the work vehicles of, else null), in order: itself if it holds
+// them, then its lot; none of those set (an older world): every place joined to it that takes them, nearest by hops first
+function lotsFor(from, sv, fam, W) {
+  const L = [];
+  if (workTakes(from, sv, fam, W)) L.push(from);
+  const q = lotOf(from, fam); if (q && workTakes(q, sv, fam, W)) L.push(q);
+  if (L.length || lotNeeds(from).has(fam)) return L;
+  const seen = new Set([from]), Q = [from];
+  while (Q.length) { const o = Q.shift(); if (o !== from && workTakes(o, sv, fam, W)) L.push(o); for (const z of storyLinks(o)) if (!seen.has(z)) { seen.add(z); Q.push(z); } }
+  return L;
+}
+// (the panel - strFill) PARKING / DOCK: the lot it uses for each family it needs one for
+function lotBox(o, el, css) {
+  const N = lotNeeds(o); if (!N.size) return null;
+  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'VEHICLES KEPT AT'));
+  for (const [fam, sv] of N) {
+    const r = el('div', 'row'), l = el('label', '', LOT_FAMS[fam]), s = el('select'); s.style.cssText = css;
+    l.title = fam === 'boat' ? 'The dock its boats are kept at - or drag its handle onto one' : 'The parking its cars are kept at - or drag its handle onto one';
+    const cur = lotOf(o, fam), L = lotChoices(o, fam, sv);
+    for (const [v, t] of [['', 'NONE'], ...L.map(q => [String(q.id), placeLab(q)])]) { const z = document.createElement('option'); z.value = v; z.textContent = t; s.appendChild(z); }
+    if (cur && !L.includes(cur)) { const z = document.createElement('option'); z.value = String(cur.id); z.textContent = strName(cur) + ' (NOT JOINED)'; s.appendChild(z); }
+    s.value = cur ? String(cur.id) : '';
+    s.onchange = () => { lotSet(o, fam, s.value ? strById(+s.value) : null); strSave(); strSync(); };
+    r.append(l, s); c.appendChild(r);
+  }
+  return c;
+}
+// (strPlaceBad) a place missing a lot: NEEDS PARKING / NEEDS DOCK
+const lotBad = o => { if (!STORY_WORLD) return ''; for (const [fam] of lotNeeds(o)) if (!lotOf(o, fam)) return 'NEEDS ' + LOT_FAMS[fam]; return ''; };
+// ---- the handles: on the one picked structure, a knob for each lot it needs (P / D) over its top right - dragged onto a lot, that's its lot;
+// its lots joined to it by an orange line (strStretchDraw pushes them into SE.hnd with lk: the family)
+const LOTD = { d: null };   // (d: { id: pointer, o, fam, x, y } the knob being dragged, world units)
+function lotKnobs(o, q) {
+  const N = lotNeeds(o); if (!N.size) return;
+  const B = strBox(o), R = Math.max(edHandle(6), 7 * q); let i = 0;
+  for (const [fam] of N) {
+    const X = Math.round(PX(B.x1)) + R * 2 + 4 * q, Y = Math.round(PY(B.top)) + i * (R * 2 + 6 * q) + R, cur = lotOf(o, fam);
+    if (cur && !(LOTD.d && LOTD.d.o === o && LOTD.d.fam === fam)) { const Bq = strBox(cur); lotLine(X, Y, PX((Bq.x0 + Bq.x1) / 2), PY(Bq.top), q, LOT_FAMS[fam], [255, 154, 46]); }
+    if (LOTD.d && LOTD.d.o === o && LOTD.d.fam === fam) { const t = strPick(LOTD.d.x, LOTD.d.y, 0), ok = t && t !== o && lotChoices(o, fam, N.get(fam)).includes(t); lotLine(X, Y, PX(LOTD.d.x), PY(LOTD.d.y), q, ok ? LOT_FAMS[fam] : '', ok ? [120, 230, 140] : [255, 154, 46]); }
+    C.fillStyle = '#ffffff'; pxDisc(C, X, Y, R + q); C.fillStyle = cur ? '#ff9a2e' : '#ff4a3a'; pxDisc(C, X, Y, R - q);
+    drawText(C, fam === 'boat' ? 'D' : 'P', X - 2 * q, Y - 3 * q, [255, 255, 255], q, 'left');
+    SE.hnd.push({ o: o.id, lk: fam, x: (X + CAMPX) / SV, y: (Y + TOPPX) / SV, r: (R + q) / SV });
+    i++;
+  }
+}
+function lotLine(ax, ay, bx, by, q, lab, col) {
+  const d = Math.hypot(bx - ax, by - ay); if (d < 2) return; const n = Math.ceil(d / (2 * q)), t = Math.max(2, q);
+  C.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+  for (let i = 0; i <= n; i++) { const u = i / n; C.fillRect(Math.round(ax + (bx - ax) * u - t / 2), Math.round(ay + (by - ay) * u - t / 2), t, t); }
+  C.fillRect(Math.round(bx - 2 * t), Math.round(by - 2 * t), 4 * t, 4 * t);
+  if (lab) drawTextC(C, lab, Math.round((ax + bx) / 2), Math.round((ay + by) / 2 - 8 * q), col, q, 'center', [4, 7, 15]);
+}
+function lotDragEnd(X, Y) {
+  const d = LOTD.d; LOTD.d = null; if (!d) return;
+  const t = strPick(X, Y, 0), N = lotNeeds(d.o); if (!t || t === d.o || !N.has(d.fam)) return;
+  if (!lotChoices(d.o, d.fam, N.get(d.fam)).includes(t)) return;   // (not one it may use: nothing changes)
+  lotSet(d.o, d.fam, t); strSave(); strSync(); setTimeout(undoCommit, 0);
 }
 
 //@src 50-zzzzz-vehicle-editor-marks.js:1
