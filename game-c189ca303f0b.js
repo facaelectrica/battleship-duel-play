@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1141;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 21:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1142;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 21:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49440,19 +49440,21 @@ function drawIslChunks(x0, x1, inLand) {
   // from the grid on the GPU (50-land-zz-grid.js), as the ground in front is: its skins, stones, smooth edge, rims in the sun, the hour's light
   ggDraw(islSlices(x0, x1).filter(k => !seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) === inLand), 1);   // (a slice in a country: the land's pass)
   C.imageSmoothingEnabled = ga;
-  if (!inLand) drawLandProps(x0, x1, 'sea', 'plants');   // (an island at sea: its plants here, behind the water - decks 1-2; its DECK 0 after what stands on it - drawIslFront)
   // each layer of islands in front of them, back to front, in their plane: its ground; its plants with it as an island's (the sea's pass) - what stands
   // on it in the land's pass, as on an island (renderLandObjects0)
   for (const L of LI) {
     if (!inLand) drawLayPlants(x0, x1, L, 'back');
     C.imageSmoothingEnabled = false; drawLay(x0, x1, L, inLand); C.imageSmoothingEnabled = ga;
-    if (!inLand) { drawLayPlants(x0, x1, L, null); drawLayPlants(x0, x1, L, 'front'); }
+    // (its DECK 1 and DECK 0 in front of what stands on it - drawn after its things in the land's pass, renderLandObjects0)
   }
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
-// (user Nov 19 20:16: "House bushes, House, BG vegetation") an island at sea's DECK 0 - in front of what stands on it, as on the land (renderLandObjects0:
-// DECK 1, the structures, DECK 0): drawn right after drawIslStructs. It was drawn with the island, before its structures - a house's own bushes behind it
-function drawIslFront(x0, x1) { if (!land.cell || !(land.islRuns && land.islRuns.length)) return; VEG_PASS = 'front'; try { drawLandProps(x0, x1, 'sea', 'plants'); } finally { VEG_PASS = null; } }
+// (user Nov 19 20:34-20:35) an island at sea's plants in front of what stands on it, as on the land (renderLandObjects0): its buildings' own plants, then the
+// vegetation's DECK 1 and DECK 0 - drawn right after drawIslStructs (its back decks with its ground - drawIslChunks)
+function drawIslFront(x0, x1) {
+  if (!land.cell || !(land.islRuns && land.islRuns.length)) return;
+  try { for (const p of ['str', null, 'front']) { VEG_PASS = p; drawLandProps(x0, x1, 'sea', 'plants'); } } finally { VEG_PASS = null; }
+}
 // the slices holding island columns in [x0, x1], each once, in the island lines' order
 function islSlices(x0, x1) {
   const out = [], done = new Set();
@@ -52655,7 +52657,7 @@ const plantLive = it => it.state !== 'gone';
 // meets - hits, crashes into, burns, drives over: deck 1's (it.deck 2); the other decks are scenery (a blast reaches DECK 2 too - plantBlown)
 // (terrain layers) hard to whom: what flies and shoots (lay undefined) meets only the front layer's - a plant on a layer behind the frontmost there is
 // background (layBackAt); what stands on layer lay (a tank, a landed helicopter) meets its own layer's and those in front of it, as its ground (layBelow)
-const plantHard = (it, lay) => it.deck === 2 && (lay == null ? !layBackAt(it.lay, it.x) : (it.lay | 0) >= lay);
+const plantHard = (it, lay) => it.deck === 2 && !it.sp && (lay == null ? !layBackAt(it.lay, it.x) : (it.lay | 0) >= lay);
 // (user Nov 17 15:16: "can we have trees that are on deck 2 get affected by blasts from tanks and other stuff?") what a blast reaches - blown apart,
 // knocked down, a trunk snapped: DECK 1's (it.deck 2) and DECK 2's just behind it (it.deck 3). Catching fire and everything else stays DECK 1's (plantHard)
 const plantBlown = it => it.deck === 2 || it.deck === 3;
@@ -53221,7 +53223,9 @@ function vegInPass(it, x0, x1, isl, part) {
   if (part && part !== 'plants') return false;
   // (user Nov 8 10:59: "anything that is NOT Deck 1 or 0 should be rendering behind the terrain") the editor's DECK 2 and every deck behind it (it.deck 3+) in
   // the pass behind the ground; DECK 1 (it.deck 2) with the structures; DECK 0 (it.deck 1) in front of them
-  if (part === 'plants' && !it.uw && !it.cave && (it.deck >= 3 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) return false;
+  // (user Nov 19 20:34-20:35: a building's own plants - it.sp, its prefab's - are drawn with it, in front of it: the 'str' pass, right after the structures; the
+  // vegetation's DECK 1 and DECK 0 after them, in front of the buildings)
+  if (part === 'plants' && !it.uw && !it.cave && (it.sp ? 'str' : it.deck >= 3 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) return false;
   if (VEG_PASS === 'cave' ? !it.cave : VEG_PASS !== 'uw' && (it.uw || it.cave)) return false;
   const rr = plantReach(it); if (rr > PROP_IX.r) PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
   if (offViewR(it.x, rr, x0, x1)) return false;
@@ -53316,11 +53320,6 @@ function tropPalms() {
   // (user Nov 4 13:44: "one of the islands is not getting any vegetation" - an airport's: the 80 m / 300 m keep-away is for trees, what an aircraft can
   // hit - treeAt: trees and palms). A plant that isn't a tree (a bush, the jungle behind) only keeps off the airport's own parts - its concrete, buildings
   const AP = []; for (const o of strsUsed()) if (AIR_PARTS[o.k]) { try { const b = strBox0(o); AP.push([b.x0, b.x1]); } catch (e) { } }
-  // (user Nov 19 20:16: "House bushes, House, BG vegetation - How can they ever render in front?") a building's front is its own: no plant of the
-  // front deck (drawn in front of the structures) over a building drawn from its picture on the ground - only its prefab's own plants
-  // (hand-placed - 50-zzzz-hand-plants.js); the decks behind still grow behind it. [x0, x1, its terrain layer]
-  const BS = []; for (const o of strsUsed()) { const K = STR_KINDS[o.k]; if (K && K.art && !K.water && !K.prop) { try { const b = strBox0(o); BS.push([b.x0, b.x1, o.lay || 0]); } catch (e) { } } }
-  const bldOver = (a, b, L) => BS.some(q => q[2] === L && b > q[0] && a < q[1]);
   let tree = true; const nearAir = x => tree ? nearAirport(x, AS) : AP.some(([a, b]) => x > a - 4 && x < b + 4);
   let B = 'tropical';   // (the biome being planted: its ground's columns only - biomeAtX)
   const backOwn = x => !layHas(x) || layTop(x, 1) > landTop(x, 0) + 1;   // (terrain layers: the top here the back ground's own, not a front layer's - that one's plants are its own: okLay)
@@ -53356,7 +53355,7 @@ function tropPalms() {
       const flip = W.a[i] < 0.5, z = d + 0.01 + (n + W.b[i]) / list.length * 0.98;   // (user Nov 4 10:37: the deck's order - its first prefab in front, its last behind)
       const pick = W.p[i];
       // (ROAD - user Nov 19 10:18: "trees and bushes in Deck 1 would not be allowed if that segment is marked as 'Road'") no DECK 1 plant over a road's cement or its fade
-      const road = L => d === 0 && (roadOver(x - P.w, x + P.w, L) || bldOver(x - P.w, x + P.w, L));   // (and none in front of a building - BS)
+      const road = L => d === 0 && roadOver(x - P.w, x + P.w, L);
       const at = road(0) ? null : ok(x, P.w) ? {} : okIsl(x, P.w) ? { isl: true } : null;
       if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn }, D0 === VEG_DECKS ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
       for (const L of SHP.layList) if (layHas(x, L) && !road(L) && okLay(x, P.w, L) && vegFadeKeep(x, d * 13 + n, false, L)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, lay: L }, D0 === VEG_DECKS ? {} : { ve: e }, P.make));
@@ -61270,11 +61269,12 @@ function renderLandObjects0() {
     drawLandGround(x0, x1, () => { if (!edTiny(0.5 * UPM)) drawFieldFlowers(x0, x1); if (!RIG_T.off && !edTiny(6 * UPM)) { VEG_PASS = 'back'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck3'); } }, part => guardDraw(part === 'fill' ? 'lakeFill' : 'lakeOver', () => drawLakeRoots(x0, x1, part || 'over')));   // (the field's flowers: none while plants have bones - their field isn't drawn, user Nov 3 21:23)   // (the green country's flowers - on its field)
     lt('ground');
     drawPads(x0, x1);                                     // (OPEN WORLD: the launch pads, past the hangars)
-    // (user Nov 3 22:35, the Vegetation Lab: "All objects we spawn must be in FRONT of the vegetation of course") the plants with bones behind
-    // the structures; the old pictures as Nov 2 had them, in front
+    // (user Nov 19 20:34: "The deck 1 of the vegetation, the one cars collide with, must be in front of the buildings because cars don't collide with
+    // buildings"; 20:35: "The house only has the bushes and flowers in front of it") the back decks behind the ground (above); the structures; each
+    // building's own plants (its prefab's - the 'str' pass); then the vegetation's DECK 1 and DECK 0 in front of them all
     const vegBack = !RIG_T.off;
-    if (vegBack && !edTiny(6 * UPM)) { drawLandPlants(x0, x1); lt('plants'); }
-    lt('pads'); if (!VEG_SOLO) drawStructs(x0, x1); lt('structs');   // (the vegetation lab's WORLD view: only the plant being edited)                                  // (the placed structures: houses, stations, docks... - 50-zz-struct)
+    lt('pads'); if (!VEG_SOLO) drawStructs(x0, x1); lt('structs');
+    if (vegBack && !edTiny(6 * UPM)) { VEG_PASS = 'str'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; drawLandPlants(x0, x1); lt('plants'); }   // (the vegetation lab's WORLD view: only the plant being edited)                                  // (the placed structures: houses, stations, docks... - 50-zz-struct)
     if (vegBack && !edTiny(6 * UPM)) { VEG_PASS = 'front'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck0'); }   // (deck 0: in front of the structures - 22:54)
     if (!vegBack && !edTiny(6 * UPM)) drawLandPlants(x0, x1); lt('plants');         // (the trees, palms, cacti and scrub: in front of the structures - user Nov 2)
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
@@ -61296,7 +61296,7 @@ function renderLandObjects0() {
   drawCoastWedges(x0, x1);                               // (OPEN WORLD: the embankment under each harbour's block, user Oct 25 late)
   lt('coast'); drawLandUnits(x0, x1, 0);                // (what's on the back layer - terrain layers, 50-story-cars.js layStep)
   // (each terrain layer in front, back to front: its ground over everything behind it, then what's on it - terrain-layers-plan-nov18.md)
-  for (let L = 1, N = layN(); L <= N; L++) { if (layIsl(L)) { drawLayThings(x0, x1, L); continue; } drawLayPlants(x0, x1, L, 'back'); drawLay(x0, x1, L); drawLayPlants(x0, x1, L, null); drawLayThings(x0, x1, L); drawLayPlants(x0, x1, L, 'front'); }   // (a layer of islands: its ground and plants with the islands, behind the water - drawIslChunks - only what stands on it here; any other: its plants as the back's: the back decks behind its ground, DECK 1 before its structures, DECK 0 in front of them)
+  for (let L = 1, N = layN(); L <= N; L++) { if (layIsl(L)) { drawLayThings(x0, x1, L); for (const p of ['str', null, 'front']) drawLayPlants(x0, x1, L, p); continue; } drawLayPlants(x0, x1, L, 'back'); drawLay(x0, x1, L); drawLayThings(x0, x1, L); drawLayPlants(x0, x1, L, 'str'); drawLayPlants(x0, x1, L, null); drawLayPlants(x0, x1, L, 'front'); }   // (a layer of islands: its ground and plants with the islands, behind the water - drawIslChunks - only what stands on it here; any other: its plants as the back's: the back decks behind its ground, DECK 1 before its structures, DECK 0 in front of them)
   drawLandFliers(); lt('units');                         // (a helicopter can be out over the sea)                               // (a helicopter can be out over the sea)
   if (!spans.length) return;
   drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
@@ -73751,25 +73751,25 @@ const STR_KINDS = {
   parking: { lab: 'PARKING', art: 'parking', takes: ['car'], maxL: 6.6 },
   home: { lab: 'HOME', art: 'home-hut', res: true },          // (res: residential - someone cooks there: its chimney smokes)
   hospital: { lab: 'HOSPITAL', art: 'hospital' },
-  school: { lab: 'SCHOOL', art: 'school', pl: [PL('palm', -20, 1, 0.6)] },
+  school: { lab: 'SCHOOL', art: 'school', pl: [PL('pf-6', -18, 0, 0.45), PL('pf-10', 18, 0, 0.45)] },
   // (user Nov 19 19:44, ref-town-nov19.png: "a set of buildings ... It would replace the current ones" - the houses, school, market, stations and
   // the two town buildings are his new pictures under their old names; MECHANIC & TOW, the porch house and the green house are new)
-  // pl: the plants its own prefab starts with (user 19:44: "Please add plants when it makes sense" - the hand-placed plants' records along it from its
-  // middle, world units: 50-zzzz-hand-plants.js; DECK 0 in front of it, DECK 1 behind) - a garden for the houses, the school's palm; none in town
-  houseA: { lab: 'ORANGE COTTAGE', art: 'house-orange-roof', res: true, pl: [PL('pf-6', -17, 0, 0.5), PL('pf-19', 12, 1, 0.6)] },
-  houseB: { lab: 'FISHERMAN\'S HOUSE', art: 'house-blue-roof', res: true, pl: [PL('palm', 30, 1, 0.7)] },
-  houseC: { lab: 'TIN COTTAGE', art: 'house-tin-roof', res: true, pl: [PL('pf-7', 17, 0, 0.5), PL('pf-19', -12, 1, 0.6, true)] },
+  // pl: the plants its own prefab starts with (user 19:44: "Please add plants when it makes sense"; 20:35: "The house only has the bushes and flowers in
+  // front of it") - the hand-placed plants' records along it from its middle, world units (50-zzzz-hand-plants.js), drawn in front of it; none in town
+  houseA: { lab: 'ORANGE COTTAGE', art: 'house-orange-roof', res: true, pl: [PL('pf-6', -11, 0, 0.45), PL('pf-10', 12, 0, 0.4)] },
+  houseB: { lab: 'FISHERMAN\'S HOUSE', art: 'house-blue-roof', res: true, pl: [PL('pf-8', -20, 0, 0.5), PL('pf-11', 21, 0, 0.45)] },
+  houseC: { lab: 'TIN COTTAGE', art: 'house-tin-roof', res: true, pl: [PL('pf-7', 11, 0, 0.45), PL('pf-12', -12, 0, 0.4, true)] },
   houseD: { lab: 'PORCH HOUSE', art: 'house-porch', res: true, pl: [PL('pf-7', -14, 0, 0.45), PL('pf-8', 14, 0, 0.45, true)] },
-  houseE: { lab: 'GREEN HOUSE', art: 'house-green', res: true, pl: [PL('pf-9', -16, 0, 0.5), PL('pf-19', -6, 1, 0.6)] },
+  houseE: { lab: 'GREEN HOUSE', art: 'house-green', res: true, pl: [PL('pf-9', -13, 0, 0.45), PL('pf-13', 13, 0, 0.4)] },
   // (user Nov 19 19:54: "a couple more generic buildings just so we have variety" - ref-town2-nov19.png, eight houses)
-  town1: { lab: 'VERANDA HOUSE', art: 'town-1', res: true, pl: [PL('pf-10', -40, 0, 0.5), PL('palm', 40, 1, 0.7)] },
-  town2: { lab: 'TALL RED HOUSE', art: 'town-2', res: true, pl: [PL('pf-19', -26, 1, 0.6)] },
-  town3: { lab: 'STAIR HOUSE', art: 'town-3', res: true, pl: [PL('pf-8', 38, 0, 0.5)] },
-  town4: { lab: 'TWIN HOUSES', art: 'town-4', res: true, pl: [PL('pf-6', -36, 0, 0.45), PL('pf-7', 36, 0, 0.45, true)] },
-  town5: { lab: 'SHUTTER HOUSE', art: 'town-5', res: true, pl: [PL('palm', -34, 1, 0.7)] },
-  town6: { lab: 'RED HOUSE', art: 'town-6', res: true, pl: [PL('pf-9', -36, 0, 0.5)] },
-  town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true },
-  town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-19', 36, 1, 0.6)] },
+  town1: { lab: 'VERANDA HOUSE', art: 'town-1', res: true, pl: [PL('pf-10', -30, 0, 0.5), PL('pf-6', 30, 0, 0.5)] },
+  town2: { lab: 'TALL RED HOUSE', art: 'town-2', res: true, pl: [PL('pf-11', -16, 0, 0.45)] },
+  town3: { lab: 'STAIR HOUSE', art: 'town-3', res: true, pl: [PL('pf-8', 30, 0, 0.5)] },
+  town4: { lab: 'TWIN HOUSES', art: 'town-4', res: true, pl: [PL('pf-6', -28, 0, 0.45), PL('pf-7', 28, 0, 0.45, true)] },
+  town5: { lab: 'SHUTTER HOUSE', art: 'town-5', res: true, pl: [PL('pf-12', -26, 0, 0.45), PL('pf-9', 26, 0, 0.45)] },
+  town6: { lab: 'RED HOUSE', art: 'town-6', res: true, pl: [PL('pf-9', -28, 0, 0.5)] },
+  town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true, pl: [PL('pf-13', 22, 0, 0.45)] },
+  town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-7', 28, 0, 0.45)] },
   // (a garage that mends cars - REPAIR on; the Story's tow trucks live here: a character's routine TOW - 50-zzzzz-story-folk.js)
   mechanic: { lab: 'MECHANIC & TOW', art: 'mechanic', enclosed: true, takes: ['car'], only: ['taxi', 'suv', 'van'], rep: true },
   market: { lab: 'MARKET', art: 'market', market: true },   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
@@ -76687,8 +76687,8 @@ function drawDockRopes(x0, x1) {
    hand-placed ones (hplStrs: one record per copy and plant - its id 's<copy>.<n>', so: its own seed), mirrored with the copy's FLIP, on the
    copy's terrain layer; a copy moved or flipped lays its plants again with its ground (50-zzzz-live-edit.js). In the editor they're picked,
    dragged and set as any hand-placed plant - what's changed goes to the prefab (hplPut) and every copy shows it. PART OF moves a plant between
-   the world and a building's prefab; a picked structure's PLANTS adds one (hplStrBox, strFill). DECK 0 stands in front of the building, DECK 1
-   behind it (the plants' passes round drawStructs).
+   the world and a building's prefab; a picked structure's PLANTS adds one (hplStrBox, strFill). A building's plants (it.sp) stand in front of it -
+   drawn right after the structures ('str' pass), before the vegetation's DECK 1 and DECK 0 (user Nov 19 20:34-20:35); they collide with nothing.
    ================================================================ */
 let HPL = [];
 worldLoad(() => { HPL = []; try { const L = JSON.parse(localStorage.getItem('bd_plants') || 'null'); if (Array.isArray(L)) HPL = L.filter(r => r && Number.isFinite(r.id) && Number.isFinite(r.x) && typeof r.p === 'string'); } catch (e) { } });
@@ -76716,7 +76716,7 @@ function hplLay(L = hplAll()) {
     // garden on the Story town's island was laid as the land's - drawn in the land's pass, in front of the house and the island's own plants)
     const lay = layOn() ? r.lay | 0 : 0, d = clamp(r.d | 0, 0, 3), isl = !lay && (strOnIsl(r) || (runs.some(([a, b]) => r.x > a && r.x < b) && landTop(r.x, 0) < frontTop(r.x) - 2));   // (lay: the terrain layer it's put on - drawn and standing on it, as the layers' own plants)
     const ve = { plantMin: r.s ?? 1, plantMax: r.s ?? 1, sizeMin: r.leaf ?? 1, sizeMax: r.leaf ?? 1, tint: r.tint ?? VTUNE.tree.tint };
-    land.props.push(Object.assign({ x: r.x, pick: (hplSeed(r) * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, lay ? { lay } : {}, P.make));
+    land.props.push(Object.assign({ x: r.x, pick: (hplSeed(r) * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, sp: r.so != null, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, lay ? { lay } : {}, P.make));
   }
 }
 // a structure's plant as it's set now, onto its prefab (its place along the building, its facing and tilt as the unflipped building has them) and
@@ -76801,13 +76801,13 @@ function hplFill(box, el) {
   const sl = (lab, k, lo, hi, st, d, tip) => { const row = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', String(+(r[k] ?? d).toFixed(2))); l.title = tip; i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = r[k] ?? d; i.oninput = () => { out.textContent = String(+(+i.value).toFixed(2)); for (const q of L) { q[k] = +i.value; hplRelay(q); } }; i.onchange = () => all(q => { q[k] = +i.value; }); row.append(l, i, out); c.appendChild(row); };
   sel('PREFAB', hplPrefabs(), r.p, v => all(q => { q.p = v; }), 'Which plant it is');
   if (L.length === 1) hplPartOf(r, sel);
-  sel('DECK', VEG_DECKS.map((L, i) => [i, 'DECK ' + i + (i === 0 ? ' (IN FRONT)' : i === 1 ? ' (COLLISION)' : '')]), r.d | 0, v => all(q => { q.d = +v; }), 'Which deck it is drawn in');
+  if (!L.some(q => q.so != null)) sel('DECK', VEG_DECKS.map((L, i) => [i, 'DECK ' + i + (i === 0 ? ' (IN FRONT)' : i === 1 ? ' (COLLISION)' : '')]), r.d | 0, v => all(q => { q.d = +v; }), 'Which deck it is drawn in');   // (a building's: always in front of its building - no deck)
   { const row = el('div', 'row'), l = el('label', '', 'FLIP'), t = NSKY.editor.TUNE.toggle(r.flip ? 1 : 0); l.title = 'Face the other way'; t.addEventListener('input', () => all(q => { q.flip = !!+t.value; })); row.append(l, t); c.appendChild(row); }
   sl('ROTATE', 'rot', -90, 90, 1, 0, 'Tilt about its foot, degrees');
   sl('PLANT SIZE', 's', 0.2, 3, 0.05, 1, 'Plant size, times its art');
   sl('LEAF SIZE', 'leaf', 0.2, 3, 0.05, 1, 'Leaf size, times its art');
   sl('TINT', 'tint', 0, 0.6, 0.01, VTUNE.tree.tint, 'How much its colour varies');
-  c.appendChild(el('div', 'tabnote', L.some(q => q.so != null) ? 'A building\'s plant: every copy of it has it. DECK 0 is in front of it, DECK 1 behind.' : 'Biome plants are set in the biome editor.'));
+  c.appendChild(el('div', 'tabnote', L.some(q => q.so != null) ? 'A building\'s plant: in front of it, on every copy. It doesn\'t collide.' : 'Biome plants are set in the biome editor.'));
   box.appendChild(c); return true;
 }
 // the world's other editors' ways (50-zzz-world-ed.js WK)
