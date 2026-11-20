@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1215;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 15:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1216;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 15:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79997,7 +79997,7 @@ const folkVehs = c => { const S = FOLK.c[c.id] || {}; return [...storyCars, ...j
 // a job's verb as the routine does it (the one list - VERBS): BUY is COLLECT from a market's stock, SELL is DELIVER into it (a character's
 // coins aren't kept yet)
 // a SELL pays as the player's does: at a market that BUYS it (marketBuys, 50-zz-cargo.js)
-const folkSellPay = (o, k, n) => strMarket(o) && marketBuys(o).includes(k) ? cargoCoins(k, n) : 0;
+const folkSellPay = (o, k, n) => (strMarket(o) && marketBuys(o).includes(k)) || workBuysOwn(o, k) ? cargoCoins(k, n) : 0;   // (or its own routine SELLs it: it buys it from its workers - 50-zzzzz-story-work.js)
 const folkDo = J => J.do === 'buy' ? 'collect' : J.do === 'sell' ? 'deliver' : J.do;
 // what they're doing now: the goal the PRIORITIES set (S.g - its jobs: a ROUTINE, a family member's medicine...) - famDecide; their ROUTINE as
 // written (folkRoutine). BUY / SELL pay (pay -1 / 1): their coins (S.k)
@@ -80880,7 +80880,11 @@ const strWork = o => !!(STR_KINDS[o.k] || {}).work && strProp(o, 'work', K => !!
 // WHAT A WORKPLACE STORES (user Nov 20 13:29-13:34: "the fishery stores fish that the market goes and pick up to sell, but I have no option for the
 // fishery to store stuff"): its type's STORES (keeps), and whatever its job handles anyway - its market's SELLS and BUYS (none listed: every good), what
 // it MAKES and what that's made from. X: a copy, or a design with its type's job over it
+// (user Nov 20 14:06: "WHat does this mean 'not bought here'??") a workplace whose routine SELLs a good here buys it from its workers at its price - no MARKET
+// needed (a fisherman's catch at the fishery, paid per fish); and keeps it
+const workBuysOwn = (X, k) => !!X && Array.isArray(X.rt) && X.rt.some(q => q && q.do === 'sell' && q.k === k);
 function keepWhy(X, K, k) {
+  if (workBuysOwn(X, k)) return 'its workers sell it here';
   const mk = X.market ?? !!K.market, M = X.makes && X.makes.k ? X.makes : null;
   if (mk && Array.isArray(X.sells) && X.sells.includes(k)) return 'its market sells it';
   if (mk && (!Array.isArray(X.buys) || X.buys.includes(k))) return 'its market buys it';
@@ -80895,7 +80899,7 @@ function placeCan(X, K, verb, g) {
   const sells = mk && (g ? Array.isArray(X.sells) && X.sells.includes(g) : true), buys = mk && (g ? !Array.isArray(X.buys) || X.buys.includes(g) : true);
   if (verb === 'go') return true;
   if (verb === 'buy') return stores && sells;
-  if (verb === 'sell') return stores && buys;
+  if (verb === 'sell') return stores && (buys || workBuysOwn(X, g));   // (its own routine's SELL: it buys it)
   if (verb === 'deliver') return stores;
   if (verb === 'collect') return stores;   // (wherever that good is stored - user Nov 20 13:58)
   return false;
@@ -80963,8 +80967,8 @@ function workPrefabBox(p, el, css, ed, self) {   // (self: its type's kind - THI
     if (J.do === 'tow') r.append(W_('IMPOUNDED VEHICLES, BACK TO THEIR OWNERS', 'When a vehicle is impounded: towed back where its owner keeps it'));
     else if (J.do === 'theft') r.append(W_('ITS WORK VEHICLES CHASE A THIEF', 'When a vehicle is stolen: an idle work vehicle of it goes after the thief'));
     else if (J.do === 'fish') r.append(W_('AT THE NEAREST FISH AREA', 'The fish area nearest each workplace'));
-    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); { const here = rtTo(J) === 'self', w = W_(here ? 'HERE' : 'AT A PLACE SET ON EACH', here ? 'Sold to this place (its market buys it)' : 'Each placed one sets where (WORLD EDITOR)');
-        if (!can(J)) { w.textContent = here ? 'NOT BOUGHT HERE' : 'NOWHERE CAN'; w.title = here ? 'This type\'s market doesn\'t buy it (MARKET > BUYS)' : 'No place stores, sells or buys it'; w.style.color = '#ff6a5a'; } r.append(w); } }
+    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); { const here = rtTo(J) === 'self', w = W_(here ? 'HERE' : 'AT A PLACE SET ON EACH', here ? 'Its workers sell it to this place - paid its price for each' : 'Each placed one sets where (WORLD EDITOR)');
+        if (!here && !can(J)) { w.textContent = 'NOWHERE CAN'; w.title = 'No place stores it'; w.style.color = '#ff6a5a'; } r.append(w); } }
     if (J.do !== 'go' && !WORK_DUTY.includes(J.do)) { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; ed(); }; r.append(n); }
     const x = el('button', '', 'X'); x.title = 'Remove this job'; x.onclick = () => { p.rt.splice(i, 1); if (!p.rt.length) delete p.rt; ed(); }; r.append(x);
   });
