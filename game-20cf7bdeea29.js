@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1173;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 12:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1174;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 12:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69130,6 +69130,11 @@ function carLamps(out) {
 // its wheels (bySize: smaller in front), her damage (dmgLook, her marks' mask - dmgMask), the hour's tint and a roof's shade, the moon's
 // and a low sun's rims (thingsLit - objLit's rule: no night shape of her own, lit like the ground she stands on, as the structures - user
 // Nov 2, the taxi went black at dusk), seen only through her building's door when at home in one (strMaskBox)
+// (user Nov 20 11:06: "all vehicles should have a front view. And when they're parked, we see them from the front. And when they drive, we see
+// them from the side") a car at its spot, nobody driving it: its front picture (NAME-front - gen/tropical/front_views.py, placeholders till the
+// user's), standing where its side would - its wheels in the picture
+const carFacing = c => c.berth != null && c.state === 'run' && c.driven == null && !c.vDrive && !(c.hp <= 0);
+const carFrontPic = c => tropPic(c.art + '-front');
 function drawStoryCars(x0, x1, pass) {
   if (typeof VEG_SOLO !== 'undefined' && VEG_SOLO) return;   // (the vegetation lab's WORLD view: only the plant)
   if (!storyCars.length || !img.tropical) { if (pass === 'dry') drawExhaust(x0, x1); return; }   // (everyone's exhaust - a boat's funnel too - drawn with or without cars: user Nov 2 10:40, no funnel smoke in the lab)
@@ -69141,6 +69146,16 @@ function drawStoryCars(x0, x1, pass) {
   for (const c of bySize(storyCars)) {   // (smaller in front - 50-zz-size-order.js)
     if (c.state === 'gone' || vehCulled(c, x0, x1) || carPass(c) !== pass) continue;
     const [w, h, P0] = storyCarSize(c); if (!P0) continue;
+    { const PF = carFacing(c) && carFrontPic(c), eF = PF && artPut(PF);
+      if (eF && eF.ok) {
+        const wf = PF.width * PF._m * UPM, hf = PF.height * PF._m * UPM, W = PX(c.x + wf / 2) - PX(c.x - wf / 2), H = PY(c.y + hf) - PY(c.y);
+        const clip = strMaskBox(c, w / 2), sh = roofShade(c.x - wf / 2, c.x + wf / 2, c.y - hf, c.y), fc = sh < 1 ? fx.map(v => v * sh) : fx;
+        const M = thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + (c.susY || 0) + (dryLand(c.x) ? VTUNE.ground.veh : 0))));
+        const [cov] = dmgLook(PF, dmgOf(c));
+        thingsQuad(M, -W / 2, -H, W, H, eF, THG_BODY, fc, cov, null, dmgCell(PF), dmgSeed(PF), thingsLit(PX(c.x), 0), clip);
+        continue;
+      }
+    }
     const K = carParts(P0, c.art), e = artPut(P0);
     const DW = carWheelsOf(c), whs = K ? K.wheels.map((q, qi) => {
       const rw = q.r * P0._m * UPM, dr = DW && DW.on[qi], sp = dr && c.wsp != null ? c.wsp * UPM * c.dir : c.vx;   // (her wheel's radius, world units; a driven one turns by its own spin - carDrive)
@@ -69168,7 +69183,7 @@ function drawStoryCars(x0, x1, pass) {
 // the cars' pictures into the atlas as soon as they exist (artFamily - 04-zz-art-atlas.js): every car's body, the wheel set
 artFamily(() => {
   if (!img.tropical || !img.tropical.width || !img.wheels || !img.wheels.width) return false;
-  for (const art in CAR_WHEELS) { const P = tropPic(art); if (!P) { if (STR_VEHS[art] && STR_VEHS[art].made) continue; return false; } artPut(P); }   // (a car made in the Vehicle Editor whose picture isn't in yet: it goes in when it's drawn)
+  for (const art in CAR_WHEELS) { const P = tropPic(art); if (!P) { if (STR_VEHS[art] && STR_VEHS[art].made) continue; return false; } artPut(P); const F = tropPic(art + '-front'); if (F) artPut(F); }   // (its front too, for when it's parked)   // (a car made in the Vehicle Editor whose picture isn't in yet: it goes in when it's drawn)
   for (let k = 0; k < WHEEL_SET.length; k++) artPut(wheelPicK(k));
   return true;
 });
@@ -73814,7 +73829,7 @@ const storyKeyName = () => { const d = (SLOTS[0] || {}).dev || 'kb'; return d ==
    none yet. The art: one sheet (img.tropical), cut on first use - a piece of it each (with clear rows over it where the user's chimney stands up
    past its top); what's composed on it is the things' pass's as it draws (strQuad): its chimney behind it (_under), its flag's cloth and its
    painted gate taken out (_cuts) and drawn on their own from its own texels, the dark inside behind its gate. ---- */
-const TROP = {"control-tower":{"w":67,"h":154,"m":0.0974,"x":354,"y":1462},"windsock":{"w":87,"h":236,"m":0.02542,"x":378,"y":812},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":1016,"y":1054},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":1331,"y":1462},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":1542,"y":1462},"dock-wood":{"w":160,"h":80,"m":0.025,"x":569,"y":1620},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1553,"y":1709},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":471,"y":416},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":1124,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":462,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"motorboat-0":{"w":170,"h":68,"m":0.04967,"x":951,"y":1620},"motorboat-1":{"w":110,"h":61,"m":0.04967,"x":1754,"y":1620},"motorboat-2":{"w":83,"h":62,"m":0.04967,"x":1584,"y":1620},"motorboat-3":{"w":61,"h":61,"m":0.04967,"x":1866,"y":1620},"motorboat-4":{"w":50,"h":60,"m":0.04967,"x":63,"y":1709},"house-blue-roof":{"w":78,"h":47,"m":0.1,"x":352,"y":1709},"house-tin-roof":{"w":44,"h":42,"m":0.1,"x":1198,"y":1709},"house-orange-roof":{"w":44,"h":42,"m":0.1,"x":1244,"y":1709},"building-1":{"w":72,"h":93,"m":0.1,"x":1753,"y":1462},"building-2":{"w":58,"h":96,"m":0.1,"x":1271,"y":1462},"market":{"w":84,"h":66,"m":0.1,"x":1295,"y":1620},"school":{"w":53,"h":48,"m":0.1,"x":297,"y":1709},"house-porch":{"w":60,"h":46,"m":0.1,"x":526,"y":1709},"house-green":{"w":57,"h":44,"m":0.1,"x":1139,"y":1709},"town-1":{"w":113,"h":87,"m":0.1,"x":0,"y":1620},"town-2":{"w":72,"h":106,"m":0.1,"x":906,"y":1462},"town-3":{"w":109,"h":82,"m":0.1,"x":458,"y":1620},"town-4":{"w":100,"h":86,"m":0.1,"x":317,"y":1620},"town-5":{"w":97,"h":91,"m":0.1,"x":1827,"y":1462},"town-6":{"w":102,"h":88,"m":0.1,"x":1926,"y":1462},"town-7":{"w":88,"h":119,"m":0.1,"x":739,"y":1462},"town-8":{"w":102,"h":87,"m":0.1,"x":115,"y":1620},"parking":{"w":88,"h":26,"m":0.1,"x":1463,"y":1709},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":1145,"y":1054},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":588,"y":1709},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":0,"y":1772},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":467,"y":812},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":617,"y":1462},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":980,"y":1462},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":810,"y":1620},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":219,"y":1620},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1371,"y":1709},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":432,"y":1709},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":1070,"y":1709},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":1290,"y":1709},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":990,"y":1709},"taxi":{"w":360,"h":156,"m":0.01122,"x":1274,"y":1264},"suv":{"w":328,"h":156,"m":0.01154,"x":1636,"y":1264},"van":{"w":352,"h":156,"m":0.01282,"x":0,"y":1462},"ambulance":{"w":408,"h":200,"m":0.014,"x":606,"y":1054},"box_truck":{"w":412,"h":212,"m":0.01604,"x":1290,"y":812},"dump_truck":{"w":452,"h":220,"m":0.01455,"x":697,"y":812},"fire_engine":{"w":488,"h":192,"m":0.01719,"x":506,"y":1264},"city_bus":{"w":504,"h":196,"m":0.01633,"x":0,"y":1264},"school_bus":{"w":604,"h":208,"m":0.01538,"x":0,"y":1054},"motorcycle":{"w":276,"h":188,"m":0.00638,"x":996,"y":1264},"tractor":{"w":376,"h":240,"m":0.01167,"x":0,"y":812},"fishing-boat-0-dmg":{"w":615,"h":381,"m":0.01945,"x":1088,"y":416},"fishing-boat-1-dmg":{"w":469,"h":394,"m":0.01945,"x":0,"y":416},"fishing-boat-2-dmg":{"w":329,"h":411,"m":0.01945,"x":793,"y":0},"fishing-boat-3-dmg":{"w":229,"h":414,"m":0.01945,"x":231,"y":0},"motorboat-0-dmg":{"w":170,"h":68,"m":0.04967,"x":1123,"y":1620},"motorboat-1-dmg":{"w":110,"h":61,"m":0.04967,"x":1929,"y":1620},"motorboat-2-dmg":{"w":83,"h":62,"m":0.04967,"x":1669,"y":1620},"motorboat-3-dmg":{"w":61,"h":61,"m":0.04967,"x":0,"y":1709},"motorboat-4-dmg":{"w":50,"h":60,"m":0.04967,"x":115,"y":1709},"home-hut":{"w":203,"h":98,"m":0.06364,"door":[55,52,67,85],"x":1066,"y":1462},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"door":[164,25,190,65],"x":1381,"y":1620},"hospital":{"w":192,"h":134,"m":0.06176,"door":[83,91,106,125],"x":423,"y":1462},"church":{"w":75,"h":115,"m":0.09545,"door":[31,90,44,112],"x":829,"y":1462},"lighthouse":{"w":37,"h":85,"m":0.21,"door":[15,74,21,84],"x":419,"y":1620},"police-station":{"w":54,"h":53,"m":0.1,"door":[7,28,31,51],"gate":1,"x":167,"y":1709},"fire-station":{"w":77,"h":73,"m":0.1,"door":[19,33,70,69],"gate":1,"x":731,"y":1620},"mechanic":{"w":72,"h":49,"m":0.1,"door":[19,23,58,46],"gate":1,"x":223,"y":1709},"lighthouse-2":{"w":137,"h":215,"m":0.1,"door":[97,189,105,210],"x":1151,"y":812},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":410,"y":1772},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":558,"y":1772},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":665,"y":1772},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":1919,"y":1709},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":1830,"y":1709}};
+const TROP = {"control-tower":{"w":67,"h":154,"m":0.0974,"x":1596,"y":1467},"windsock":{"w":87,"h":236,"m":0.02542,"x":576,"y":812},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":1896,"y":1054},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":908,"y":1657},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":1119,"y":1657},"dock-wood":{"w":160,"h":80,"m":0.025,"x":150,"y":1793},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1201,"y":1880},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":471,"y":416},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":1124,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":462,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"motorboat-0":{"w":170,"h":68,"m":0.04967,"x":532,"y":1793},"motorboat-1":{"w":110,"h":61,"m":0.04967,"x":1335,"y":1793},"motorboat-2":{"w":83,"h":62,"m":0.04967,"x":1165,"y":1793},"motorboat-3":{"w":61,"h":61,"m":0.04967,"x":1447,"y":1793},"motorboat-4":{"w":50,"h":60,"m":0.04967,"x":1685,"y":1793},"house-blue-roof":{"w":78,"h":47,"m":0.1,"x":0,"y":1880},"house-tin-roof":{"w":44,"h":42,"m":0.1,"x":846,"y":1880},"house-orange-roof":{"w":44,"h":42,"m":0.1,"x":892,"y":1880},"building-1":{"w":72,"h":93,"m":0.1,"x":1330,"y":1657},"building-2":{"w":58,"h":96,"m":0.1,"x":848,"y":1657},"market":{"w":84,"h":66,"m":0.1,"x":876,"y":1793},"school":{"w":53,"h":48,"m":0.1,"x":1919,"y":1793},"house-porch":{"w":60,"h":46,"m":0.1,"x":174,"y":1880},"house-green":{"w":57,"h":44,"m":0.1,"x":787,"y":1880},"town-1":{"w":113,"h":87,"m":0.1,"x":1607,"y":1657},"town-2":{"w":72,"h":106,"m":0.1,"x":483,"y":1657},"town-3":{"w":109,"h":82,"m":0.1,"x":39,"y":1793},"town-4":{"w":100,"h":86,"m":0.1,"x":1924,"y":1657},"town-5":{"w":97,"h":91,"m":0.1,"x":1404,"y":1657},"town-6":{"w":102,"h":88,"m":0.1,"x":1503,"y":1657},"town-7":{"w":88,"h":119,"m":0.1,"x":316,"y":1657},"town-8":{"w":102,"h":87,"m":0.1,"x":1722,"y":1657},"parking":{"w":88,"h":26,"m":0.1,"x":1111,"y":1880},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":0,"y":1268},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":236,"y":1880},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":0,"y":1929},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":665,"y":812},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":194,"y":1657},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":557,"y":1657},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":391,"y":1793},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":1826,"y":1657},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1019,"y":1880},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":80,"y":1880},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":718,"y":1880},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":938,"y":1880},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":638,"y":1880},"taxi":{"w":360,"h":156,"m":0.01122,"x":388,"y":1467},"suv":{"w":328,"h":156,"m":0.01154,"x":750,"y":1467},"van":{"w":352,"h":156,"m":0.01282,"x":1080,"y":1467},"ambulance":{"w":408,"h":200,"m":0.014,"x":1328,"y":1054},"box_truck":{"w":412,"h":212,"m":0.01604,"x":0,"y":1054},"dump_truck":{"w":452,"h":220,"m":0.01455,"x":895,"y":812},"fire_engine":{"w":488,"h":192,"m":0.01719,"x":1370,"y":1268},"city_bus":{"w":504,"h":196,"m":0.01633,"x":706,"y":1268},"school_bus":{"w":604,"h":208,"m":0.01538,"x":564,"y":1054},"motorcycle":{"w":276,"h":188,"m":0.00638,"x":0,"y":1467},"tractor":{"w":376,"h":240,"m":0.01167,"x":0,"y":812},"taxi-front":{"w":160,"h":156,"m":0.01122,"x":1434,"y":1467},"suv-front":{"w":164,"h":148,"m":0.01216,"x":1823,"y":1467},"van-front":{"w":156,"h":152,"m":0.01316,"x":1665,"y":1467},"ambulance-front":{"w":156,"h":200,"m":0.014,"x":1738,"y":1054},"box_truck-front":{"w":148,"h":212,"m":0.01604,"x":414,"y":1054},"dump_truck-front":{"w":172,"h":220,"m":0.01455,"x":1349,"y":812},"fire_engine-front":{"w":144,"h":192,"m":0.01719,"x":1860,"y":1268},"city_bus-front":{"w":156,"h":196,"m":0.01633,"x":1212,"y":1268},"school_bus-front":{"w":156,"h":208,"m":0.01538,"x":1170,"y":1054},"motorcycle-front":{"w":108,"h":188,"m":0.00638,"x":278,"y":1467},"tractor-front":{"w":196,"h":240,"m":0.01167,"x":378,"y":812},"fishing-boat-0-dmg":{"w":615,"h":381,"m":0.01945,"x":1088,"y":416},"fishing-boat-1-dmg":{"w":469,"h":394,"m":0.01945,"x":0,"y":416},"fishing-boat-2-dmg":{"w":329,"h":411,"m":0.01945,"x":793,"y":0},"fishing-boat-3-dmg":{"w":229,"h":414,"m":0.01945,"x":231,"y":0},"motorboat-0-dmg":{"w":170,"h":68,"m":0.04967,"x":704,"y":1793},"motorboat-1-dmg":{"w":110,"h":61,"m":0.04967,"x":1510,"y":1793},"motorboat-2-dmg":{"w":83,"h":62,"m":0.04967,"x":1250,"y":1793},"motorboat-3-dmg":{"w":61,"h":61,"m":0.04967,"x":1622,"y":1793},"motorboat-4-dmg":{"w":50,"h":60,"m":0.04967,"x":1737,"y":1793},"home-hut":{"w":203,"h":98,"m":0.06364,"door":[55,52,67,85],"x":643,"y":1657},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"door":[164,25,190,65],"x":962,"y":1793},"hospital":{"w":192,"h":134,"m":0.06176,"door":[83,91,106,125],"x":0,"y":1657},"church":{"w":75,"h":115,"m":0.09545,"door":[31,90,44,112],"x":406,"y":1657},"lighthouse":{"w":37,"h":85,"m":0.21,"door":[15,74,21,84],"x":0,"y":1793},"police-station":{"w":54,"h":53,"m":0.1,"door":[7,28,31,51],"gate":1,"x":1789,"y":1793},"fire-station":{"w":77,"h":73,"m":0.1,"door":[19,33,70,69],"gate":1,"x":312,"y":1793},"mechanic":{"w":72,"h":49,"m":0.1,"door":[19,23,58,46],"gate":1,"x":1845,"y":1793},"lighthouse-2":{"w":137,"h":215,"m":0.1,"door":[97,189,105,210],"x":1523,"y":812},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":410,"y":1929},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":558,"y":1929},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":665,"y":1929},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":1567,"y":1880},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":1478,"y":1880}};
 const tropArt = {};
 function tropPic(n) {
   const c0 = tropArt[n]; if (c0) return c0;
@@ -74050,7 +74065,11 @@ const dockLenM = o => isPierS(o) ? pierLenOf(o) / UPM : (o.len || 24);
 // LARGE everything - the types marked big in STR_VEHS) a hangar's size decides what it takes, not a length
 const isHangarS = o => o.k === 'hangarAir' || o.k === 'hangarSea';
 const strMaxL = o => o.k === 'dock' ? Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o)) : isHangarS(o) ? Infinity : o.maxL || (STR_KINDS[o.k] || {}).maxL || 30;   // (a kind's own: the PARKING's bollards)
-const strSpots = o => o.k === 'dock' ? Math.max(1, Math.floor(dockLenM(o) / strMaxL(o) + 1e-6)) : o.n ?? (strVehs(o).length || 1);
+/* (user Nov 20 11:06: "the parking lot needs to have enough length, like a dock, in order to store vehicles") a PARKING's spots: one a PARK_STALL_M
+   along its length - its vehicles stand in it seen from the front (50-story-cars.js), the widest a bus's 2.5 m; stretched by its ends' handles */
+const PARK_STALL_M = 3;
+const parkLenM = o => { const B = strBox(o); return (B.x1 - B.x0) / UPM; };
+const strSpots = o => o.k === 'parking' ? Math.max(1, Math.floor(parkLenM(o) / PARK_STALL_M + 1e-6)) : o.k === 'dock' ? Math.max(1, Math.floor(dockLenM(o) / strMaxL(o) + 1e-6)) : o.n ?? (strVehs(o).length || 1);
 // a vehicle type's length in metres, where it's known before one is made (the boats, the minisub): null - not known here
 function strTypeLenM(sv) {
   const D = STR_VEHS[sv]; if (!D) return null;
@@ -74181,7 +74200,7 @@ function strBox0(o) {
     if (K0 && K0.buoy) { const w = 16 * BUOY_K, h = 34 * BUOY_K, foot = waterLv(clamp(o.x, 0, WORLD_W - 1)) + 2.5 + (o.dy || 0); return { x0: o.x - w / 2, x1: o.x + w / 2, top: foot - h, foot, P: null, m: 1 }; }
     if (K0 && K0.lamp) { const k = BASE.K, gy = strGround(o.x, 4 * UPM, o.lay) + (o.dy || 0), x0 = o.x - (o.flip ? DLAMP.post[2] - DLAMP.foot : DLAMP.foot) * k; return { x0, x1: x0 + DLAMP.post[2] * k, top: gy - DLAMP_H * k, foot: gy, P: null, m: k }; } }
   const K = STR_KINDS[o.k], P0 = tropPic(o.k === 'dock' ? o.spr || K.art : o.art || K.art), P = P0 && o.k === 'windsock' ? sockParts(P0).pole : P0;   // (art: its prefab's picture; a windsock's still picture its pole - its sock turns with the wind, 50-zz-windsock.js)
-  const m = P ? P._m * UPM : 1, w = o.k === 'dock' ? (o.len || 24) * UPM : (P ? P.width : 40) * m, h = (P ? P.height : 40) * m;
+  const m = P ? P._m * UPM : 1, w = o.k === 'dock' || (o.k === 'parking' && o.len) ? (o.len || 24) * UPM : (P ? P.width : 40) * m, h = (P ? P.height : 40) * m;
   const foot = (K.water ? waterLv(clamp(o.x, 0, WORLD_W - 1)) + (h - DOCK_ABOVE * UPM) : strGround(o.x, w, o.lay)) + (o.dy || 0);   // (afloat on its own water's level - a lake's as the sea's, user Nov 3)
   return { x0: o.x - w / 2, x1: o.x + w / 2, top: foot - h, foot, P, m };
 }
@@ -74537,6 +74556,12 @@ function strStillDraw(o, B) {
     while (x < B.x1 - 0.01) { const w = Math.min(tw, B.x1 - x), a = Math.round(PX(x)), b = Math.round(PX(x + w)); strQuad(B.P, a, Y0, b, Y1, false, w < tw - 0.01 ? { sr: [0, 0, Math.max(1, Math.round(B.P.width * w / tw)), B.P.height] } : undefined); x += w; }
     return;
   }
+  if (o.k === 'parking' && o.len && B.P) {                  // (stretched: its two ends as drawn - a bollard, the sign and a bollard - and the plain strip between them drawn out - user Nov 20 11:06)
+    const P = B.P, a = Math.round(P.width * 14 / 88), b = Math.round(P.width * 60 / 88), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
+    const L = [[0, a, B.x0, B.x0 + a * B.m], [a, b, B.x0 + a * B.m, B.x1 - (P.width - b) * B.m], [b, P.width, B.x1 - (P.width - b) * B.m, B.x1]];
+    for (const [s0, s1, w0, w1] of L) { const fl = !!o.flip, u0 = fl ? B.x0 + B.x1 - w1 : w0, u1 = fl ? B.x0 + B.x1 - w0 : w1; if (u1 - u0 > 0.01) strQuad(P, Math.round(PX(u0)), Y0, Math.round(PX(u1)), Y1, fl, { sr: [s0, 0, s1 - s0, P.height] }); }
+    return;
+  }
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
   const [cov, D] = dmgLook(B.P, strDmgOf(o, B));   // (damaged: the one rule - 50-zz-damage.js: charred, its damaged picture destroyed)
   { const c = B.P && strCutOf(o, strPieces(B.P, B.m)); if (c) { strDrawCut(o, B, c, cov); return; } }   // (pieces of it gone: what's left, piece by piece - strHit)
@@ -74606,7 +74631,7 @@ function strPick(X, Y, r) {
    end stays at its quay), a runway, a road - has a handle beside each end, the World Plan's (and the weather areas') look: orange, a white
    ring, a white <->, joined to its end by a short line. Dragged, that end goes with the pointer and the other stays; let go, its spots are
    laid again (dockRefit). The handles' places as drawn this frame (SE.hnd) are what a press finds. */
-const STR_STRETCH = { runway: [120, 900], road: [10, 600], dock: [6, 160], pier: [60, 900] };   // (metres: the shortest and longest)
+const STR_STRETCH = { runway: [120, 900], road: [10, 600], dock: [6, 160], pier: [60, 900], parking: [PARK_STALL_M, 120] };   // (metres: the shortest and longest)
 const strStretchOf = o => o ? STR_STRETCH[isPierS(o) ? 'pier' : o.k] || null : null;
 // the ends that stretch: both, a pier its sea end only (away from its land end)
 const strStretchEnds = o => { if (!isPierS(o)) return [-1, 1]; const B = strBox(o), E = pierLandEnd(o); return [Math.abs(B.x0 - E) > Math.abs(B.x1 - E) ? -1 : 1]; };
@@ -74680,7 +74705,8 @@ const strRGB = h => { const f = n => { const k = (n + h / 60) % 6; return Math.r
 // dry ground (the sea and the lakes are water: the ground under that water's own level - waterLv, user Nov 3)
 function strPlaceBad(o) {
   if (strFree(o)) return 'OFF THE GROUND';
-  { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
+  { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }
+  { const n = typeof assignShort === 'function' ? assignShort(o) : ''; if (n) return n; }   // (a parking too short for the vehicles it would hold - 50-zzzzz-story-work.js)   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
   for (const x of [B.x0 + m, (B.x0 + B.x1) / 2, B.x1 - m]) {
@@ -74828,7 +74854,7 @@ function strFill() {
     const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, i, out); box.appendChild(r);
   };
   // (user Nov 20 00:33: its length by its handles on the view - strStretchDraw - not a slider) its length shown
-  if (strStretchOf(o)) { const r = el('div', 'row'), l = el('label', '', 'LENGTH'), w = el('output', '', Math.round(o.len ?? (o.k === 'runway' ? 260 : o.k === 'road' ? 80 : isPierS(o) ? PIER_M : 24)) + ' M'); l.title = w.title = 'Drag the handles at its ends to stretch it'; r.append(l, w); c.appendChild(r); }
+  if (strStretchOf(o)) { const r = el('div', 'row'), l = el('label', '', 'LENGTH'), w = el('output', '', Math.round(o.len ?? (o.k === 'runway' ? 260 : o.k === 'road' ? 80 : isPierS(o) ? PIER_M : o.k === 'parking' ? parkLenM(o) : 24)) + ' M'); l.title = w.title = 'Drag the handles at its ends to stretch it'; r.append(l, w); c.appendChild(r); }
   if (o.k === 'runway') sl(c, 'HEIGHT', 'hgt', -10, 40, ' M', 0, null, 'Runway height over the ground, metres');
   U.box.appendChild(c);
   if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
@@ -79462,7 +79488,7 @@ function folkReach(v, a, b) {
 function folkPark(v, x, ok) {
   const cat = civCat(v); let best = null, bd = Infinity;
   for (const o of strsUsed()) {
-    if (!(strTakes(o) || []).includes(cat) || !strAllows(o, v.sv) || !strFits(o, v.sv) || storyFreeSpot(o, v) < 0 || (ok && !ok(o))) continue;
+    if (!(strTakes(o) || []).includes(cat) || !strAllows(o, v.sv) || !strFits(o, v.sv) || (strWork(o) && v.wk !== o.id) || storyFreeSpot(o, v) < 0 || (ok && !ok(o))) continue;   // (a workplace's spots: its own work vehicles' only)
     const d = Math.abs(o.x - x); if (d < bd && folkReach(v, v.x, o.x)) { bd = d; best = o; }
   }
   return best;
@@ -80442,41 +80468,59 @@ function workLinksDraw(q) {
 }
 /* ---- WHERE THE VEHICLES START, SHOWN IN THE EDITOR (user Nov 20 10:55: "the parking should show the vehicle that that person owns. You cant pick
    it in the editor but you can see its correctly assigned (that is how the world would be when it starts)"; "For locations that have hangars or
-   store vehicles inside (e.g. police station) the vehicle would appear above as we do for hangars"): every character's VEHICLE at the spot it's
-   made at (ownVehStep), then every workplace's WORK VEHICLE once - the type it makes for each worker as they start (workIn) - an open place (a parking, a dock) shows it standing at its
-   spot, an enclosed one (a hangar, a police station) over it as its spots are; no spot free: over the home / workplace in red, NO SPOT.
-   Never picked: only drawn. ---- */
-const ASG = { t: -9, gen: -1, at: new Map() };   // (at: structure id -> [{ sv, who, s, red }])
+   store vehicles inside (e.g. police station) the vehicle would appear above as we do for hangars"; 11:04: one work vehicle shown, "That shows what
+   kind of vehicle that structure spawns"; 11:06: "it can tell us immediately if the parking lot is big enough"; 11:12: three workers - three spaces).
+   Two plans, as ownVehStep / workIn make them:
+   - the start: every character's VEHICLE at the spot it's made at near their home - drawn there (an open place: at its spot; an enclosed one: over
+     it, as its spots are); none free: over the home in red, NO SPOT;
+   - a shift: the workers' own vehicles parked by their workplace (folkPark - never in a workplace) and a work vehicle for each worker (workSpot).
+     The workplace's WORK VEHICLE drawn once over it, red when one of its workers' finds no spot.
+   A place that would have to hold more than its spots in either (the first that takes it on the way out from the home / workplace) is short:
+   its frame red, N SPOTS SHORT (strPlaceBad). Never picked: only drawn. ---- */
+const ASG = { t: -9, at: new Map(), short: new Map() };   // (at: structure id -> [{ sv, who, s, red }]; short: structure id -> how many)
 function assignPlan() {
-  const key = STR_GEN + ':' + JSON.stringify(charsAll().map(c => [c.id, c.home, c.work, c.veh])) + ':' + JSON.stringify(strsUsed().map(o => [o.id, o.wv]));
-  if (ASG.key === key && time - ASG.t < 1 && ASG.t <= time) return ASG.at;
-  ASG.key = key; ASG.t = time; const at = ASG.at = new Map(), used = new Map();
+  const key = STR_GEN + ':' + JSON.stringify(charsAll().map(c => [c.id, c.home, c.work, c.veh])) + ':' + JSON.stringify(strsUsed().map(o => [o.id, o.wv, o.len]));
+  if (ASG.key === key && time - ASG.t < 1 && ASG.t <= time) return ASG;
+  ASG.key = key; ASG.t = time; const at = ASG.at = new Map(), short = ASG.short = new Map();
   const put = (o, e) => { (at.get(o.id) || at.set(o.id, []).get(o.id)).push(e); };
-  const place = (W, sv, who) => {
-    const D = STR_VEHS[sv]; if (!D || !WORK_FAMS.includes(D.fam)) return;
-    const seen = new Set([W]), Q = [W];
+  // a vehicle of type sv from structure W out by joins (W: a workplace whose own it is, else null): [the structure, its spot] / [null, the first that takes it]
+  const place = (used, from, sv, W, miss) => {
+    const D = STR_VEHS[sv]; if (!D || !WORK_FAMS.includes(D.fam)) return null;
+    const seen = new Set([from]), Q = [from]; let want = null;
     while (Q.length) {
       const o = Q.shift();
       if (workTakes(o, sv, D.fam, W)) {
+        want = want || o;
         const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
         let best = -1, bd = 1e12;
-        for (let i = 0; i < storyBerths(o); i++) if (!U.has(i)) { const d = Math.abs(storySpotX(o, i) - W.x); if (d < bd) { bd = d; best = i; } }
-        if (best >= 0) { U.add(best); put(o, { sv, who, s: best }); return; }
+        for (let i = 0; i < storyBerths(o); i++) if (!U.has(i)) { const d = Math.abs(storySpotX(o, i) - from.x); if (d < bd) { bd = d; best = i; } }
+        if (best >= 0) { U.add(best); return [o, best]; }
       }
       for (const q of storyLinks(o)) if (!seen.has(q)) { seen.add(q); Q.push(q); }
     }
-    put(W, { sv, who, s: -1, red: 1 });
+    if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);
+    return [null, want];
   };
   const nm = c => c === PLAYER_C ? 'PLAYER' : (c.name || '').toUpperCase();
-  for (const c of charsAll()) { if (!c.veh || (c !== PLAYER_C && stGone(c.id))) continue; const H = stHome(c); if (H) place(H, c.veh, nm(c)); }
-  for (const W of strsUsed()) if (workVehD(W)) place(W, W.wv, '');   // (one: the type it makes for each worker as they start - user Nov 20 11:04 / 11:09)
-  return at;
+  const live = charsAll().filter(c => c === PLAYER_C || !stGone(c.id));
+  { const used = new Map(), miss = new Map();   // (the start)
+    for (const c of live) { const H = stHome(c); if (!c.veh || !H) continue; const r = place(used, H, c.veh, null, miss); if (!r) continue; if (r[0]) put(r[0], { sv: c.veh, who: nm(c), s: r[1] }); else put(H, { sv: c.veh, who: nm(c), s: -1, red: 1 }); }
+    for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); }
+  { const used = new Map(), miss = new Map(), bad = new Set();   // (a shift: the workers at work, everyone else at home)
+    const at0 = c => { const W0 = workOf(c); return W0 && !strDown(W0) ? W0 : null; };
+    for (const c of live) { const H = stHome(c); if (c.veh && H && !at0(c)) place(used, H, c.veh, null, miss); }
+    for (const c of live) { const W0 = at0(c); if (!W0) continue; if (c.veh) place(used, W0, c.veh, null, miss); if (workVehD(W0)) { const r = place(used, W0, W0.wv, W0, miss); if (r && !r[0]) bad.add(W0.id); } }
+    for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n));
+    for (const W0 of strsUsed()) if (workVehD(W0)) put(W0, { sv: W0.wv, who: '', s: -1, top: 1, red: bad.has(W0.id) || !workSpotsAt(W0).length ? 1 : 0 }); }
+  return ASG;
 }
+// (strPlaceBad) a place too small for the vehicles it would hold - 'N SPOTS SHORT'
+const assignShort = o => { if (!STORY_WORLD || !strTakes(o)) return ''; const n = assignPlan().short.get(o.id) || 0; return n ? n + (n === 1 ? ' SPOT SHORT' : ' SPOTS SHORT') : ''; };
 function assignEdDraw(o, X0, X1, Y0, q) {
-  const L = assignPlan().get(o.id); if (!L || !L.length) return;
+  const L = assignPlan().at.get(o.id); if (!L || !L.length) return;
   spotScan();
   const inside = !!(STR_KINDS[o.k] || {}).enclosed, B = strBox(o), gap = 4 * q, cx = Math.round((X0 + X1) / 2);
-  const pic = e => { const P = spotPic(e.sv), w = Math.max(4, Math.round(spotWorldW(e.sv) * SV)), h = P ? Math.max(2, Math.round(P.height * w / P.width)) : Math.round(w * 0.3); return { P, w, h }; };
+  const pic = e => { const P = !(inside || e.red || e.top) && STR_VEHS[e.sv] && STR_VEHS[e.sv].art && tropPic(STR_VEHS[e.sv].art + '-front') || spotPic(e.sv), F = P && P !== spotPic(e.sv) ? P.width * P._m * UPM : 0, w = Math.max(4, Math.round((F || spotWorldW(e.sv)) * SV)), h = P ? Math.max(2, Math.round(P.height * w / P.width)) : Math.round(w * 0.3); return { P, w, h }; };
   const one = (e, ix, iy, w, h, P, flip) => {
     if (e.red) { C.fillStyle = 'rgba(255,60,50,0.28)'; C.fillRect(ix - q, iy - q, w + 2 * q, h + 2 * q); }
     if (P) { if (flip) { C.save(); C.translate(ix + w, iy); C.scale(-1, 1); C.drawImage(P, 0, 0, w, h); C.restore(); } else C.drawImage(P, ix, iy, w, h); }
@@ -80485,10 +80529,10 @@ function assignEdDraw(o, X0, X1, Y0, q) {
   let y = Y0 - gap;   // (the stack over it: enclosed ones and NO SPOT)
   for (const e of L) {
     const { P, w, h } = pic(e);
-    if (inside || e.red) {
+    if (inside || e.red || e.top) {
       y -= Math.max(h, 7 * q); const ix = cx - (w >> 1), iy = y + Math.max(h, 7 * q) - h;
       one(e, ix, iy, w, h, P, o.flip);
-      const lab = e.red ? (e.who ? e.who + ': NO SPOT' : 'NO SPOT') : e.who;
+      const lab = e.red ? (e.who ? e.who + ': NO SPOT' : 'NO SPOT') : e.who;   // (the work vehicle: no word - its picture over its workplace)
       if (lab) drawText(C, lab, ix - gap - textWidth(lab) * q, y + (Math.max(h, 7 * q) >> 1) - 3 * q, e.red ? [255, 120, 110] : [150, 220, 255], q, 'left');
       y -= gap; continue;
     }
