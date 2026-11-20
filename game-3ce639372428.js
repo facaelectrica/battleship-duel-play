@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1225;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 17:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1226;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 17:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36802,7 +36802,8 @@ const ED_CSS = `
 #skyEd .row:not(:has(> input[type=range])) > label:first-child { flex: 0 1 96px; }
 #skyEd .row:not(:has(> input[type=range])) > output { margin-left: auto; }
 #skyEd .row > .tgl { flex: 0 0 auto; }
-#skyEd h4 { margin: 0 0 3px; color: #7a8294; font-weight: normal; font-size: 11px; letter-spacing: .1em; }
+#skyEd .colh { color: #ffb347; }
+#skyEd h4 { margin: 0 0 3px; color: #ffb347; font-weight: normal; font-size: 11px; letter-spacing: .1em; }
 #skyEd .row { display: grid; grid-template-columns: minmax(64px, 96px) minmax(150px, 1fr) 44px 50px; align-items: center; gap: 6px; }
 #skyEd .row label { color: #7a8294; letter-spacing: .04em; cursor: help; }
 #skyEd .row output { text-align: right; color: #ffb347; font-variant-numeric: tabular-nums; }
@@ -37091,6 +37092,7 @@ TUNE.panel = (root, home) => {
 };
 const ED_PANEL_CSS = `
 .edp [hidden] { display: none !important; }
+.edp h3, .edp h4, .edp .colh { color: #ffb347 !important; }   /* (user Nov 20 16:53: "the headings should be orange EVERYWHERE so its clear" - every editor's headings, set here once) */
 .edp button:disabled, .edp select:disabled, .edp input:disabled { opacity: 0.4; cursor: default; }`;
 // (user Nov 20 10:48: "properties that are not related, each should have its own line organized vertically. Otherwise its confusing") ONE PROPERTY A
 // ROW: a row (.row) is one property - its name (a label) and what sets it. A row built with more names than one is cut into one row each, in place,
@@ -73485,8 +73487,8 @@ function pfJobBox(J, K, d, box, el, css, ed, sync) {
     // (user Nov 20 16:50: "Why do we have medicine twice?" - it was a list under SELLS and the same list under BUYS, the two headings read as rows)
     // one table: a good a row, SELLS and BUYS its two columns
     const cur = (key, all) => Array.isArray(J[key]) ? J[key] : all ? CARGO_KINDS.map(q => q[0]) : [];
-    const cell = x => { const c = el('span', ''); c.style.cssText = 'flex:0 0 56px;display:flex;justify-content:center;font-size:11px;letter-spacing:.1em;color:#7a8294'; c.append(x); return c; };
-    { const h = el('div', 'row'); h.append(el('label', '', ''), cell('SELLS'), cell('BUYS')); m.appendChild(h); }
+    const cell = x => { const c = el('span', ''); c.style.cssText = 'flex:0 0 56px;display:flex;justify-content:center;font-size:11px;letter-spacing:.1em'; c.append(x); return c; };
+    { const h = el('div', 'row'), c1 = cell('SELLS'), c2 = cell('BUYS'); c1.className = c2.className = 'colh'; h.append(el('label', '', ''), c1, c2); m.appendChild(h); }
     for (const [k, kl] of CARGO_KINDS) {
       const r = el('div', 'row'); r.appendChild(el('label', '', kl));
       for (const [key, all, tip] of [['sells', false, 'Sold here: '], ['buys', true, 'Bought here for coins: ']]) {
@@ -79638,7 +79640,7 @@ function benchFill(P, el, css) {
   // LEFT: what they see
   const L = sec('WHAT ' + (mine ? 'YOU SEE' : benchName(M.who) + ' DOES')), O = BENCH.out;
 
-  const head = t => { const h = el('h4', '', t); h.style.cssText = 'margin:6px 0 2px;font-size:11px;color:#9aa3b8'; L.appendChild(h); };
+  const head = t => { const h = el('h4', '', t); h.style.cssText = 'margin:6px 0 2px;font-size:11px'; L.appendChild(h); };
   if (BENCH.err) line(L, 'ERROR: ' + BENCH.err, '#ff6a5a');
   if (BENCH.said && BENCH.said.length) { head('JUST SAID'); for (const [w, t] of BENCH.said) line(L, (w === -1 || w == null ? '' : benchName(w) + ': ') + t, '#c08cff'); }
   if (O && mine) {
@@ -83269,7 +83271,7 @@ function vegUI(Z) {
     css.textContent = `#vgLab{position:fixed;right:8px;top:var(--below-corner,var(--below-bar,8px));max-height:calc(100% - 8px - var(--below-corner,var(--below-bar,8px)));overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;z-index:70;background:#0f1420e8;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:10px;display:grid;gap:8px;width:min(330px,calc(100vw - 16px))}
 #vgLab .tri button{font-size:12px;padding:8px 2px}#vgLab button.fold{text-align:left;padding-left:12px;color:#9fd36a;background:#141b2a}#vgLab button.fold::after{content:' \\25B8';float:right;margin-right:6px}#vgLab button.fold.open::after{content:' \\25BE'}#vgLeft .tri button{font-size:14px}#vgLab button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:48px;padding:10px 8px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;text-align:center}
 #vgLab button:active,#vgLab button.on{background:#2a3a1e;border-color:#6a9a3a}#vgLab .w{display:grid;grid-template-columns:1fr 1fr;gap:8px}#vgLab .w3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}#vgTip{color:#ffd9a0;min-height:1.4em}
-#vgLab h4{margin:6px 0 0;font:inherit;color:#9fd36a}#vgCost{color:#c8cfdc}
+#vgLab h4{margin:6px 0 0;font:inherit;color:#ffb347}#vgCost{color:#c8cfdc}
 .vgS{display:grid;gap:4px;user-select:none;-webkit-user-select:none}.vgS .t{display:flex;justify-content:space-between;color:#9aa3b5}.vgS .t b{color:#9fd36a;font-weight:600}.vgS .t i{font-style:normal;color:#7a8294;cursor:pointer;margin-left:6px;padding:2px 4px;border-radius:4px}.vgS .t i:hover{color:#ffd25a;background:#1a2234}.vgS .t i.same{opacity:.45}
 .vgS .k{position:relative;height:44px;touch-action:pan-y;cursor:pointer}#vgLab::-webkit-scrollbar{width:14px}#vgLab::-webkit-scrollbar-thumb{background:#6a9a3a;border-radius:7px}#vgLab::-webkit-scrollbar-track{background:#1a2234}.vgS .k::before{content:"";position:absolute;left:0;right:0;top:19px;height:6px;border-radius:3px;background:#2c3850}
 .vgS .f{position:absolute;left:0;top:19px;height:6px;border-radius:3px;background:#6a9a3a}.vgS .h{position:absolute;top:6px;width:32px;height:32px;margin-left:-16px;border-radius:50%;background:#9fd36a;border:3px solid #0f1420;box-sizing:border-box}
@@ -85451,7 +85453,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 #vehEd.flat .side { flex: 0 0 min(32em, 46vw); border-top: 0; border-left: 1px solid #2c3850; }
 #vehEdBack { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 56; background: #ffb347; color: #000; border: 1px solid #ffb347; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
 #vehEdBack[hidden] { display: none !important; }
-#vehEd h4 { margin: 10px 0 6px; font: inherit; color: #7a8294; letter-spacing: .08em; border-bottom: 1px solid #2c3850; padding-bottom: 4px; }
+#vehEd h4 { margin: 10px 0 6px; font: inherit; color: #ffb347; letter-spacing: .08em; border-bottom: 1px solid #2c3850; padding-bottom: 4px; }
 #vehEd h4:first-child { margin-top: 0; }
 #vehEd .mk { display: grid; grid-template-columns: 1.2em 1fr auto; gap: 4px 6px; align-items: center; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
 #vehEd .mk.on { border-color: #ffffff; background: #1a2234; }
