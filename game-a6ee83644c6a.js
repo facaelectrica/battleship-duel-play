@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1172;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 12:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1173;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 12:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36773,9 +36773,6 @@ const ED_CSS = `
 #skyEd .cvlist button { padding: 1px 6px; margin-left: 6px; }
 #skyEd .cvlist .warn { color: #ff8a7a; }
 #skyEd .cat { border: 1px solid #2c3850; border-radius: 6px; padding: 5px 9px 7px; display: grid; gap: 2px; }
-/* (the panel's one system - TUNE.sync below) hidden is hidden, whatever the box's own display; a button that can't act now is greyed, one look */
-#skyEd [hidden] { display: none !important; }
-#skyEd button:disabled { opacity: 0.4; cursor: default; }
 /* halves side by side: a tab's tools, then SELECTED - what's picked (TUNE.buttons' '=NAME' groups, the OBJECTS tabs' SPAWN | SELECTED) */
 #skyEd .opane { display: flex; gap: 10px; align-items: flex-start; }
 #skyEd .opane > .osec { flex: 1 1 0; min-width: 0; }
@@ -36894,7 +36891,7 @@ function edBuild(host) {
   edHost = host;
   const st = document.createElement('style'); st.textContent = ED_CSS; document.head.appendChild(st);
   const root = edEl('div'); root.id = 'skyEd'; root.hidden = true;
-  new MutationObserver(() => edOneProp(root)).observe(root, { childList: true, subtree: true });   // (one property a row - edOneProp)
+  TUNE.panel(root, '.body');   // (the panels' one system - below)
   const tabs = edEl('div', 'bar');
   const bCmp = edEl('button', '', 'COMPARE: MINE'); bCmp.title = 'Switch between your settings and the defaults';
   const bClose = edEl('button', '', 'CLOSE');
@@ -37045,33 +37042,50 @@ TUNE.toggle = edToggle; TUNE.isOnOff = isOnOff; TUNE.help = edHelp;   // (TUNE.h
 TUNE.pane = (tab, build) => { ED_PANES[tab] = build; if (!ED_TABS[tab]) ED_TABS[tab] = []; };
 TUNE.sliders = (tab, name, keys) => { if (!ED_TABS[tab]) ED_TABS[tab] = []; ED_TABS[tab].push([name, keys]); };   // (a group of the sliders above, on another chat's tab - e.g. TERRAIN)
 TUNE.buttons = (tab, name, list, opts) => { ED_BTNS.push([tab, name, list, opts]); if (!ED_TABS[tab]) ED_TABS[tab] = []; };   // (opts.when: the section shows only then; a button's 4th item: what it needs to act - TUNE.sync)
-/* THE PANEL'S ONE SYSTEM (user Nov 20 10:33: "If I select the terrain shape and then I deselect, the create terrain section completely disappears";
-   10:34: "make sure this kind of issue does never happen again anywhere ... the game editor is a patched assembly of things, because when one changes,
-   it breaks another, versus a logical system"; 10:40: "Why pile sections vertically when the rest of the section is empty?"):
-   - LAYOUT: a tab is sections side by side (.cats, wrapping to the width) - one titled thing a section, never two piled in one box; a tab with
-     groups is halves side by side (.opane / .osec): its tools, then SELECTED - what's picked.
-   - WHAT SHOWS: a section that applies only to some picks says when (TUNE.buttons' opts.when, TUNE.when(el, fn)); a button that needs something
-     to act on says what (a button's 4th item, TUNE.need(el, fn)). TUNE.sync() sets them all from what is so now - as a tab is filled and shown,
-     after every press (wedSync) and every 0.2 s while anything of the editor is up: what the panel shows is worked out from the pick, never left
-     from whenever something last remembered to refresh it. Hidden is hidden and greyed is one look (the CSS above).
-   - SCROLL: a pick scrolls the panel to its section (wedAfter); nothing picked any more - the panel back at its top, where the tab's tools are.
-   A new section or button that depends on the pick uses these - never its own .hidden / .disabled set from a sync of its own. */
-const ED_WHEN = [], ED_NEED = [], ED_ONSYNC = [];
+/* THE PANELS' ONE SYSTEM - every editor's: the GAME EDITOR, the VEHICLE EDITOR, the BIOME EDITOR (its panels, its PREFAB / COMPONENT EDITOR,
+   the sea shapes) (user Nov 20 10:33: "If I select the terrain shape and then I deselect, the create terrain section completely disappears"; 10:34:
+   "make sure this kind of issue does never happen again anywhere ... the game editor is a patched assembly of things, because when one changes, it
+   breaks another, versus a logical system"; 10:40: "Why pile sections vertically when the rest of the section is empty?"; 10:48: "properties that
+   are not related, each should have its own line"; 11:00: "Should not all be under the same system and logic?"):
+   - A PANEL: each editor's root joins it once (TUNE.panel(root, home) - its class edp: the one CSS below). In it, one property a row (edOneProp),
+     hidden is hidden and greyed is one look, and its home scroller back at the top when nothing is picked any more.
+   - LAYOUT (the GAME EDITOR's tabs): sections side by side (.cats, wrapping to the width) - one titled thing a section, never two piled in one box;
+     a tab with groups is halves side by side (.opane / .osec): its tools, then SELECTED - what's picked.
+   - WHAT SHOWS: an element that shows only sometimes says when (TUNE.when(el, fn); TUNE.buttons' opts.when); a control that needs something to
+     act on says what (TUNE.need(el, fn); a button's 4th item); a name or value written from the state goes in TUNE.onSync. TUNE.sync() sets them
+     all, in every panel, from what is so now - after every press and every 0.2 s while any editor is up: never left from whenever something last
+     remembered to refresh it. A when / need lives on its element (el._when / el._need, class edw / edn): a panel built again brings its own, and
+     what's gone takes its own with it.
+   A new panel joins with TUNE.panel; a new control that depends on anything uses these - never its own .hidden / .disabled set from a sync or a
+   timer of its own. */
+const ED_ROOTS = [], ED_ONSYNC = [];
 let edHadPick = false;
-TUNE.when = (el, fn) => { ED_WHEN.push([el, fn]); return el; };
-TUNE.need = (el, fn) => { ED_NEED.push([el, fn]); return el; };
+const edOk = f => { try { return !!f(); } catch (e) { return true; } };
+const edWhen1 = el => { const v = edOk(el._when); if (el.hidden === v) el.hidden = !v; };
+const edNeed1 = el => { const v = edOk(el._need); if (el.disabled === v) el.disabled = !v; };
+TUNE.when = (el, fn) => { el._when = fn; el.classList.add('edw'); edWhen1(el); return el; };
+TUNE.need = (el, fn) => { el._need = fn; el.classList.add('edn'); edNeed1(el); return el; };
 TUNE.picked = null;   // (() => is anything picked in the world - 50-zzz-world-ed.js)
-TUNE.onSync = f => { ED_ONSYNC.push(f); return f; };   // (what's written from the pick - a button's name (DELETE (Dock)) - kept in step with it the same way)
+TUNE.onSync = f => { ED_ONSYNC.push(f); return f; };   // (what's written from the state - a button's name (DELETE (Dock)), a slider's value - kept in step the same way)
 TUNE.sync = () => {
-  const ok = f => { try { return !!f(); } catch (e) { return true; } };
   for (const f of ED_ONSYNC) try { f(); } catch (e) { }
-  for (const [el, f] of ED_WHEN) if (el.isConnected) { const v = ok(f); if (el.hidden === v) el.hidden = !v; }
-  for (const [el, f] of ED_NEED) if (el.isConnected) { const v = ok(f); if (el.disabled === v) el.disabled = !v; }
-  if (TUNE.picked) { const p = ok(TUNE.picked); if (edHadPick && !p) edScrollHome(); edHadPick = p; }
+  for (const [R] of ED_ROOTS) { for (const el of R.querySelectorAll('.edw')) edWhen1(el); for (const el of R.querySelectorAll('.edn')) edNeed1(el); }
+  if (TUNE.picked) { const p = edOk(TUNE.picked); if (edHadPick && !p) edScrollHome(); edHadPick = p; }
 };
+// a panel joins: its look (.edp), one property a row as anything is put in it, its home scroller (a selector in it; none: the root)
+TUNE.panel = (root, home) => {
+  if (ED_ROOTS.some(q => q[0] === root)) return root;
+  ED_ROOTS.push([root, home || null]); root.classList.add('edp');
+  if (!document.getElementById('edpCss')) { const st = document.createElement('style'); st.id = 'edpCss'; st.textContent = ED_PANEL_CSS; document.head.appendChild(st); }
+  new MutationObserver(() => edOneProp(root)).observe(root, { childList: true, subtree: true }); edOneProp(root);
+  return root;
+};
+const ED_PANEL_CSS = `
+.edp [hidden] { display: none !important; }
+.edp button:disabled, .edp select:disabled, .edp input:disabled { opacity: 0.4; cursor: default; }`;
 // (user Nov 20 10:48: "properties that are not related, each should have its own line organized vertically. Otherwise its confusing") ONE PROPERTY A
 // ROW: a row (.row) is one property - its name (a label) and what sets it. A row built with more names than one is cut into one row each, in place,
-// as it's put in the panel (a sub-label inside one property is a span, not a label) - every tab's, whoever builds it
+// as it's put in the panel (a sub-label inside one property is a span, not a label) - every panel's, whoever builds it
 function edOneProp(root) {
   for (const r of root.querySelectorAll('.row')) {
     const L = [...r.children].filter(c => c.tagName === 'LABEL'); if (L.length < 2) continue;
@@ -37083,9 +37097,10 @@ function edOneProp(root) {
     }
   }
 }
-// nothing picked any more: every panel of the editor back at its top
-function edScrollHome() { for (const R of document.querySelectorAll('#skyEd .body, #vgBot .body')) if (R.scrollTop > 0) R.scrollTop = 0; }
-setInterval(() => { if (TUNE.open || (typeof VEG_MODE !== 'undefined' && VEG_MODE)) TUNE.sync(); }, 200);
+// nothing picked any more: every panel's home scroller back at its top
+function edScrollHome() { for (const [R, h] of ED_ROOTS) { const S = h ? R.querySelector(h) : R; if (S && S.scrollTop > 0) S.scrollTop = 0; } }
+const edUp = () => ED_ROOTS.some(([R]) => R.isConnected && !R.hidden && R.getClientRects().length > 0);
+setInterval(() => { if (edUp()) TUNE.sync(); }, 200);
 TUNE.add = (tab, rows) => { ED_TABS[tab] = [[tab, rows.map(r => r[0])]]; for (const r of rows) { if (!(r[0] in P)) P[r[0]] = r[5]; P_DEF[r[0]] = r[5]; DESC[r[0]] = r[6]; SL.push(r); } };
 // the lab's views (user Oct 27 evening: "In the Lab we have these view: tones etc... I cant find any of that in the game
 // editor"): the clouds' VIEW (TONES, LOBES, BILLOWS, LIGHT - each lobe, billow or puff in a colour of its own; the decks drawn
@@ -59655,7 +59670,7 @@ function terrainHillsRow(cat) {
   const inp = r.querySelector('input'), lbl = r.querySelector('label');
   lbl.title = 'How bumpy the picked segments are: under 100% smoother, over 100% hillier';
   inp.addEventListener('input', () => terrainSetHills(+inp.value / 100));
-  cat.appendChild(r); TERRAIN_ED.hills = { r, inp, out: r.querySelector('output') };
+  cat.appendChild(r); TERRAIN_ED.hills = { r, inp, out: r.querySelector('output') }; NSKY.editor.TUNE.need(inp, () => { const s = TERRAIN_ED.sel; return !!(s && selPts(s)); });   // (the panels' one system)
   terrainShapeRows(cat);
   terrainCurveRow(cat); terrainVegRow(cat);
   terrainSyncSkin();
@@ -59669,6 +59684,7 @@ function terrainShapeRows(cat) {
     r.innerHTML = `<label>${lab}</label><input type="range" min="-100" max="100" step="5"><output></output><span class="dv"></span>`;
     const inp = r.querySelector('input'); r.querySelector('label').title = tip;
     inp.addEventListener('input', () => terrainSetShape(i, +inp.value / 100));
+    NSKY.editor.TUNE.need(inp, () => { const s = TERRAIN_ED.sel; return !!(s && s.I != null && selPts(s)); });   // (the panels' one system)
     cat.appendChild(r); return { i, inp, out: r.querySelector('output') };
   });
 }
@@ -59686,7 +59702,7 @@ function terrainCurveRow(cat) {
   r.innerHTML = '<label>CURVE</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
   const inp = r.querySelector('input'); r.querySelector('label').title = 'How the line bends at the picked points: 0% a sharp corner, AUTO a smooth curve';
   inp.addEventListener('input', () => { const L = curvePts(); if (!L.length) return; for (const p of L) ptSetCurve(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
-  cat.appendChild(r); TERRAIN_ED.curve = { inp, out: r.querySelector('output') };
+  cat.appendChild(r); TERRAIN_ED.curve = { inp, out: r.querySelector('output') }; NSKY.editor.TUNE.need(inp, () => curvePts().length > 0);
 }
 // (the FADE CONCEPT, user Nov 7) VEGETATION: how much of its vegetation each picked piece keeps, 100% all of it to 0% none
 function vegPts() {   // (the picked pieces' first points - a piece's VEGETATION is its first point's; the picked points' pieces)
@@ -59701,7 +59717,7 @@ function terrainVegRow(cat) {
   r.innerHTML = '<label>VEGETATION</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
   const inp = r.querySelector('input'); r.querySelector('label').title = 'How many plants grow on the picked segments (in a cave: how many stalactites, sand and weed). 100% all, 0% none';
   inp.addEventListener('input', () => { const L = vegPts(); if (!L.length) return; for (const p of L) ptSetVeg(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
-  cat.appendChild(r); TERRAIN_ED.veg = { inp, out: r.querySelector('output') };
+  cat.appendChild(r); TERRAIN_ED.veg = { inp, out: r.querySelector('output') }; NSKY.editor.TUNE.need(inp, () => vegPts().length > 0);
 }
 function terrainSetShape(i, v) {
   const s = TERRAIN_ED.sel; if (!s || s.I == null) { terrainSyncSkin(); return; }   // (the ground's line or a segment's)
@@ -59710,11 +59726,15 @@ function terrainSetShape(i, v) {
   islChanged();
   terrainSyncSkin();
 }
-function terrainSyncSkin() {
+NSKY.editor.TUNE.onSync(() => terrainShow());
+// the TERRAIN tab as the pick is now: the panels' one sync (sky/90-editor.js) - which sections show and what can act, and what's written from the
+// pick (terrainShow - TUNE.onSync: the lit types and kinds, the sliders' values, the notes)
+function terrainSyncSkin() { NSKY.editor.TUNE.sync(); }
+function terrainShow() {
+  if (!TERRAIN_ED.skinBtns) return;   // (the tab not built yet)
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
-  if (typeof landNameSync === 'function') landNameSync();   // (LAND's name - 50-zzzzz-story-cities.js; which sections show: TUNE.sync)
-  NSKY.editor.TUNE.sync();
+  if (typeof landNameSync === 'function') landNameSync();   // (LAND's name - 50-zzzzz-story-cities.js)
   let sk; if (s && s.Is) { const set = new Set(); for (const n of s.Is) if (ISLANDS[n]) for (const p of ISLANDS[n].p) set.add(p[2] || null); if (set.size) sk = set.size === 1 ? [...set][0] : 'mixed'; }   // (whole shapes: every piece round them)
   else if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
@@ -59727,18 +59747,18 @@ function terrainSyncSkin() {
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
     if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(Math.round((P[k].length > 3 ? P[k][3] : 1) * 100));
-    H.inp.disabled = !ok; if (set.size === 1) H.inp.value = [...set][0];
+    if (set.size === 1) H.inp.value = [...set][0];
     H.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
   for (const R of TERRAIN_ED.shapes || []) {                     // (SPIKY, ROUND: the picked pieces' amount, or blank when they differ)
     const ok = !!(s && P && s.I != null), set = new Set();
     if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(Math.round((R.i === 4 ? ptSpiky(P[k]) : ptRound(P[k])) * 100));
-    R.inp.disabled = !ok; if (set.size === 1) R.inp.value = [...set][0];
+    if (set.size === 1) R.inp.value = [...set][0];
     R.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
-  if (TERRAIN_ED.cwLvl) { const R = caveRooms().filter(I => Number.isFinite(I.wl)), C3 = TERRAIN_ED.cwLvl; C3.inp.disabled = !R.length; if (R.length) { const [lo, hi] = caveSpan(R[0]); const v = Math.round((hi - R[0].wl) / Math.max(1, hi - lo) * 100); C3.inp.value = v; C3.out.textContent = v + '%'; } else C3.out.textContent = 'NONE'; }
-  if (TERRAIN_ED.veg) { const V2 = TERRAIN_ED.veg, L = vegPts(), set = new Set(L.map(p => Math.round(ptVeg(p) * 100))); V2.inp.disabled = !L.length; if (set.size === 1) V2.inp.value = [...set][0]; V2.out.textContent = !L.length ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED'; }
-  if (TERRAIN_ED.curve) { const C2 = TERRAIN_ED.curve, L = curvePts(), set = new Set(L.map(p => ptCurve(p) == null ? 'AUTO' : Math.round(ptCurve(p) * 100))); C2.inp.disabled = !L.length; if (set.size === 1 && [...set][0] !== 'AUTO') C2.inp.value = [...set][0]; C2.out.textContent = !L.length ? '' : set.size === 1 ? ([...set][0] === 'AUTO' ? 'AUTO' : [...set][0] + '%') : 'MIXED'; }
+  if (TERRAIN_ED.cwLvl) { const R = caveRooms().filter(I => Number.isFinite(I.wl)), C3 = TERRAIN_ED.cwLvl; if (R.length) { const [lo, hi] = caveSpan(R[0]); const v = Math.round((hi - R[0].wl) / Math.max(1, hi - lo) * 100); C3.inp.value = v; C3.out.textContent = v + '%'; } else C3.out.textContent = 'NONE'; }
+  if (TERRAIN_ED.veg) { const V2 = TERRAIN_ED.veg, L = vegPts(), set = new Set(L.map(p => Math.round(ptVeg(p) * 100))); if (set.size === 1) V2.inp.value = [...set][0]; V2.out.textContent = !L.length ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED'; }
+  if (TERRAIN_ED.curve) { const C2 = TERRAIN_ED.curve, L = curvePts(), set = new Set(L.map(p => ptCurve(p) == null ? 'AUTO' : Math.round(ptCurve(p) * 100))); if (set.size === 1 && [...set][0] !== 'AUTO') C2.inp.value = [...set][0]; C2.out.textContent = !L.length ? '' : set.size === 1 ? ([...set][0] === 'AUTO' ? 'AUTO' : [...set][0] + '%') : 'MIXED'; }
   const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (n > 1 ? n + ' segments' : '1 segment') + ' picked' + (s && s.I != null && ISLANDS[s.I] ? ' on ' + shpLabel(s.I) : '') + ' (shown in white). Segment type: ';
   if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' shapes' : ' shape') + ' picked. Drag to move, or press a segment type to change all of them.'; return; }
   { const L = islPtsOn(), q = L[0]; if (TERRAIN_ED.skinNote && !s && q) { TERRAIN_ED.skinNote.textContent = L.length > 1 ? L.length + ' points picked. Drag one to move them all.' : 'Point ' + (q.k + 1) + ' picked on ' + shpLabel(q.n) + '. Drag it to move it.'; return; } }
@@ -59915,7 +59935,7 @@ function caveWaterSet(on) { const L = caveRooms(); if (!L.length) return; for (c
   a[2].init = b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.cwLvl) return; const row = document.createElement('div'); row.className = 'row';
     row.innerHTML = '<label>WATER LEVEL</label><input type="range" min="0" max="100" step="1"><output></output><span class="dv"></span>'; row.querySelector('label').title = 'How high the water in the picked cave comes up';
     const inp = row.querySelector('input'); inp.addEventListener('input', () => { for (const I of caveRooms()) { if (!Number.isFinite(I.wl)) continue; const [lo, hi] = caveSpan(I); I.wl = Math.round(hi - (hi - lo) * (+inp.value / 100)); } islChanged(); terrainSyncSkin(); });
-    cat.appendChild(row); TERRAIN_ED.cwLvl = { inp, out: row.querySelector('output') }; terrainSyncSkin(); }, 0); };
+    cat.appendChild(row); TERRAIN_ED.cwLvl = { inp, out: row.querySelector('output') }; NSKY.editor.TUNE.need(inp, () => caveRooms().some(I => Number.isFinite(I.wl))); terrainSyncSkin(); }, 0); };
   NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE WATER', [a, r], { when: () => caveRooms().length > 0 }); }   // (a cave - not a tunnel - picked)
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
@@ -82446,7 +82466,7 @@ function vegUI(Z) {
     const css = document.createElement('style');
     css.textContent = `#vgLab{position:fixed;right:8px;top:var(--below-corner,var(--below-bar,8px));max-height:calc(100% - 8px - var(--below-corner,var(--below-bar,8px)));overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;z-index:70;background:#0f1420e8;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:10px;display:grid;gap:8px;width:min(330px,calc(100vw - 16px))}
 #vgLab .tri button{font-size:12px;padding:8px 2px}#vgLab button.fold{text-align:left;padding-left:12px;color:#9fd36a;background:#141b2a}#vgLab button.fold::after{content:' \\25B8';float:right;margin-right:6px}#vgLab button.fold.open::after{content:' \\25BE'}#vgLeft .tri button{font-size:14px}#vgLab button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:48px;padding:10px 8px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;text-align:center}
-#vgLab button:disabled{opacity:0.35;cursor:default}#vgLab button:active,#vgLab button.on{background:#2a3a1e;border-color:#6a9a3a}#vgLab .w{display:grid;grid-template-columns:1fr 1fr;gap:8px}#vgLab .w3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}#vgTip{color:#ffd9a0;min-height:1.4em}
+#vgLab button:active,#vgLab button.on{background:#2a3a1e;border-color:#6a9a3a}#vgLab .w{display:grid;grid-template-columns:1fr 1fr;gap:8px}#vgLab .w3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}#vgTip{color:#ffd9a0;min-height:1.4em}
 #vgLab h4{margin:6px 0 0;font:inherit;color:#9fd36a}#vgCost{color:#c8cfdc}
 .vgS{display:grid;gap:4px;user-select:none;-webkit-user-select:none}.vgS .t{display:flex;justify-content:space-between;color:#9aa3b5}.vgS .t b{color:#9fd36a;font-weight:600}.vgS .t i{font-style:normal;color:#7a8294;cursor:pointer;margin-left:6px;padding:2px 4px;border-radius:4px}.vgS .t i:hover{color:#ffd25a;background:#1a2234}.vgS .t i.same{opacity:.45}
 .vgS .k{position:relative;height:44px;touch-action:pan-y;cursor:pointer}#vgLab::-webkit-scrollbar{width:14px}#vgLab::-webkit-scrollbar-thumb{background:#6a9a3a;border-radius:7px}#vgLab::-webkit-scrollbar-track{background:#1a2234}.vgS .k::before{content:"";position:absolute;left:0;right:0;top:19px;height:6px;border-radius:3px;background:#2c3850}
@@ -82478,7 +82498,7 @@ function vegUI(Z) {
       '<div id="vgProps" style="display:grid;gap:6px"></div>' +
       '<div id="vgGroupOnly" style="display:none;gap:8px"><h4>IN THE GROUP</h4><div id="vgGrp" style="display:grid;gap:6px"></div></div>' +
       '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgTip">Point at a button to see what it does</div>';
-    Z.put(d);
+    Z.put(d); NSKY.editor.TUNE.panel(d);   // (the panels' one system - sky/90-editor.js)
     // (a foldout: its header opens and closes what's under it)
     setTimeout(() => { for (const b of d.querySelectorAll('.fold')) { const sync = () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); b.classList.toggle('open', !!c && c.style.display !== 'none'); }; sync(); b.addEventListener('click', () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); if (!c) return; c.style.display = c.style.display === 'none' ? (c.classList.contains('w') ? '' : 'grid') : 'none'; sync(); b.blur(); }); } }, 0);
     { const sel = d.querySelector('#vgSpawn'), grp = lab => { const g = document.createElement('optgroup'); g.label = lab; sel.appendChild(g); return g; }, add = (g, v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; g.appendChild(o); };
@@ -82508,11 +82528,13 @@ function vegUI(Z) {
       selIt = it; pickKey = it ? VG().fol.keyOf(it) : null; const K = VG().fol.kinds().find(k => k[0] === pickKey);
       d.querySelector('#vgSelH').textContent = 'SELECTED: ' + (K ? K[1] : '-'); if (K) tip.textContent = K[1] + ' selected';
       if (window.__vgSelDeck) window.__vgSelDeck(it, K ? K[1] : null);   // (10:21: SET PROPERTIES on the picked plant's deck)
-      for (const a of ['blast', 'shake', 'fire', 'feTap']) d.querySelector('[data-a=' + a + ']').disabled = !it;
+      NSKY.editor.TUNE.sync();
     }
+    for (const a of ['blast', 'shake', 'fire', 'feTap']) NSKY.editor.TUNE.need(d.querySelector('[data-a=' + a + ']'), () => !!selIt);   // (nothing selected: greyed - the panels' one system)
+    NSKY.editor.TUNE.need(d.querySelector('[data-a=unspawn]'), () => strPick != null || !!vehPick);
     // (22:43: "select a spawned prefab in the editor window and delete it using the Remove that would say REMOVE object name. Otherwise its GREYED out")
     function pickStr(id, name) { strPick = id; if (id != null) vehPick = null; pickName(id == null && !vehPick ? null : name); }
-    function pickName(name) { const b = d.querySelector('[data-a=unspawn]'), any = strPick != null || !!vehPick; b.disabled = !any; b.textContent = any ? 'REMOVE ' + (name || 'IT') : 'REMOVE'; }
+    function pickName(name) { const b = d.querySelector('[data-a=unspawn]'), any = strPick != null || !!vehPick; b.textContent = any ? 'REMOVE ' + (name || 'IT') : 'REMOVE'; }
     pickStr(null);
     select(nearPalm());
     for (const b of d.querySelectorAll('button')) {
@@ -82634,7 +82656,7 @@ function vegUI(Z) {
 #vgBot .vgS > button { grid-column: 2 / 5; grid-row: 1; }
 #vgBot .cat > button.tglrow { justify-self: start; }`; Z.put(document.head, st); }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) bot.addEventListener(ev, e => e.stopPropagation());
-    Z.put(bot);
+    Z.put(bot); NSKY.editor.TUNE.panel(bot, '.body');
     const botFit = () => { const r = d.getBoundingClientRect(); bot.style.right = Math.max(8, window.innerWidth - r.left + 8) + 'px'; }; botFit(); addEventListener('resize', botFit); setInterval(botFit, 1000);
     const vgReplant = () => { try { VG().replant(); } catch (er) { console.error('replant', er); if (window.__vgLog) window.__vgLog.push(['replantERR', String(er && er.stack || er).slice(0, 300)]); window.__vgReplantErr = String(er && er.stack || er).slice(0, 400); } };
     // (user Nov 4 10:21: "When I select something in the Group Editor, the Set Properties should automatically update to the Deck of what I selected")
@@ -82713,7 +82735,7 @@ function vegUI(Z) {
         // (user Nov 7 23:08: "this section for Adding to a Deck should be on the same level as the Deck 1, Deck 2, etc. Just greyed out if no deck is
         // selected") the deck's ADD (and its SAVE / RESET) at the end of the deck tabs' row - renderDeck fills it; greyed with no deck picked
         subAdd = document.createElement('div'); subAdd.style.cssText = 'display:flex;gap:6px;margin-left:auto;align-items:center;flex-wrap:wrap'; sb.appendChild(subAdd);
-        if (typeof deckTab !== 'number') { const s0 = document.createElement('select'), b0 = sBtn('ADD', 'Pick a deck first', () => { }, true); s0.disabled = true; s0.title = 'Pick a deck first'; s0.innerHTML = '<option>PICK A DECK</option>'; subAdd.appendChild(s0); subAdd.appendChild(b0); }
+        if (typeof deckTab !== 'number') { const s0 = document.createElement('select'), b0 = sBtn('ADD', 'Pick a deck first', () => { }, true); NSKY.editor.TUNE.need(s0, () => false); s0.title = 'Pick a deck first'; s0.innerHTML = '<option>PICK A DECK</option>'; subAdd.appendChild(s0); subAdd.appendChild(b0); }
         // (user Nov 8 11:58: "a button to add a deck or remove a deck? 0 and 1 are fixed"; 12:0x: "next to a deck I have selected. If I don't have any deck
         // selected, it would go at the end") ADD DECK: a new empty deck right behind the deck picked (never before DECK 2), else at the very back
         { const behind = typeof deckTab === 'number' ? deckTab + 1 : D.length;
@@ -82732,7 +82754,7 @@ function vegUI(Z) {
     }
     // a section of the game editor's (.cat): its heading and what's in it
     const catOf = (host, name, tp) => { const c = document.createElement('div'); c.className = 'cat'; const h = document.createElement('h4'); h.textContent = name; if (tp) h.title = tp; c.appendChild(h); host.appendChild(c); return c; };
-    const sBtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; b.disabled = !!dis; hint(b); b.onclick = fn; return b; };
+    const sBtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; if (dis) NSKY.editor.TUNE.need(b, () => false); hint(b); b.onclick = fn; return b; };   // (dis: can't act as built - the panel is built again when that changes; the panels' one system)
     const btnRow = (c, ...bs) => { const r = document.createElement('div'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px'; for (const b of bs) r.appendChild(b); c.appendChild(r); return r; };
     // one deck: what's on it, each a section - a prefab (its AMOUNT, COLOUR VARIETY, sizes), a picture (its SIZE, HEIGHT, ATMOSPHERE, SPACING), the
     // meadow (HEIGHT, WAVINESS, FLOWERS, PEBBLES) - each its MOVE UP / DOWN and REMOVE; ADD under them. Every deck is the biome's one deck list (saved with
@@ -82855,7 +82877,8 @@ function vegUI(Z) {
       // (user Nov 8 13:19: "we have a SAVE button near the DECKS tab, but then the SAVE CHANGES on the left ... We should remove the one in the DECKS")
       // no SAVE of the decks' own: SAVE CHANGES keeps them (with everything else); REVERT goes back to the decks as SAVE CHANGES last kept them
       { const rv = sBtn('REVERT', 'Puts this biome\'s decks back as last saved', () => { if (window.__vgSetRevert) window.__vgSetRevert(); }), ub = sBtn('UNDO', 'Undoes your last change (Ctrl+Z)', () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); });
-        rv.dataset.setRev = '1'; ub.dataset.gUndo = '1'; add.appendChild(ub); add.appendChild(rv); }
+        rv.dataset.setRev = '1'; ub.dataset.gUndo = '1'; add.appendChild(ub); add.appendChild(rv);
+        NSKY.editor.TUNE.need(rv, () => !!(window.__vgSetDirty && window.__vgSetDirty())); NSKY.editor.TUNE.need(ub, () => !!(window.__vgGUCan && window.__vgGUCan())); }   // (REVERT: only with changes since SAVE CHANGES; UNDO: with a step to go back - the panels' one system)
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
     const surfRebuild = () => { biomeSurfSave(); liveSurface(); };   // (the ground's cells laid again as it changes - a job, nearest the view first: 50-zzzz-live-edit.js)
@@ -82868,7 +82891,7 @@ function vegUI(Z) {
       // from the surface or the waterline ... its look: a palette") each layer from the top down: MATERIAL, MIN / MAX THICKNESS, VARIATION, FILL TO SEA
       // LEVEL, COLOURS (light, mid, dark), MOVE UP / DOWN, REMOVE; ADD LAYER under them - 09-zz-biomes.js SURF_MATS, surfLayerAt
       const restruct = () => { surfRebuild(); renderDecks(); };
-      const sbtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; b.disabled = !!dis; hint(b); b.onclick = fn; return b; };
+      const sbtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; if (dis) NSKY.editor.TUNE.need(b, () => false); hint(b); b.onclick = fn; return b; };
       const cols = document.createElement('div'); cols.className = 'cats'; box.appendChild(cols);
       const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
       L.forEach((ly, i) => {
@@ -83047,7 +83070,7 @@ function vegUI(Z) {
       r2.appendChild(sel);
       r2.appendChild(btn('LOAD', 'Loads the picked terrain prefab', () => { const q = ALL[+sel.value]; if (q) { VG_GROUND_LAST = q.n; groundUse(q.g(), q.n); } }));
       const db = btn('DELETE', 'Deletes the picked prefab (only ones you saved)', () => { const q = ALL[+sel.value]; if (!q || !q.own) return; groundsSet(groundsGet().filter(o => o.n !== q.n)); renderDecks(); });
-      const dOn = () => { const q = ALL[+sel.value]; db.disabled = !(q && q.own); if (q) { sel.title = sel.dataset.t = q.n + ': ' + q.d; } }; sel.onchange = () => { dOn(); const q = ALL[+sel.value]; if (q) tip.textContent = sel.title; }; dOn(); r2.appendChild(db);
+      NSKY.editor.TUNE.need(db, () => { const q = ALL[+sel.value]; return !!(q && q.own); }); const dOn = () => { const q = ALL[+sel.value]; NSKY.editor.TUNE.sync(); if (q) { sel.title = sel.dataset.t = q.n + ': ' + q.d; } }; sel.onchange = () => { dOn(); const q = ALL[+sel.value]; if (q) tip.textContent = sel.title; }; dOn(); r2.appendChild(db);
       const inp = document.createElement('input'); inp.placeholder = 'PREFAB NAME'; inp.maxLength = 30; inp.title = 'A name for the terrain as it is now';
       inp.style.cssText = 'width:200px;margin-left:12px';
       r2.appendChild(inp);
@@ -83060,7 +83083,6 @@ function vegUI(Z) {
     // (a far picture's or the meadow's value as the world has it - GAME EDITOR > FAR SCENERY - under a biome's own)
     const worldDef = (k, d0) => { if (k === 'flw' || k === 'pb') return 1; const r = (NSKY.BG_SL || []).find(q => q[0] === k); return bgP(k, r ? r[5] : d0 != null ? d0 : 1); };
     renderDecks(); window.__vgDecks = renderDecks;
-    setInterval(() => { const dt = window.__vgSetDirty ? window.__vgSetDirty() : false; for (const b of bot.querySelectorAll('[data-set-rev]')) b.disabled = !dt; }, 300);   // (REVERT: only with changes since SAVE CHANGES)
     // (user Nov 3 22:10: "How do I save all these values Im writing?") every number in the panel - each kind's PREFAB NUMBERS, LOOK,
     // the decks and their amounts - kept in the lab's shared store (db doc settings/lab) the moment it changes: every browser opening the lab
     // gets them, and Claude reads them from there to build them into the game. (The shapes are kept by the editor's SAVE - foliage/<kind>)
@@ -83081,7 +83103,8 @@ function vegUI(Z) {
     { const gSnap = () => { const st = VG().sets.state; delete st.cur; return JSON.stringify({ sets: st, v: Object.fromEntries(GROUPS.map(f => [f, V[f]])) }); }, GU = [gSnap()]; let down = 0;
       const gBiomes = (a, b) => { const out = [], A = a.sets || {}, B = b.sets || {}; for (const n of new Set([...Object.keys(A.sets || {}), ...Object.keys(B.sets || {})])) if (JSON.stringify((A.sets || {})[n]) !== JSON.stringify((B.sets || {})[n]) || JSON.stringify((A.dh || {})[n]) !== JSON.stringify((B.dh || {})[n])) out.push(n); return out; };
       addEventListener('pointerdown', () => { down++; }, true); for (const ev of ['pointerup', 'pointercancel']) addEventListener(ev, () => { down = Math.max(0, down - 1); }, true);
-      setInterval(() => { if (down) return; const sn = gSnap(); if (sn !== GU[GU.length - 1]) { GU.push(sn); if (GU.length > 80) GU.shift(); } const b = document.querySelector('[data-g-undo]'); if (b) b.disabled = GU.length < 2; }, 400);
+      setInterval(() => { if (down) return; const sn = gSnap(); if (sn !== GU[GU.length - 1]) { GU.push(sn); if (GU.length > 80) GU.shift(); } }, 400);
+      window.__vgGUCan = () => GU.length > 1;
       window.__vgGUReset = () => { GU.length = 0; GU.push(gSnap()); };   // (what came from the shared store is where UNDO stops - never undone back to before it loaded)
       window.__vgGroupUndo = () => { if (GU.length < 2) { tip.textContent = 'Nothing to undo'; return; } const now = JSON.parse(gSnap()); GU.pop(); const o = JSON.parse(GU[GU.length - 1]), ch = gBiomes(now, o), cur = VG().sets.cur; VG().sets.load(o.sets); D = VG().decks.get(UWM);
         for (const f in o.v) if (V[f]) for (const k in o.v[f]) if (typeof o.v[f][k] === 'number') V[f][k] = o.v[f][k]; VG().save(); renderDecks(); vgReplant(); for (const f of shows) f();
@@ -83181,7 +83204,7 @@ function vegUI(Z) {
     // (user Nov 3 21:28: "a frame rate counter at the top left")
     // (user Nov 3 22:13: "Cost should all be on the upper left side ... On the left we have a small menu that has ZOOM: + -, Bones On/Off, Decks
     // Vis Toggle Deck 1 Deck 2 etc") the view's own menu, top left: the frame rate and the cost, the zoom a level in or out, the bones, each deck shown
-    const L = document.createElement('div'); L.id = 'vgLeft'; Z.put(L);
+    const L = document.createElement('div'); L.id = 'vgLeft'; Z.put(L); NSKY.editor.TUNE.panel(L);
     L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:var(--below-bar,8px);max-height:calc(100% - 267px - 24px - var(--below-bar,8px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
@@ -83211,8 +83234,9 @@ function vegUI(Z) {
     // saved with it; CLOSE, GAME EDITOR and SUBMIT CHANGES with changes not saved ask SAVE / DISCARD / CANCEL (DISCARD: everything as last saved)
     const vDirty = () => { try { return sceneDirty() || !!(window.__vgSetDirty && window.__vgSetDirty()) || feDirty(); } catch (e) { return false; } };
     const vSave = async () => { if (feDirty()) await feSaveNow(); if (window.__vgSetDirty && window.__vgSetDirty() && window.__vgSetSave) window.__vgSetSave(); sceneSave(); vSaveShow(); tip.textContent = 'Changes saved in this browser - SUBMIT CHANGES puts them in the game'; };
-    const vSaveShow = () => { const b = L.querySelector('[data-vsave]'); if (!b) return; const dt = vDirty(); b.disabled = !dt; b.style.background = dt ? '#3a5a1e' : ''; b.style.borderColor = dt ? '#9fd36a' : ''; b.title = dt ? 'Keeps your changes in this browser' : 'Nothing to save'; };
-    vSaveShow(); setInterval(vSaveShow, 500);
+    // (SAVE CHANGES: greyed with nothing to save, lit with something - the panels' one system: its need and its look from the state)
+    const vSaveShow = () => NSKY.editor.TUNE.sync();
+    { const b = L.querySelector('[data-vsave]'); if (b) { NSKY.editor.TUNE.need(b, vDirty); NSKY.editor.TUNE.onSync(() => { if (!b.isConnected) return; const dt = vDirty(); b.style.background = dt ? '#3a5a1e' : ''; b.style.borderColor = dt ? '#9fd36a' : ''; b.title = dt ? 'Keeps your changes in this browser' : 'Nothing to save'; }); } }
     // (user Nov 8 13:27: "a single SAVE CHANGES button ... a different button in the prefab and component editor ... but it should be the 'same button'
     // doing the same thing") the Prefab and Component Editors' SAVE CHANGES is this one: it saves everything
     window.__vgSaveAll = vSave; window.__vgDirtyAll = vDirty;
@@ -83247,7 +83271,7 @@ function vegUI(Z) {
     { const tri = d.querySelector('.tri'); if (tri) { tri.style.gridTemplateColumns = '1fr'; const h = document.createElement('div'); h.textContent = 'SHOW'; h.style.cssText = 'color:#7a8294;font-size:13px;margin-top:6px'; L.querySelector('#vgVis').after(h, tri); } }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) L.addEventListener(ev, e => e.stopPropagation());
     setInterval(() => { if (window.__vgProbing) return; const c = VG().cost(), n = Math.max(1, fr); fpsEl.textContent = fr + ' fps'; L.querySelector('#vgCost').textContent = `frame ${((c.fr || 0) / n).toFixed(1)} ms\nstep ${(c.step / n).toFixed(2)} ms\ndraw ${(c.draw / n).toFixed(2)} ms\n${(c.n / n).toFixed(0)} plants a frame`; fr = 0; }, 1000);
-    setInterval(() => { const p = FL().paused; ps.hidden = !p; const pb = d.querySelector('.pz'); pb.classList.toggle('on', p); pb.textContent = p ? 'RESUME' : 'PAUSE'; }, 150);
+    { const pb = d.querySelector('.pz'); NSKY.editor.TUNE.panel(ps); NSKY.editor.TUNE.when(ps, () => FL().paused); NSKY.editor.TUNE.onSync(() => { if (!pb.isConnected) return; const p = FL().paused; pb.classList.toggle('on', p); pb.textContent = p ? 'RESUME' : 'PAUSE'; }); }   // (PAUSED: the panels' one system)
   }
   /* ---- THE FOLIAGE EDITOR (user Nov 3 21:36: "a foliage editor where I define the polys and the plane they belong to ... start with these
      ones as a template ... click on the palm tree, it opens the 2D editor ... mark them as leaves or as trunk, and then save"; 21:43 the polys
@@ -83280,7 +83304,7 @@ function vegUI(Z) {
     feDraw();
   }
   const feLivePush = () => { if (FE && FE.live) VG().fol.preview(FE.key, feShape()); };   // (the live plant: the shapes as the editor holds them now)
-  function feSaveState() { if (!FE) return; const d = feDirty(), all = window.__vgDirtyAll ? window.__vgDirtyAll() : d, b = FE.q('feSave'); b.disabled = !all; FE.q('feRevert').disabled = !d; b.classList.toggle('save', all); b.title = all ? 'Keeps your changes in this browser' : 'Nothing to save'; }   // (SAVE CHANGES: every change in the editor; REVERT: this prefab's or component's)
+  function feSaveState() { if (FE) NSKY.editor.TUNE.sync(); }   // (SAVE CHANGES: every change in the editor; REVERT: this prefab's or component's - their needs at the build)   // (SAVE CHANGES: every change in the editor; REVERT: this prefab's or component's)
   const feDirty = () => !!FE && FE.clean != null && JSON.stringify(feShape()) !== FE.clean;
   // a switch: with changes not saved, first SAVE / DON'T SAVE / CANCEL (DON'T SAVE keeps them here, unsaved - the scene shows what's saved)
   function feAsk(then) {
@@ -83312,7 +83336,7 @@ function vegUI(Z) {
 #feRoot .bar{display:flex;flex-wrap:wrap;gap:6px;padding:var(--below-bar,8px) max(8px,env(safe-area-inset-right,0px)) 8px max(8px,env(safe-area-inset-left,0px));background:#0f1420;border-bottom:1px solid #2c3850;align-items:center}
 #feRoot .bot{border-top:1px solid #2c3850;border-bottom:0;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
 #feRoot button,#feRoot select{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:46px;padding:8px 12px;touch-action:manipulation}
-#feRoot button:disabled{opacity:0.35}#feRoot button.on{background:#2a3a1e;border-color:#6a9a3a}#feRoot button.save{background:#3a5a1e;border-color:#9fd36a;color:#fff}#feRoot .sep{width:1px;align-self:stretch;background:#2c3850;margin:0 4px}
+#feRoot button.on{background:#2a3a1e;border-color:#6a9a3a}#feRoot button.save{background:#3a5a1e;border-color:#9fd36a;color:#fff}#feRoot .sep{width:1px;align-self:stretch;background:#2c3850;margin:0 4px}
 #feRoot .tip{color:#ffd9a0;flex:1 1 220px}#feRoot .lbl{color:#9fd36a;align-self:center;margin:0 2px 0 6px}</style>
 <div class="bar"><button id="feGroup" title="Back to the group editor: all the plants on their decks">GROUP EDITOR</button><button id="feEdP" data-ed="prefab" title="Pick the prefab on its own: the trunk with its leaves, each leaf's modifier">PREFAB EDITOR</button><button id="feEdC" data-ed="comp" title="Edit one component: the trunk, or the leaf every frond is made of">COMPONENT EDITOR</button><span class="sep"></span>
 <select id="feKind" title="Pick the prefab"></select><input id="feName" title="Pick the prefab's name" style="font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:46px;padding:0 10px;width:150px"><button id="feNew" title="Makes a new prefab, empty or copied from this one">NEW PREFAB</button><button id="feDelP" title="Deletes this prefab (only ones you made)">DELETE PREFAB</button><select id="feCompSel" title="Pick the component"></select><input id="feCName" title="Pick the component's name" style="font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:46px;padding:0 10px;width:170px"><button id="feNewC" title="Adds a new component: a leaf, a trunk or a puff">NEW COMPONENT</button><button id="feDelC" title="Deletes this component (only when no prefab uses it)">DELETE COMPONENT</button><span class="lbl" id="fePShowL">SHOW:</span><button id="feWireT" class="on" title="Shows the lines, handles and outlines. Off: just the plant">WIRE</button><button id="feMaskT" title="Shows the plant as the game draws it, in the world">MASK</button><button id="feWorldT" title="Shows the plant moving in the world (wind, blasts). Off: it holds still">WORLD</button><button id="fePBg" title="The picture behind the prefab">BG IMAGE</button><button id="fePBgI" title="Puts a picture behind the prefab to build it to">IMPORT BG IMAGE</button><label title="The background colour while you edit" style="display:inline-flex;align-items:center;gap:6px;min-height:46px;padding:0 8px;border:1px solid #2c3850;border-radius:6px;background:#1a2234;color:#9fd36a">BG<button id="feBgC" style="width:40px;min-height:30px;height:30px;padding:0;border:1px solid #2c3850;border-radius:5px"></button></label><input type="file" id="fePBgF" accept="image/*" hidden><span class="sep"></span>
@@ -83322,6 +83346,23 @@ function vegUI(Z) {
 <div class="bar bot" id="feOps"></div>`;
       Z.put(root);
       const q = id => root.querySelector('#' + id);
+      // (the panels' one system - sky/90-editor.js, user Nov 20 11:00: "Should not all be under the same system and logic?") what shows and what can
+      // act, from the editor's state: the PREFAB EDITOR's own bar, the COMPONENT EDITOR's own, a seabed shape's (SSE.on) - only the list, the tabs
+      // and SAVE CHANGES; their needs
+      { const T = NSKY.editor.TUNE, comp = () => FE.ed === 'comp', sh = () => SSE.on, W = (id, f) => { if (q(id)) T.when(q(id), f); };
+        T.panel(root);
+        W('feOps', () => !sh()); W('feComp', () => false);
+        W('feCompBar', () => !sh() && comp());
+        for (const id of ['feMaskT', 'feWorldT', 'feWireT']) W(id, () => !sh() && !comp() && !!FE.build);
+        W('feKind', () => sh() || !comp());
+        for (const id of ['feName', 'feNew', 'feDelP', 'fePShowL', 'fePBg', 'fePBgI']) W(id, () => !sh() && !comp());
+        for (const id of ['feCompSel', 'feCName', 'feNewC', 'feDelC']) W(id, () => !sh() && comp());
+        for (const id of ['feUndo', 'feRevert']) W(id, () => !sh());
+        T.need(q('feDelP'), () => !/^cp-/.test(FE.key)); T.need(q('fePBg'), () => !!(FE.pbg && FE.pbg[FE.key]));
+        T.need(q('feDelC'), () => { const cur = feCurComp(); return !!cur && VG().comp.list().some(c => c.id === cur); });
+        T.need(q('feSave'), () => window.__vgDirtyAll ? window.__vgDirtyAll() : feDirty()); T.need(q('feRevert'), () => feDirty());
+        T.need(q('feUndo'), () => { const st = FE.undoM && FE.undoM.get(feUKey()); return !!(st && st.length > 1); });
+        T.onSync(() => { if (!FE || FE.root.style.display === 'none') return; const all = window.__vgDirtyAll ? window.__vgDirtyAll() : feDirty(), b = q('feSave'); b.classList.toggle('save', all); b.title = all ? 'Keeps your changes in this browser' : 'Nothing to save'; }); }
       FE = { root, cv: q('feCv'), lv: 'p', sel: -1, vpt: null, esel: null, newPts: null, pic: true, zoom: 1, panX: 0, panY: 0, key: null, polys: [], q };
       // (12:42: "a Background color at the top so we can change it to see different colors while editing a tree") the editors' background, kept in this browser
       { let c0 = '#121822'; try { c0 = localStorage.getItem('vg_febg') || c0; } catch (e) { } FE.bgCol = c0; const ci = q('feBgC'), qc = { c: c0 }; ci.style.background = c0; ci.onclick = () => feColPick(qc, ci, () => { FE.bgCol = qc.c; try { localStorage.setItem('vg_febg', qc.c); } catch (e) { } feDraw(); }); }
@@ -83432,7 +83473,6 @@ function vegUI(Z) {
       // (user Nov 4 10:48: "There should be a UNDO on each Editor") each change kept (a stack for each prefab / component and mode); UNDO back one
       q('feUndo').onclick = () => feUndo();
       for (const ev of ['pointerup', 'change', 'click']) root.addEventListener(ev, () => setTimeout(feMark, 0));
-      setInterval(() => { if (FE && FE.root.style.display !== 'none') { const b = FE.q('feUndo'), st = FE.undoM && FE.undoM.get(feUKey()); b.disabled = !(st && st.length > 1); } }, 300);
       q('feRevert').onclick = () => { const ed = FE.ed, mode = FE.mode; feLoad(FE.key); if (ed === 'comp') { feEd('comp'); if (mode === 'leaf') feComp('leaf'); } FE.clean = JSON.stringify(feShape()); feTip('Back to what was saved'); feSaveState(); };
       // (23:16: "Save button should 'toggle' when pressed. Its always green") SAVE and REVERT lit only with changes not saved
       setInterval(() => { if (FE && FE.root.style.display !== 'none') feSaveState(); }, 400);
@@ -83638,7 +83678,7 @@ function vegUI(Z) {
   function feCompOpts() { const sel = FE.q('feCompSel'); if (FE.ed !== 'comp') return; const L = VG().comp.list(), cur = feCurComp(); sel.innerHTML = '';
     const KD = [['trunk', 'TRUNKS'], ['leaf', 'LEAVES'], ['puff', 'PUFFS'], ['rock', 'ROCKS'], ['flower', 'FLOWERS']].sort((a, b) => feAZ(a[1], b[1]));
     for (const [kd, lab] of KD) { const it = L.filter(C => kd === 'rock' ? C.rock : kd === 'flower' ? C.flower : C.kind === kd && !C.rock && !C.flower).map(C => [C.id, C.name]); if (it.length) sel.appendChild(feGroup(lab, it)); }
-    sel.value = cur; const C = L.find(c => c.id === cur); { const nm = FE.q('feCName'); if (nm && document.activeElement !== nm) nm.value = C ? C.name : ''; } FE.q('feDelC').disabled = !C; FE.q('feDelC').title = 'Deletes this component (only when no prefab uses it)'; }
+    sel.value = cur; const C = L.find(c => c.id === cur); { const nm = FE.q('feCName'); if (nm && document.activeElement !== nm) nm.value = C ? C.name : ''; } FE.q('feDelC').title = 'Deletes this component (only when no prefab uses it)'; }
   // (user Nov 4 08:24: "When you are seeing a Component, on the left ... a list of all Prefabs that use that Component"; "When you are seeing a Prefab ...
   // a list of all the Sets that use that Prefab") - each a button: the prefab opened, the set shown in the GROUP EDITOR
   function feUses() {
@@ -83668,9 +83708,8 @@ function vegUI(Z) {
     G['SEABED SHAPES'] = seaShapes().map(S => ['ss:' + S.n, S.name]);
     for (const c of Object.keys(G).sort(feAZ)) if (G[c].length) s.appendChild(feGroup(c, G[c]));
     s.value = SSE.on && SSE.S ? 'ss:' + SSE.S.n : (v && !/^ss:/.test(v) ? v : FE.key); }
-  // a seabed shape in this editor: the plant's own buttons and bottom bar away while it's open, the tabs, the list and SAVE CHANGES kept
-  const FE_PLANT_IDS = ['feName', 'feNew', 'feDelP', 'feCompSel', 'feCName', 'feNewC', 'feDelC', 'fePShowL', 'feWireT', 'feMaskT', 'feWorldT', 'fePBg', 'fePBgI', 'feUndo', 'feRevert', 'feCompBar', 'feComp'];
-  function feShapeBars() { if (!FE) return; FE.q('feOps').style.display = SSE.on ? 'none' : ''; if (!SSE.on) return; for (const id of FE_PLANT_IDS) { const el = FE.q(id); if (el) el.style.display = 'none'; } FE.q('feKind').style.display = ''; FE.q('feEdP').classList.add('on'); FE.q('feEdC').classList.remove('on'); }
+  // a seabed shape in this editor: the plant's own buttons and bottom bar away while it's open, the tabs, the list and SAVE CHANGES kept (the whens at its build)
+  function feShapeBars() { if (!FE) return; NSKY.editor.TUNE.sync(); if (!SSE.on) return; FE.q('feEdP').classList.add('on'); FE.q('feEdC').classList.remove('on'); }   // (what shows with a seabed shape: the whens at its build)
   function feShapeOpen(n) {
     if (FE.live) { FE.pMask = FE.pWorld = false; feLiveSet(); } FE.ed = 'prefab';
     sseOpen(FE.root, n, { dlg: vgDlg, bg: () => FE.bgCol, saved: () => feSaveState(), kinds: () => { feKinds(); feShapeBars(); },
@@ -83681,14 +83720,13 @@ function vegUI(Z) {
   // which editor and what it shows: the bars, the components a prefab has
   function feBars() {
     const q = FE.q, comp = FE.ed === 'comp';
-    q('feEdP').classList.toggle('on', !comp); q('feEdC').classList.toggle('on', comp); q('feCompBar').style.display = comp ? 'contents' : 'none';
-    for (const id of ['feMaskT', 'feWorldT']) q(id).style.display = comp || !FE.build ? 'none' : ''; q('feMaskT').classList.toggle('on', !!FE.pMask); q('feWorldT').classList.toggle('on', !!FE.pWorld);
+    q('feEdP').classList.toggle('on', !comp); q('feEdC').classList.toggle('on', comp);
+    q('feMaskT').classList.toggle('on', !!FE.pMask); q('feWorldT').classList.toggle('on', !!FE.pWorld);
     // (user Nov 4 08:24: the COMPONENT EDITOR "should not display the Prefab dropdown nor the rename. Must have a NEW Component") each editor its own
-    for (const id of ['feKind', 'feName', 'feNew', 'feDelP']) q(id).style.display = comp ? 'none' : ''; for (const id of ['feCompSel', 'feCName', 'feNewC', 'feDelC']) q(id).style.display = comp ? '' : 'none'; q('feComp').style.display = 'none';
-    q('feDelP').disabled = /^cp-/.test(FE.key); q('feDelP').title = 'Deletes this prefab (only when no biome uses it on a deck)';
+    q('feDelP').title = 'Deletes this prefab (only when no biome uses it on a deck)';
     feCompOpts(); feUses();
-    for (const id of ['fePShowL', 'fePBg', 'fePBgI']) q(id).style.display = comp ? 'none' : ''; q('fePBg').disabled = !(FE.pbg && FE.pbg[FE.key]); q('fePBg').classList.toggle('on', !!(FE.pbgOn && FE.pbg && FE.pbg[FE.key]));    // (08:32: no EXPORT WIREFRAME in the prefab editor)
-    q('feNew').style.display = comp ? 'none' : ''; q('feWireT').style.display = comp || !FE.build ? 'none' : ''; q('feWireT').classList.toggle('on', FE.wire !== false); feSaveState();   // (22:41: NEW PREFAB the prefab editor's own)
+    q('fePBg').classList.toggle('on', !!(FE.pbgOn && FE.pbg && FE.pbg[FE.key]));    // (08:32: no EXPORT WIREFRAME in the prefab editor)
+    q('feWireT').classList.toggle('on', FE.wire !== false); feSaveState();   // (22:41: NEW PREFAB the prefab editor's own)
     q('feVec').classList.toggle('on', FE.showVec !== false); q('feLvM').classList.toggle('on', !!FE.showMask); q('feEdS').classList.toggle('on', !FE.editM); q('feEdM').classList.toggle('on', !!FE.editM);
     for (const b of FE.root.querySelectorAll('[data-lv]')) b.classList.toggle('on', b.dataset.lv === FE.lv);
     const c = q('feComp'); c.innerHTML = ''; for (const [v, lab] of FE.build ? [['trunk', 'TRUNK'], ['leaf', 'LEAF'], ['puff', 'PUFF']] : FE.leaf ? [['leaf', 'LEAF']] : [['shape', 'SHAPE']]) { const o = document.createElement('option'); o.value = v; o.textContent = lab; c.appendChild(o); }
@@ -83800,7 +83838,7 @@ function vegUI(Z) {
         c.onchange = () => { const C = VG().comp.list().find(q => q.id === c.value); if (!C) return; pick.set(C.key === FE.key ? undefined : C.key); feSync(); feDraw(); feLivePush(); feTip(lab + ' ' + C.name + ' - its spline and settings kept; RESET SHAPE if its vertex edits came from the one before'); };
         w.appendChild(c); bar.appendChild(w); continue; }
       if (colr) { const w = document.createElement('label'); w.style.cssText = 'display:inline-flex;align-items:center;gap:6px;min-height:46px;padding:0 8px;border:1px solid #2c3850;border-radius:6px;background:#1a2234'; w.textContent = lab; const c = document.createElement('button'), qc = { c: colr[0]() || '#806040' }; c.style.cssText = 'width:40px;min-height:30px;height:30px;padding:0;border:1px solid #2c3850;border-radius:5px;background:' + qc.c; c.onclick = () => feColPick(qc, c, () => { colr[1](qc.c); feDraw(); feLivePush(); }); w.appendChild(c); bar.appendChild(w); continue; }
-      const b = document.createElement('button'); b.textContent = name ? name() : lab; b.disabled = !can(); b.title = tipText;
+      const b = document.createElement('button'); b.textContent = name ? name() : lab; NSKY.editor.TUNE.need(b, can); b.title = tipText;
       b.onclick = () => { fn(); feSync(); feDraw(); if (tipText && !FE.newPts) { } };
       if (lab === 'CREATE' && FE.newPts) b.classList.add('on');
       bar.appendChild(b);
@@ -84027,8 +84065,8 @@ function vegUI(Z) {
     { const ol = Object.assign({ on: false, w: 1, c: '#1c2414' }, part.ol || {}), og = document.createElement('div'); og.style.cssText = 'display:grid;gap:6px;border-top:1px solid #2c3850;padding-top:8px'; box.appendChild(og);
       const setOl = ch => { for (const k of feSelParts()) { const P = fePartObj(k); if (P) P.ol = Object.assign({ on: false, w: 1, c: '#1c2414' }, P.ol || {}, ch); } feDraw(); feLivePush(); feSaveState(); feColsUI(); };
       const tg = document.createElement('button'); tg.textContent = 'OUTLINE: ' + (ol.on ? 'ON' : 'OFF'); tg.classList.toggle('on', ol.on); tg.title = 'Draws an outline around this part'; tg.style.cssText = 'min-height:36px;font-size:12px;padding:4px 6px'; tg.onclick = () => setOl({ on: !ol.on }); og.appendChild(tg);
-      const wr = document.createElement('div'); wr.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:4px'; for (const w of [1, 2, 3, 4]) { const b = document.createElement('button'); b.textContent = w + 'px'; b.title = w + ' plant pixel' + (w > 1 ? 's' : '') + ' wide'; b.disabled = !ol.on; b.classList.toggle('on', ol.on && ol.w === w); b.style.cssText = 'min-height:32px;font-size:11px;padding:2px 0'; b.onclick = () => setOl({ w }); wr.appendChild(b); } og.appendChild(wr);
-      const cb = document.createElement('button'); cb.style.cssText = 'min-height:30px;padding:0;border:1px solid #2c3850;border-radius:5px;background:' + ol.c; cb.title = 'The outline\'s colour'; cb.disabled = !ol.on; const q = { c: ol.c, a: ol.a == null ? 1 : ol.a }; cb.onclick = () => feColPick(q, cb, () => setOl({ c: q.c, a: q.a })); og.appendChild(cb); }
+      const wr = document.createElement('div'); wr.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:4px'; for (const w of [1, 2, 3, 4]) { const b = document.createElement('button'); b.textContent = w + 'px'; b.title = w + ' plant pixel' + (w > 1 ? 's' : '') + ' wide'; NSKY.editor.TUNE.need(b, () => !!ol.on); b.classList.toggle('on', ol.on && ol.w === w); b.style.cssText = 'min-height:32px;font-size:11px;padding:2px 0'; b.onclick = () => setOl({ w }); wr.appendChild(b); } og.appendChild(wr);
+      const cb = document.createElement('button'); cb.style.cssText = 'min-height:30px;padding:0;border:1px solid #2c3850;border-radius:5px;background:' + ol.c; cb.title = 'The outline\'s colour'; NSKY.editor.TUNE.need(cb, () => !!ol.on); const q = { c: ol.c, a: ol.a == null ? 1 : ol.a }; cb.onclick = () => feColPick(q, cb, () => setOl({ c: q.c, a: q.a })); og.appendChild(cb); }
   }
   // the colour of a point: HSL sliders first, RGB the browser's own picker
   function feColPick(q, anchor, done) {
@@ -84419,14 +84457,18 @@ function sseBuild(host) {
   q('fit').onclick = () => { sseFit(); sseDraw(); };
   addEventListener('keydown', e => { if (!SSE.on) return; const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return; if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); sseDelPoint(); } if (e.key === 'Escape' && SSE.addHole) { SSE.addHole = false; sseBarSync(); } }, true);
   new ResizeObserver(() => { if (SSE.on) { if (!SSE.fitted && SSE.cv.clientHeight) { SSE.fitted = true; sseFit(); } sseDraw(); } }).observe(SSE.cv);
+  // what can act (the panels' one system - sky/90-editor.js; it's inside the PREFAB EDITOR's panel)
+  { const T = NSKY.editor.TUNE, sel = () => SSE.sel, S = () => SSE.S || { top: [] };
+    T.need(q('del'), () => !S().base);
+    T.need(q('delp'), () => { const s = sel(); return !!s && (s.h == null ? !(s.i === 0 || s.i === S().top.length - 1 || S().top.length <= 2) : s.i >= 0); });
+    T.need(q('delh'), () => { const s = sel(); return !!s && s.h != null; }); T.need(q('undo'), () => SSE.undo.length > 0); }
   ssePointer();
 }
 function sseBarSync() {
   const el = SSE.el; if (!el || !SSE.S) return; const q = s => el.querySelector('[data-' + s + ']'), S = SSE.S, s = SSE.sel;
-  if (document.activeElement !== q('name')) q('name').value = S.name; q('del').disabled = !!S.base;
-  q('delp').disabled = !s || (s.h == null ? s.i === 0 || s.i === S.top.length - 1 || S.top.length <= 2 : s.i < 0);
-  q('delh').disabled = !s || s.h == null; q('hole').style.background = SSE.addHole ? '#2a3a1e' : '#1a2234'; q('hole').style.borderColor = SSE.addHole ? '#6a9a3a' : '#2c3850';
-  q('h').value = Math.round(S.h); q('hv').textContent = Math.round(S.h); q('undo').disabled = !SSE.undo.length;
+  if (document.activeElement !== q('name')) q('name').value = S.name;
+  NSKY.editor.TUNE.sync(); q('hole').style.background = SSE.addHole ? '#2a3a1e' : '#1a2234'; q('hole').style.borderColor = SSE.addHole ? '#6a9a3a' : '#2c3850';
+  q('h').value = Math.round(S.h); q('hv').textContent = Math.round(S.h);
 }
 function sseDelHole(h) { if (h == null || !SSE.S.holes[h]) return; ssePush(); SSE.S.holes.splice(h, 1); SSE.sel = null; sseChanged(true); sseTip('Hole taken away'); }
 function sseDelPoint() {
@@ -84591,10 +84633,8 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   function build() {
     const st = $('style'); st.textContent = `
 #vehEd { position: fixed; inset: 0; z-index: 55; pointer-events: none; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
-#vehEd[hidden] { display: none !important; }
 #vehEd button, #vehEd select, #vehEd input[type=number] { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
 #vehEd input[type=number] { width: 5.4em; padding: 3px 4px; cursor: text; }
-#vehEd button:disabled { opacity: 0.4; cursor: default; }
 #vehEd button.on { background: #ffb347; border-color: #ffb347; color: #000; }
 #vehEd .bar, #vehEd .main, #vehEd .foot, #vehEd .ask { pointer-events: auto; }
 #vehEd.flat { background: #0b0f18; }
@@ -84603,7 +84643,6 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 #vehEd .bar .gap { flex: 1 1 0; }
 #vehEd .main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-self: flex-end; width: min(50vw, 64em); background: #0b0f18; border-left: 1px solid #2c3850; }
 #vehEd.flat .main { width: 100%; flex-direction: row; border-left: 0; }
-#vehEd .main[hidden] { display: none; }
 #vehEd .view { flex: 1 1 56%; min-width: 0; min-height: 0; position: relative; }
 #vehEd canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
 #vehEd .side { flex: 0 0 44%; overflow-y: auto; border-top: 1px solid #2c3850; background: #0f1420; padding: 8px 10px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
@@ -84641,6 +84680,14 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 <div class="main"><div class="view"><canvas></canvas></div><div class="side"></div></div>
 <div class="foot"></div>`;
     document.body.appendChild(root);
+    // (the panels' one system - sky/90-editor.js: one look, what can act from the state, one property a row)
+    { const T = NSKY.editor.TUNE, q = a => root.querySelector('[data-a=' + a + ']'); T.panel(root, '.side');
+      T.need(q('undo'), () => VED.undo.length > 0); T.need(q('redo'), () => VED.redo.length > 0);
+      T.need(q('turn'), () => !!VED.key && fam().views(art()) >= 2);
+      T.need(q('del'), () => !!made()); T.need(q('play'), () => !!(VW.in && VW.v)); T.when(q('win'), () => !!VW.in);
+      T.need(q('reset'), () => !!VED.key && JSON.stringify(vmGet(VED.key)) !== JSON.stringify(VM.def[VED.key]));
+      T.onSync(() => { if (!VEH_MODE) return; q('save').classList.toggle('on', dirty()); root.classList.toggle('flat', !VW.in);
+        q('turn').parentNode.title = !VED.key || fam().views(art()) < 2 ? 'This vehicle has no views turned toward you yet' : 'Turn the vehicle toward you to check its marks'; }); }
     VED.cv = root.querySelector('canvas'); VED.side = root.querySelector('.side'); VED.foot = root.querySelector('.foot');
     VED.sel_ = root.querySelector('[data-a=veh]'); VED.turnEl = root.querySelector('[data-a=turn]');
     list();
@@ -84668,7 +84715,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     window.addEventListener('resize', () => { if (VEH_MODE) { fit(); draw(); } });
     new ResizeObserver(() => { if (VEH_MODE && VED.P) { const r = VED.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; if (Math.abs(r.width * d - VED.cv.width) > 2 || Math.abs(r.height * d - VED.cv.height) > 2) { fit(); draw(); } } }).observe(VED.cv);
     window.addEventListener('keydown', key, true);
-    setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag && !VEH_PLAY) draw(); sync(); if (VW.in) try { edPlacedOnly(); } catch (e) { } } }, 400);   // (its test world kept clear of what the world sends out on its own - boats, planes, yachts: the editors' one way, 18-zz-photo.js)
+    setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag && !VEH_PLAY) draw(); if (VW.in) try { edPlacedOnly(); } catch (e) { } } }, 400);   // (its test world kept clear of what the world sends out on its own - boats, planes, yachts: the editors' one way, 18-zz-photo.js)
   }
   // the vehicles' list, by family (made again when one is made or removed)
   function list() {
@@ -84729,15 +84776,9 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
       vnewSave(VNEW.list.filter(q => q.id !== r.id)); vmSave(); VED.undo.length = 0; VED.redo.length = 0; VED.key = null; list(); load(vmKeys()[0]); };
   }
   const say = (name, text) => { VED.foot.innerHTML = (name ? '<b>' + name + '</b>' : '') + (text || ''); };
-  function sync() {
-    const R = VED.root; if (!R) return;
-    R.querySelector('[data-a=save]').classList.toggle('on', dirty());
-    R.querySelector('[data-a=undo]').disabled = !VED.undo.length; R.querySelector('[data-a=redo]').disabled = !VED.redo.length;
-    const n = VED.key ? fam().views(art()) : 1; VED.turnEl.disabled = n < 2; VED.turnEl.parentNode.title = n < 2 ? 'This vehicle has no views turned toward you yet' : 'Turn the vehicle toward you to check its marks';
-    R.querySelector('[data-a=del]').disabled = !made();
-    R.querySelector('[data-a=play]').disabled = !(VW.in && VW.v); R.querySelector('[data-a=win]').hidden = !VW.in; R.classList.toggle('flat', !VW.in);
-    R.querySelector('[data-a=reset]').disabled = !VED.key || JSON.stringify(vmGet(VED.key)) === JSON.stringify(VM.def[VED.key]);
-  }
+  // what the panel shows from the state now (the panels' one system - its needs and names, registered as it's built)
+  function sync() { NSKY.editor.TUNE.sync(); }
+
 
   // ---- a vehicle in: its row as marks on its side picture
   function load(key, keepSel) {
