@@ -12965,8 +12965,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1158;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 01:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1159;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 01:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70257,8 +70257,7 @@ function storyPark(p, id) {
   v.berth = o.id; v.spot = best; v.x = storySpotX(o, best); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
   if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
   if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
-  setOrder(telegraphs[p], 3); civRelease(p); civUI[p] = true;
-  netAboard(v);                                          // (tied up: the net aboard, its catch turned to coins - 50-story-net.js)
+  setOrder(telegraphs[p], 3); netAboard(v); storyCarryOut(v); civRelease(p); civUI[p] = true;   // (tied up: the net aboard, its catch landed into the hold - 50-story-net.js -, then carried out with you - 50-zz-story-swap.js)
   storyGo(p, o.id, true); sound('click', gunCtl[p]);   // (tied up at a structure of yours: saved there - storyGo)
 }
 ACTS.storyBoard = (p, sid) => storyBoard(p, sid);
@@ -73438,6 +73437,10 @@ function storyArrive(id) {
 }
 // the vehicle you leave: it stays where it is - stopped by a structure that takes it, it's tied up there (at its nearest free spot,
 // where it stands: refuelled, mended, its catch sold - as storyPark), else left as it is
+// (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car" - the characters' rule, folkCarry) out of a vehicle,
+// what it holds is carried - in your inventory (story.inv); into the next one, loaded - your own INVENTORY goods (medicine) stay with you
+function storyCarryOut(v) { if (!v || !STORY) return; for (const [k] of CARGO_KINDS) { const n = cargoN(v, k); if (n > 0) { cargoPut(v, k, 0); storyInvAdd(k, n); } } }
+function storyCarryIn(v) { if (!v || !STORY) return; for (const [k] of CARGO_KINDS) { const n = storyInvN(k); if (n > 0 && !cargoInv(k)) { cargoAdd(v, k, n); story.inv[k] = 0; } } }
 function storyLeave(p, v) {
   const o = storyParks(v).sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0];
   if (o) {
@@ -73449,6 +73452,7 @@ function storyLeave(p, v) {
       netAboard(v); storyArrive(o.id);
     }
   }
+  if (typeof netAboard === 'function') netAboard(v); storyCarryOut(v);   // (the net's catch landed, then what it holds goes with you - 50-zzzzz-story-folk.js)
   v.drv = 0; v.vDrive = 0; v.cin = 0;
   civRelease(p);
 }
@@ -73458,6 +73462,7 @@ function storyEnterVeh(p, v) {
   if (c.mode !== 'civ' && c.mode !== 'dock') { c.mode = 'dock'; c.watch = null; c.look = null; }
   if (v.plane && v.state === 'parked' && !storyPlaneOut(v)) return false;   // (out of its hangar onto the runway)
   v.berth = null; boardCiv(p, v); v.drv = 0; v.vDrive = 0; v.cin = 0; setOrder(telegraphs[p], 3);
+  storyCarryIn(v);                                       // (what you carry, loaded)
   return true;
 }
 // the swap (a command: the same on every screen)
@@ -79154,8 +79159,13 @@ function folkTie(v, T) {
   const sp = storyFreeSpot(o, v); if (sp < 0) return;
   v.berth = o.id; v.spot = sp; v.x = storySpotX(o, sp);
 }
-// out of a vehicle on the way to deliver: the good goes with them, into the next vehicle (S.carry)
-function folkCarry(S, v, J) { if (!J || J.do !== 'deliver') return; const n = cargoN(v, J.k); if (n > 0) { cargoPut(v, J.k, 0); S.carry = { k: J.k, n: (S.carry && S.carry.k === J.k ? S.carry.n : 0) + n }; } }
+/* (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car ... the same universal system for all characters")
+   GOODS GO WITH WHOEVER STEPS OUT: out of a vehicle, what it holds is carried - a character's in hand (S.carry: { good: n }), the player's in
+   their inventory (story.inv - storyLeave, 50-zz-story-swap.js); into the next vehicle it's loaded (the player's own INVENTORY goods - medicine -
+   stay with them); on foot at a place it's handed over (DELIVER, SELL). */
+const folkHand = S => { const C = S.carry; if (!C) return null; if (C.k != null) { S.carry = { [C.k]: C.n }; } return S.carry; };   // (an older save's one good: as the list)
+function folkCarry(S, v) { for (const [k] of CARGO_KINDS) { const n = cargoN(v, k); if (n > 0) { cargoPut(v, k, 0); const H = folkHand(S) || (S.carry = {}); H[k] = (H[k] || 0) + n; } } }
+function folkLoad(S, v) { const H = folkHand(S); if (!H) return; for (const k in H) if (H[k] > 0) cargoAdd(v, k, H[k]); S.carry = null; }
 /* ---- STEALING (user Nov 19 18:15: "The way other vehicles will work is that you can steal them. So it says steal. It's only available to
    steal if no one else is driving it. The owner of the vehicle will be stuck in this other vehicle waiting for the arrival. Above their
    head ... a skull and a thunder and an exclamation point, showing that they're pissed"). A character's vehicle is never for sale: its
@@ -79312,24 +79322,24 @@ function folkPlan(c, S) {
     }
     // home: put away where it's taken nearest home, then a hop
     if (!J) {
-      if (here && folkAtPlace(here, T)) { S.in = 0; S.at = T.o.id; S.j = -1; folkLog({ t: 'home', who: c.id }); return; }
+      if (here && folkAtPlace(here, T)) { folkCarry(S, v); S.in = 0; S.at = T.o.id; S.j = -1; folkLog({ t: 'home', who: c.id }); return; }
       if (can(v)) { const P = folkPark(v, T.x); if (P && P !== here && folkAtPlace(P, T)) { folkGo(v, P.x, P); return; } }
     }
     // this vehicle can't get there: to one of theirs that can, and out of this one there
     // (a place this one ties up at, from which the other is reached by hops)
     const u = V.find(q => q !== v && can(q) && q.berth != null && (() => { const P = folkPark(v, q.x); return P && folkHops(P, slStr(q.berth)); })());
-    if (u) { const P = folkPark(v, u.x); if (P && P !== here) { folkGo(v, P.x, P); return; } if (here) { folkCarry(S, v, J); S.in = 0; S.at = here.id; return; } }
+    if (u) { const P = folkPark(v, u.x); if (P && P !== here) { folkGo(v, P.x, P); return; } if (here) { folkCarry(S, v); S.in = 0; S.at = here.id; return; } }
     if (folkWait(c, S, V)) return;                                          // (stuck in this one, waiting for the other)
     if (!J) { if (!wasStuck) folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.stuck = 1; S.nx = time + 5; S.j = jobs.length; return; }   // (no way home from here: they stay in it, and look again now and then)
     folkLog({ t: 'skip', who: c.id, verb: J.do, at: T.o ? slPlaceName(T.o) : 'THE FISH AREA' }); S.j++; return;                                                          // (no way there: that job left)
   }
   const P = slStr(S.at); if (!P) { S.at = (stHome(c) || {}).id || 0; return; }
-  if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; folkLog({ t: 'home', who: c.id }); return; } if (J.do === 'deliver' && S.carry && S.carry.k === J.k) { stAdd(T.o, J.k, S.carry.n); S.carry = null; } S.j++; return; }   // (on foot: what they carry handed over; nothing to collect it in)
+  if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; folkLog({ t: 'home', who: c.id }); return; } const H = folkHand(S); if (J.do === 'deliver' && H && H[J.k] > 0) { const n = folkN(J, H[J.k]); stAdd(T.o, J.k, n); if (J.pay > 0) S.k = (S.k || 0) + cargoCoins(J.k, n); H[J.k] -= n; if (!Object.values(H).some(q => q > 0)) S.carry = null; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); } S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
   const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkHops(B, slStr(u.berth)); })()));
-  if (go) { if (FOLK.st[go.sid]) { const st = Object.assign({}, FOLK.st); delete st[go.sid]; FOLK.st = st; } S.in = go.sid; S.at = 0; if (S.carry) { cargoAdd(go, S.carry.k, S.carry.n); S.carry = null; } return; }   // (what they carried, loaded)
+  if (go) { if (FOLK.st[go.sid]) { const st = Object.assign({}, FOLK.st); delete st[go.sid]; FOLK.st = st; } S.in = go.sid; S.at = 0; folkLoad(S, go); return; }   // (what they carried, loaded)
   if (folkWait(c, S, V)) return;                                            // (their vehicle taken: they wait for it)
   if (!J) { folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.j = -1; return; }   // (no way home: they stay)
   folkLog({ t: 'skip', who: c.id, verb: J.do, at: T.o ? slPlaceName(T.o) : 'THE FISH AREA' }); S.j++;                                                                   // (no way to that job: the next)
