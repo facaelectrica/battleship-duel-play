@@ -7709,7 +7709,7 @@ const DW_BAKED = {
    },
    {
     "n": "PEAK",
-    "t": 21,
+    "t": 9,
     "p": [
      [
       -1,
@@ -7783,7 +7783,7 @@ const DW_BAKED = {
    },
    {
     "n": "PEAK HELD",
-    "t": 14,
+    "t": 6,
     "p": [
      [
       -1,
@@ -12950,8 +12950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1132;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 20:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1134;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 20:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72692,6 +72692,9 @@ function vehLookOf(sv) {
    - A structure prefab: its kind (what the code does with it), its picture and what it is (PF_KEYS). A placed copy (STRS, its
      o.pf) takes these from its prefab - copied onto it (pfApply), so the game reads a copy as it always did; the copy's own:
      where it is, FLIP, OWNER, CURRENT, its LENGTH / HEIGHT and what starts at each spot (50-zz-struct.js strSync).
+   - Its PLANTS (pl - user Nov 19 19:20: "a building also has flowers and plants, not just a landscape"): the hand-placed plants' records with
+     their place along it from its middle (dx) instead of a place in the world - every copy has them, mirrored with its FLIP, moving with it
+     (laid by hplLay, edited as any hand-placed plant: 50-zzzz-hand-plants.js).
    - Every kind has its own prefab ('k:<kind>', what SPAWN made of it before), and the variants the old switches made (a LARGE
      hangar, a PIER dock, a LIGHTHOUSE tower). A copy from before prefabs gets the prefab its properties match, made if there is
      none ('m' + a hash of them: the same in every browser, so nothing needs saving until a prefab is edited).
@@ -72699,15 +72702,15 @@ function vehLookOf(sv) {
      STR_VEHS as its own type, 'vp<n>', so a spot's list and the game take it as any other).
    Kept in bd_prefabs - not a world key: both worlds use the same prefabs (and a SNAPSHOT carries them, WORLD_PACK.game).
    ================================================================ */
-const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n'];
+const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl'];
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
 function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
-const pfClone = v => Array.isArray(v) ? v.slice() : v;
-const pfSig = o => JSON.stringify(pfFields(o.k).map(q => o[q] === undefined ? null : o[q]));
+const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v;   // (a list of records - its PLANTS: each its own)
+const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl').map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
 // the kinds' own prefabs and the old switches' variants: what SPAWN made of each before
 function pfBases() {
   const L = [];
@@ -72767,7 +72770,7 @@ function pfEdited(p, held) {
   pfSave(); strSave(); if (!held) strSync();
 }
 // a NEW structure prefab: a copy of the one picked, its own id and name
-function pfNewS(from) { const p = Object.assign({}, from, { id: 'p' + (++PREFABS.next), name: pfFreeName(from.name), base: false }); for (const q of PF_KEYS) if (Array.isArray(p[q])) p[q] = p[q].slice(); pfAllS().push(p); pfSave(); return p; }
+function pfNewS(from) { const p = Object.assign({}, from, { id: 'p' + (++PREFABS.next), name: pfFreeName(from.name), base: false }); for (const q of PF_KEYS) if (Array.isArray(p[q])) p[q] = pfClone(p[q]); pfAllS().push(p); pfSave(); return p; }
 const pfCopies = p => STRS.filter(o => o.pf === p.id).length;
 // ---- vehicle prefabs: the vehicle types, and NEW ones made from one (in STR_VEHS as their own types)
 function pfVehRegister() {
@@ -74220,7 +74223,7 @@ function strFill() {
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PROPERTIES'));
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; q.title = 'Which prefab this is (edit in PREFABS)';
     for (const p of pfSorted().filter(p => p.k === o.k)) { const z = document.createElement('option'); z.value = p.id; z.textContent = p.name; q.appendChild(z); }
-    q.value = o.pf; q.onchange = () => { const p = pfGet(q.value); if (!p) return; o.pf = p.id; pfApply(o, p); if (strTakes(o)) dockRefit(o); strSave(); strSync(); };
+    q.value = o.pf; q.onchange = () => { const p = pfGet(q.value); if (!p) return; o.pf = p.id; pfApply(o, p); if (strTakes(o)) dockRefit(o); strSave(); if (typeof hplChanged === 'function') hplChanged(); strSync(); };   // (its plants are the new prefab's - laid again)
     const lp = el('label', '', 'PREFAB'); lp.title = 'Which prefab this is (edit in PREFABS)'; r.append(lp, q); c.appendChild(r); }
   const sw = (lab, key, f, tip, on = () => o[key]) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(on() ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); if (f) f(); }); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, t); c.appendChild(r); };
   // TYPE (was USE - user Nov 5 09:04: "lets call it TYPE ... just below Prefab and it should say what each type does"): what the copy is for in
@@ -74248,6 +74251,7 @@ function strFill() {
     else { const E = pierLandEnd(o); sl(c, 'LENGTH', 'len', 60, 900, ' M', PIER_M, refit, 'Pier length, metres'); const i = c.lastChild.querySelector('input'), on = i.oninput; i.oninput = () => { on(); o.x = E - pierDir(o) * pierLenOf(o) / 2; strSave(); }; }   // (the harbour pier: its land end kept where it is - at its hangar's quay; REFRESH builds it)
   }
   U.box.appendChild(c);
+  { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
   U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js)
   U.box.appendChild(stockBox(el, U.selCss, o, strSave));   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
   // (Nov 7, user: "select any structure and choose what they sell if they have the market property") a market's SELLS: each kind of cargo on or off
@@ -74725,7 +74729,7 @@ const UNDO_KEPT = {
   bd_weather_areas: () => { WXA = wxaFrom(lsJ('bd_weather_areas', null)); WXE.sel = clamp(WXE.sel || 0, 0, WXA.areas.length - 1); wxaSync(); },
   bd_plants: () => { HPL = lsJ('bd_plants', []); HPE.sel = []; if (land.props) rigReplant(); },
   bd_markers: () => { MARKS = lsJ('bd_markers', []); MKE.sel = []; mkListSync(); },   // (the editor's markers - 50-zzzz-markers.js)
-  bd_prefabs: () => { PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, lsJ('bd_prefabs', {})); PF_S = null; pfVehRegister(); pfSync(); },
+  bd_prefabs: () => { PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, lsJ('bd_prefabs', {})); PF_S = null; pfVehRegister(); pfSync(); if (land.props) rigReplant(); },   // (a building's plants - its prefab's: laid again, 50-zzzz-hand-plants.js)
   bd_prices: () => { STORY_PRICES = lsJ('bd_prices', {}); pfSync(); },
   bd_story_zoom: () => { STORY_ZW = lsJ('bd_story_zoom', {}); pfSync(); },
   bd_vtune: () => { vtuneApply(lsJ('bd_vtune', {})); vtunePush(); },
@@ -75516,7 +75520,7 @@ function objSpawn() {
   else vehSpawn({ sv: id });
   strSync(); vehSync(); wedSync();
 }
-const seaNames = () => { const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); return [...MKE.sel.filter(id => MARKS.some(r => r.id === id)).map(id => MARKS.find(r => r.id === id)).map(mkName), ...HPE.sel.filter(id => HPL.some(r => r.id === id)).map(() => 'PLANT'), ...BGE.sel.filter(id => BGS.some(r => r.id === id)).map(() => 'BACKGROUND'), ...SEAPICK.krakens.filter(id => KRAKENS.some(k => k.rid === id)).map(id => 'KRAKEN ' + (KRAKENS.findIndex(k => k.rid === id) + 1)), ...SEAPICK.wrecks.filter(id => pirateWrecks.some(w => w.k === id)).map(id => 'PIRATE WRECK ' + (pirateWrecks.findIndex(w => w.k === id) + 1)), ...(a ? [NAT_KINDS[a.k].lab] : [])]; };
+const seaNames = () => { const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); return [...MKE.sel.filter(id => MARKS.some(r => r.id === id)).map(id => MARKS.find(r => r.id === id)).map(mkName), ...(A => HPE.sel.filter(id => A.some(r => r.id === id)))(HPE.sel.length ? hplAll() : []).map(() => 'PLANT'), ...BGE.sel.filter(id => BGS.some(r => r.id === id)).map(() => 'BACKGROUND'), ...SEAPICK.krakens.filter(id => KRAKENS.some(k => k.rid === id)).map(id => 'KRAKEN ' + (KRAKENS.findIndex(k => k.rid === id) + 1)), ...SEAPICK.wrecks.filter(id => pirateWrecks.some(w => w.k === id)).map(id => 'PIRATE WRECK ' + (pirateWrecks.findIndex(w => w.k === id) + 1)), ...(a ? [NAT_KINDS[a.k].lab] : [])]; };
 // (user Nov 3 08:37: "I decide if it has a treasure or not, if I can flip it or not") a picked wreck: which of the four pictures,
 // FLIP, and her chest's CARGO (none: no treasure)
 function objWreckFill(box, el, id) {
@@ -76492,43 +76496,82 @@ function drawDockRopes(x0, x1) {
    vegEntry), on whatever ground or segment top is at its x. In the editor: OBJECTS > VEGETATION spawns one in the view; a press near one
    picks it (WK 'plant', white), a drag moves it, DELETE takes it, its PREFAB / DECK / FLIP / ROTATE / PLANT SIZE / LEAF SIZE / TINT in OBJECTS.
    Not yet: ROTATE (a plant stands on its ground; a turned plant needs the plants' drawing to turn its bones - say so).
+   A STRUCTURE'S PLANTS (user Nov 19 19:20: "When we're creating a house or a building prefab ... some of them could have bushes or flowers in
+   front ... So a building also has flowers and plants, not just a landscape"): the same records on the structure's prefab (its pl - 50-zz-prefabs.js),
+   each with its place along the building from its middle (dx, world units) instead of an x. Every copy of the prefab has them, laid with the
+   hand-placed ones (hplStrs: one record per copy and plant - its id 's<copy>.<n>', so: its own seed), mirrored with the copy's FLIP, on the
+   copy's terrain layer; a copy moved or flipped lays its plants again with its ground (50-zzzz-live-edit.js). In the editor they're picked,
+   dragged and set as any hand-placed plant - what's changed goes to the prefab (hplPut) and every copy shows it. PART OF moves a plant between
+   the world and a building's prefab; a picked structure's PLANTS adds one (hplStrBox, strFill). DECK 0 stands in front of the building, DECK 1
+   behind it (the plants' passes round drawStructs).
    ================================================================ */
 let HPL = [];
 worldLoad(() => { HPL = []; try { const L = JSON.parse(localStorage.getItem('bd_plants') || 'null'); if (Array.isArray(L)) HPL = L.filter(r => r && Number.isFinite(r.id) && Number.isFinite(r.x) && typeof r.p === 'string'); } catch (e) { } });
 function hplSave() { try { if (HPL.length) localStorage.setItem('bd_plants', JSON.stringify(HPL)); else localStorage.removeItem('bd_plants'); } catch (e) { } }
 const hplNewId = () => 1 + HPL.reduce((m, r) => Math.max(m, r.id), 0);
 const hplPrefabs = () => Object.keys(VEG_PREFABS).map(k => [k, VEG_PREFABS[k].lab || k.toUpperCase()]);
+// every structure's plants as records in the world (each copy in play - in the editor every copy - with its prefab's plants)
+function hplStrs(pf) {
+  const L = [];
+  for (const o of strsUsed()) {
+    if (!Array.isArray(o.pl) || !o.pl.length || (pf && o.pf !== pf)) continue;
+    const f = o.flip ? -1 : 1;
+    o.pl.forEach((e, i) => { if (e && typeof e.p === 'string') L.push({ id: 's' + o.id + '.' + i, so: o.id, si: i, p: e.p, x: Math.round(o.x + f * (e.dx || 0)), d: e.d | 0, flip: !!e.flip !== !!o.flip, s: e.s, leaf: e.leaf, tint: e.tint, rot: (e.rot || 0) * f, lay: o.lay }); });
+  }
+  return L;
+}
+const hplAll = () => HPL.concat(hplStrs());
+const hplSeed = r => typeof r.id === 'number' ? r.id : (r.so * 31 + r.si * 7) | 0;
 // (tropPalms) each one laid as a plant of land.props: its deck's band in the drawing order, its own sizes and tint as its deck entry
-function hplLay(L = HPL) {
+function hplLay(L = hplAll()) {
   const runs = land.islRuns || [];
   for (const r of L) {
     const P = VEG_PREFABS[r.p]; if (!P || plOut(r.x)) continue;
     const lay = layOn() ? r.lay | 0 : 0, d = clamp(r.d | 0, 0, 3), isl = !lay && runs.some(([a, b]) => r.x > a && r.x < b) && landTop(r.x, 0) < frontTop(r.x) - 2;   // (lay: the terrain layer it's put on - drawn and standing on it, as the layers' own plants)
     const ve = { plantMin: r.s ?? 1, plantMax: r.s ?? 1, sizeMin: r.leaf ?? 1, sizeMax: r.leaf ?? 1, tint: r.tint ?? VTUNE.tree.tint };
-    land.props.push(Object.assign({ x: r.x, pick: (r.id * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, lay ? { lay } : {}, P.make));
+    land.props.push(Object.assign({ x: r.x, pick: (hplSeed(r) * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, lay ? { lay } : {}, P.make));
   }
 }
-// the plants laid again after an edit (the deck plants with them - rigReplant)
-const hplChanged = () => { hplSave(); if (typeof rigReplant === 'function' && land.props) rigReplant(); };
+// a structure's plant as it's set now, onto its prefab (its place along the building, its facing and tilt as the unflipped building has them) and
+// every copy of it; the prefab, or null when it's gone
+function hplPut(r) {
+  const o = strById(r.so), P = o && pfGet(o.pf), e = P && Array.isArray(P.pl) ? P.pl[r.si] : null; if (!e) return null;
+  const f = o.flip ? -1 : 1;
+  e.p = r.p; e.dx = Math.round((r.x - o.x) * f); e.d = r.d | 0; e.flip = !!r.flip !== !!o.flip;
+  for (const k of ['s', 'leaf', 'tint']) if (r[k] !== undefined) e[k] = r[k];
+  if (r.rot) e.rot = r.rot * f; else delete e.rot;
+  hplToCopies(P); HPE.pfs.add(P.id);
+  return P;
+}
+const hplToCopies = P => { for (const o of STRS) if (o.pf === P.id) o.pl = pfClone(P.pl); };
+// the plants laid again after an edit (the deck plants with them - rigReplant); a prefab whose plants changed kept, with its copies
+const hplChanged = () => {
+  hplSave();
+  if (HPE.pfs.size) { for (const id of HPE.pfs) { const P = pfGet(id); if (P) { if (P.pl && !P.pl.length) delete P.pl; hplToCopies(P); P.base = false; } } HPE.pfs.clear(); pfSave(); strSave(); }
+  if (typeof rigReplant === 'function' && land.props) rigReplant();
+};
 // (user Nov 11 23:41: "all actions in the UI editor should all be real time") one laid again where it is and as it's set now, the rest kept - as it's
 // dragged, as a slider moves (its own entry: hpl); let go, all of them as always (hplChanged)
 function hplRelay(r) {
   if (!land.props) return;
-  land.props = land.props.filter(it => it.hpl !== r.id);
-  const n0 = land.props.length; hplLay([r]);
+  let L = [r];
+  if (r.so != null) { const P = hplPut(r); if (!P) return; L = hplStrs(P.id); }   // (a structure's: every copy's, as its prefab has it now)
+  const ids = new Set(L.map(q => q.id));
+  land.props = land.props.filter(it => !ids.has(it.hpl));
+  const n0 = land.props.length; hplLay(L);
   for (let i = n0; i < land.props.length; i++) { const it = land.props[i]; Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) }); }   // (as rigReplant stands it)
   land.props.sort((a, b) => b.z - a.z); plantsRegrid();
 }
 // ---- the editor
-const HPE = { sel: [], drag: null };
+const HPE = { sel: [], drag: null, pfs: new Set() };   // (pfs: the prefabs whose plants were edited - kept by hplChanged)
 const hplOpen = () => NSKY.editor.TUNE.world();
-const hplGround = r => { if (layOn() && r.lay) return layTop(r.x, r.lay); const it = land.props && land.props.find(q => q.hp != null && Math.abs(q.x - r.x) < 0.01); return it && it.isl ? landTop(r.x, 0) : frontTop(r.x); };   // (on its terrain layer's top - lay)
+const hplGround = r => { if (layOn() && r.lay) return layTop(r.x, r.lay); const it = land.props && land.props.find(q => q.hpl === r.id); return it && it.isl ? landTop(r.x, 0) : frontTop(r.x); };   // (on its terrain layer's top - lay)
 // its terrain layer: the one whose ground is under where it's put down or dragged (layRest; none - the back ground: no lay kept)
 function hplLayAt(r, y) { const L = layOn() ? layUnder(r.x, y) : 0; if (L) r.lay = L; else delete r.lay; }
 function hplBox(r) { const P = VEG_PREFABS[r.p], w = Math.max(18, (P ? P.w : 6) * 3) * (r.s ?? 1), g = hplGround(r), h = (P && P.make.kind === 'tree' ? 110 : 40) * (r.s ?? 1); return [r.x - w, r.x + w, g - h, g + 4]; }
-function hplPick(X, Y, rr) { for (const r of HPL.slice().reverse()) { const b = hplBox(r); if (X > b[0] - rr && X < b[1] + rr && Y > b[2] - rr && Y < b[3] + rr) return r; } return null; }
+function hplPick(X, Y, rr) { for (const r of hplAll().reverse()) { const b = hplBox(r); if (X > b[0] - rr && X < b[1] + rr && Y > b[2] - rr && Y < b[3] + rr) return r; } return null; }
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !hplOpen() || onEdUI(ev) || !HPL.length) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !hplOpen() || onEdUI(ev) || !(HPL.length || STRS.some(o => o.pl && o.pl.length))) return;
   const [X, Y, rr] = vehWorld(ev), r = hplPick(X, Y, rr); if (!r) return;
   if (!WED.shift) HPE.sel = [];
   if (!HPE.sel.includes(r.id)) HPE.sel.push(r.id);
@@ -76538,7 +76581,7 @@ window.addEventListener('pointerdown', ev => {
 window.addEventListener('pointermove', ev => {
   const d = HPE.drag; if (!d || d.id !== ev.pointerId) return;
   if (!d.moved && Math.abs(ev.clientX - d.cx) < 6) return;
-  d.moved = true; const [X, Y] = vehWorld(ev); d.r.x = Math.round(d.x0 + X - d.X); hplLayAt(d.r, Y); hplRelay(d.r);
+  d.moved = true; const [X, Y] = vehWorld(ev); d.r.x = Math.round(d.x0 + X - d.X); if (d.r.so == null) hplLayAt(d.r, Y); hplRelay(d.r);   // (a structure's: on its building's layer)
   ev.stopImmediatePropagation();
 }, { capture: true, passive: true });
 const hplUp = ev => { const d = HPE.drag; if (d && d.id === ev.pointerId) { HPE.drag = null; if (d.moved) { hplChanged(); if (typeof undoCommit === 'function') setTimeout(undoCommit, 0); } ev.stopImmediatePropagation(); } };
@@ -76549,34 +76592,78 @@ function hplSpawn(p) {
   const v = cam.view[0], w = (ONEVIEW() ? bw : bw / 2) / (S * v.z), [, my] = edViewMid(), r = { id: hplNewId(), p, x: Math.round(v.l + w / 2), d: 1, flip: false, s: 1, leaf: 1, tint: VTUNE.tree.tint };
   hplLayAt(r, my); HPL.push(r); HPE.sel = [r.id]; hplChanged();
 }
-function hplDelete() { if (!HPE.sel.length) return; HPL = HPL.filter(r => !HPE.sel.includes(r.id)); HPE.sel = []; hplChanged(); }
+function hplDelete() {
+  if (!HPE.sel.length) return;
+  const gone = new Set();   // (a structure's: out of its prefab - every copy's)
+  for (const r of hplStrs()) if (HPE.sel.includes(r.id)) { const o = strById(r.so), P = o && pfGet(o.pf); if (P && P.pl && P.pl[r.si]) { gone.add(P.pl[r.si]); HPE.pfs.add(P.id); } }
+  for (const id of HPE.pfs) { const P = pfGet(id); if (P && P.pl) P.pl = P.pl.filter(e => !gone.has(e)); }
+  HPL = HPL.filter(r => !HPE.sel.includes(r.id)); HPE.sel = []; hplChanged();
+}
 // a picked one, outlined (from vehEdDraw)
 function hplEdDraw() {
   if (!hplOpen() || !HPE.sel.length) return;
   const q = Math.max(1, Math.round(2 * dpr / PIXW));
-  for (const r of HPL) if (HPE.sel.includes(r.id)) { const b = hplBox(r), X0 = Math.round(PX(b[0])), X1 = Math.round(PX(b[1])), Y0 = Math.round(PY(b[2])), Y1 = Math.round(PY(b[3])); C.fillStyle = '#ffffff'; C.fillRect(X0, Y0, X1 - X0, q); C.fillRect(X0, Y1 - q, X1 - X0, q); C.fillRect(X0, Y0, q, Y1 - Y0); C.fillRect(X1 - q, Y0, q, Y1 - Y0); }
+  for (const r of hplAll()) if (HPE.sel.includes(r.id)) { const b = hplBox(r), X0 = Math.round(PX(b[0])), X1 = Math.round(PX(b[1])), Y0 = Math.round(PY(b[2])), Y1 = Math.round(PY(b[3])); C.fillStyle = '#ffffff'; C.fillRect(X0, Y0, X1 - X0, q); C.fillRect(X0, Y1 - q, X1 - X0, q); C.fillRect(X0, Y0, q, Y1 - Y0); C.fillRect(X1 - q, Y0, q, Y1 - Y0); }
 }
 // its properties in OBJECTS (objSync): PREFAB, DECK, FLIP, ROTATE, PLANT SIZE, LEAF SIZE, TINT
 function hplFill(box, el) {
-  const L = HPL.filter(r => HPE.sel.includes(r.id)); if (!L.length) return false;
+  const L = hplAll().filter(r => HPE.sel.includes(r.id)); if (!L.length) return false;
   const r = L[0], css = OBJ.ui.css, c = el('div', 'cat'); c.appendChild(el('h4', '', L.length > 1 ? L.length + ' PLANTS' : (VEG_PREFABS[r.p] || {}).lab || 'PLANT'));
-  const all = f => { for (const q of L) f(q); hplChanged(); };
+  const all = f => { for (const q of L) { f(q); if (q.so != null) hplPut(q); } hplChanged(); };
   const sel = (lab, opts, val, set, tip) => { const row = el('div', 'row'), s = el('select'), l = el('label', '', lab); s.style.cssText = css; l.title = tip; for (const [v, t] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = t; s.appendChild(o); } s.value = val; s.onchange = () => set(s.value); row.append(l, s); c.appendChild(row); };
   const sl = (lab, k, lo, hi, st, d, tip) => { const row = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', String(+(r[k] ?? d).toFixed(2))); l.title = tip; i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = r[k] ?? d; i.oninput = () => { out.textContent = String(+(+i.value).toFixed(2)); for (const q of L) { q[k] = +i.value; hplRelay(q); } }; i.onchange = () => all(q => { q[k] = +i.value; }); row.append(l, i, out); c.appendChild(row); };
   sel('PREFAB', hplPrefabs(), r.p, v => all(q => { q.p = v; }), 'Which plant it is');
+  if (L.length === 1) hplPartOf(r, sel);
   sel('DECK', VEG_DECKS.map((L, i) => [i, 'DECK ' + i + (i === 0 ? ' (IN FRONT)' : i === 1 ? ' (COLLISION)' : '')]), r.d | 0, v => all(q => { q.d = +v; }), 'Which deck it is drawn in');
   { const row = el('div', 'row'), l = el('label', '', 'FLIP'), t = NSKY.editor.TUNE.toggle(r.flip ? 1 : 0); l.title = 'Face the other way'; t.addEventListener('input', () => all(q => { q.flip = !!+t.value; })); row.append(l, t); c.appendChild(row); }
   sl('ROTATE', 'rot', -90, 90, 1, 0, 'Tilt about its foot, degrees');
   sl('PLANT SIZE', 's', 0.2, 3, 0.05, 1, 'Plant size, times its art');
   sl('LEAF SIZE', 'leaf', 0.2, 3, 0.05, 1, 'Leaf size, times its art');
   sl('TINT', 'tint', 0, 0.6, 0.01, VTUNE.tree.tint, 'How much its colour varies');
-  c.appendChild(el('div', 'tabnote', 'Biome plants are set in the biome editor.'));
+  c.appendChild(el('div', 'tabnote', L.some(q => q.so != null) ? 'A building\'s plant: every copy of it has it. DECK 0 is in front of it, DECK 1 behind.' : 'Biome plants are set in the biome editor.'));
   box.appendChild(c); return true;
 }
 // the world's other editors' ways (50-zzz-world-ed.js WK)
+// PART OF: the world, or the prefab of a building it stands by (within HPL_NEAR of it) - moved there, its place along it kept
+const HPL_NEAR = 30 * UPM;
+function hplPartOf(r, sel) {
+  const near = strsUsed().filter(o => STR_KINDS[o.k] && !STR_KINDS[o.k].water && pfGet(o.pf)).map(o => { const B = strBox(o); return [o, Math.max(0, B.x0 - r.x, r.x - B.x1)]; }).filter(([o, d]) => d <= HPL_NEAR || o.id === r.so).sort((a, b) => a[1] - b[1]).slice(0, 4).map(([o]) => o);
+  const opts = [['', 'NONE (ONLY HERE)'], ...near.map(o => ['' + o.id, pfGet(o.pf).name])];
+  sel('PART OF', opts, r.so != null ? '' + r.so : '', v => hplMove(r, v ? strById(+v) : null), 'A building\'s plants: every copy of it has them');
+}
+function hplMove(r, o) {
+  if (o && r.so === o.id) return;
+  const rec = { p: r.p, d: r.d | 0, flip: !!r.flip, s: r.s, leaf: r.leaf, tint: r.tint, rot: r.rot || 0 };
+  if (r.so != null) { const q = strById(r.so), P = q && pfGet(q.pf); if (P && P.pl) { P.pl = P.pl.filter((e, i) => i !== r.si); HPE.pfs.add(P.id); } }   // (out of its building's prefab)
+  else HPL = HPL.filter(q => q.id !== r.id);
+  if (o) {   // (into this building's prefab: where it stands from the middle, facing as the unflipped building has it)
+    const P = pfGet(o.pf), f = o.flip ? -1 : 1; if (!P) return;
+    P.pl = (P.pl || []).concat([Object.assign({}, rec, { dx: Math.round((r.x - o.x) * f), flip: rec.flip !== !!o.flip, rot: rec.rot * f })]); HPE.pfs.add(P.id);
+    HPE.sel = ['s' + o.id + '.' + (P.pl.length - 1)];
+  } else {   // (into the world: only here)
+    const n = Object.assign({ id: hplNewId(), x: r.x }, rec); if (r.lay) n.lay = r.lay; HPL.push(n); HPE.sel = [n.id];
+  }
+  hplChanged(); objSync();
+}
+// a picked structure's PLANTS (strFill): how many its prefab has, ADD (one at its middle, in front, picked to be dragged where it goes)
+function hplStrBox(o, el, css) {
+  const P = pfGet(o.pf); if (!P || (STR_KINDS[o.k] && STR_KINDS[o.k].water)) return null;
+  const c = el('div', 'cat'), n = (P.pl || []).length; c.appendChild(el('h4', '', 'PLANTS'));
+  c.appendChild(el('div', 'tabnote', n ? n + ' ON EVERY ' + P.name : 'NONE ON ' + P.name));
+  const row = el('div', 'row'), s = el('select'), b = el('button', '', 'ADD'); s.style.cssText = css; s.title = 'Which plant to add'; b.title = 'Add a plant to every copy of this building';
+  for (const [v, t] of hplPrefabs()) { const q = document.createElement('option'); q.value = v; q.textContent = t; s.appendChild(q); }
+  if (HPE.last && VEG_PREFABS[HPE.last]) s.value = HPE.last;
+  b.onclick = () => {
+    HPE.last = s.value; P.pl = (P.pl || []).concat([{ p: s.value, dx: 0, d: 0, flip: false, s: 1, leaf: 1, tint: VTUNE.tree.tint }]); HPE.pfs.add(P.id);
+    hplChanged(); for (const id in WK) if (id !== 'plant') WK[id].clear();   // (the new plant picked alone - to be dragged where it goes)
+    HPE.sel = ['s' + o.id + '.' + (P.pl.length - 1)]; objSync(); wedSync();
+  };
+  row.append(el('label', '', 'ADD PLANT'), s, b); c.appendChild(row);
+  return c;
+}
 WK.plant = {
   tab: 'OBJECTS',
-  items: () => HPE.sel.filter(id => HPL.some(r => r.id === id)).map(() => ({ noun: 'PLANT', del: true })),
+  items: () => { const A = hplAll(); return HPE.sel.filter(id => A.some(r => r.id === id)).map(() => ({ noun: 'PLANT', del: true })); },
   clear() { if (HPE.sel.length) { HPE.sel = []; if (typeof objSync === 'function') objSync(); } },
   del() { hplDelete(); objSync(); },
   show: () => objSync(),
@@ -76683,7 +76770,7 @@ function liveShapes(B, rs, N) {
 // (a structure's fields the land reads nothing of - what starts at its spots, how many and how long, what it's for and sells, its hours, its cargo,
 // its colour in the editor, its RESTRICT, REPAIR, REFUEL, HOSPITAL, MARKET, its gun's weapon: one of them changed lays none of the ground again -
 // what they feed reads them as it's asked: STR_GEN)
-const LIVE_STR_OWN = new Set(['veh', 'n', 'maxL', 'use', 'sells', 'openH', 'closeH', 'cargo', 'home', 'hue', 'restrict', 'allow', 'rep', 'ref', 'hosp', 'market', 'takes', 'name', 'wt']);
+const LIVE_STR_OWN = new Set(['veh', 'n', 'maxL', 'use', 'sells', 'openH', 'closeH', 'cargo', 'home', 'hue', 'restrict', 'allow', 'rep', 'ref', 'hosp', 'market', 'takes', 'name', 'wt', 'pl']);   // (pl: its prefab's plants - laid again by their own edit, hplRelay)
 const lvStrGround = o => JSON.stringify(o, function (k, v) { return this === o && LIVE_STR_OWN.has(k) ? undefined : v; });   // (its own fields only)
 // -> the structures as read (liveNowStrs)
 function liveStructs(B, rs) {
