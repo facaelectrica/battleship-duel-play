@@ -12968,8 +12968,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1234;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 19:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1235;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 19:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -58889,7 +58889,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
 const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av bod flood',
-'txt: kind state','val: lake net anc ai home mag cg', ...STORY_REC, ...CIV_REC));
+'txt: kind state','val: lake net anc ai home mag cg crj', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
 defTable('jetboats', null, { cols: jetboats, skip: ['_smS'] });
@@ -79637,7 +79637,8 @@ window.addEventListener('keydown', e => {
      the gate rolling down behind it), is loaded or unloaded inside, the gate rolls up and it drives off (folkBay, 50-zzzzz-story-folk.js).
    The gate rolls up while a container's rolling through it or a car's coming out (drawStrGate). ---- */
 const ROLL_T = 2.5;                                            // (s a container takes through the door)
-const BAY_T = 3;                                               // (s a car stays in, being loaded or unloaded)
+const BAY_T = 3;
+const ROLL_WAIT = 40;                                          // (s a container rolled out waits on the rollers for a crane before it rolls back in)                                               // (s a car stays in, being loaded or unloaded)
 // the art a structure is drawn with, and its vehicle door in the world: { x0, x1, cx, w, top, foot } (null: none marked)
 const strArtOf = o => o.art || (STR_KINDS[o.k] || {}).art || null;
 function placeDoor(o) {
@@ -79660,6 +79661,7 @@ function rollWants(o, D) {
   for (const j of jetboats) {
     const K = typeof boatCrane === 'function' ? boatCrane(j) : null, Hd = K && picBoat(j).hold; if (!Hd || j.state !== 'run') continue;
     if (Math.abs(j.npcV || 0) > 2 || Math.abs(j.vDrive || 0) > 0.5 || (j.mag && j.mag.obj)) continue;   // (stopped, its magnet empty)
+    if (j.driven == null && !(j.crj && j.crj.t === 'load' && j.crj.o === o.id && !j.crj.done)) continue;            // (a character's: only while loading here - folkCrane)
     if (vehBoxes(j) >= Hd.n) continue;                                                               // (its hold full)
     const f = boatPt(j, K.post[0], K.post[1]); if (Math.abs(f[0] - D.cx) > K.jib * UPM) continue;    // (the door in its jib's reach)
     return j;
@@ -79672,7 +79674,7 @@ function stepDoors() {
     if (!placeRolls(o)) continue;
     const D = placeDoor(o); let k = rollOn(o, D);
     // set down on the rollers: in through the door, if it's a good this place keeps (anything else stays there)
-    if (k && k.where === 'rest' && k.gk && k.gn > 0 && strKeeps(o, k.gk)) { Object.assign(k, { where: 'roll', rs: o.id, rt: time, rd: 1, x: D.cx, y: D.foot - CONT_H / 2, a: 0, vx: 0, vy: 0, va: 0, on: null }); sound('anchorWinch', D.cx, 1); }
+    if (k && k.where === 'rest' && k.gk && k.gn > 0 && strKeeps(o, k.gk) && !(k.rd < 0 && k.rs === o.id && !(k.hookT > k.rt) && time - k.rt < ROLL_T + ROLL_WAIT)) {   /* (not one it's just rolled out, waiting to be lifted - unless nobody has for ROLL_WAIT) */ Object.assign(k, { where: 'roll', rs: o.id, rt: time, rd: 1, x: D.cx, y: D.foot - CONT_H / 2, a: 0, vx: 0, vy: 0, va: 0, on: null }); sound('anchorWinch', D.cx, 1); }
     if (k && k.where === 'roll') {
       const u = (time - k.rt) / ROLL_T;
       if (u >= 1 && k.rd > 0) { stAdd(o, k.gk, k.gn); folkLog({ t: 'job', who: -1, verb: 'ROLLED IN', k: k.gk, n: k.gn, at: slPlaceName(o) }); const i = containers.indexOf(k); if (i >= 0) containers.cut(i); }
@@ -79681,8 +79683,9 @@ function stepDoors() {
     }
     if (k) continue;
     // empty rollers and a ship waiting: a filled container out - the good it has most of (one that goes in a container)
-    if (!rollWants(o, D)) continue;
+    const W = rollWants(o, D); if (!W) continue;
     let g = null, gn = 0; for (const [q] of CARGO_KINDS) if (!cargoLiq(q) && stN(o, q) > gn) { g = q; gn = stN(o, q); }
+    if (W.crj && W.crj.k && stN(o, W.crj.k) > 0) { g = W.crj.k; gn = stN(o, g); }   // (a character's job's good)
     if (!g) continue;
     const n = Math.min(cargoPer(g), gn); stAdd(o, g, -n);
     k = newCont(); Object.assign(k, { ci: cargoBoxCol(g), gk: g, gn: n, sz: 1, where: 'roll', rs: o.id, rt: time, rd: -1, x: D.cx, y: D.foot - CONT_H / 2, a: 0, vx: 0, vy: 0, va: 0 });
@@ -79789,7 +79792,7 @@ function holdCatch(k, yb0) {
   for (const j of jetboats) {
     if (j.state !== 'run' || !picBoat(j) || !picBoat(j).hold) continue;
     const f = holdFloor(j, k.x); if (f === Infinity) continue;
-    const yb = k.y + CONT_H / 2; if (!(yb0 <= f + 3 && yb >= f)) continue;
+    const yb = k.y + CONT_H / 2; if (!(yb0 <= f + 3 && yb >= f - 3)) continue;   // (let go resting on it, or coming down onto it)
     if (vehRoom(j, k.gk) < 1 || vehBoxes(j) >= picBoat(j).hold.n) continue;   // (no room: it lands on her as on anything - it falls on)
     cargoAdd(j, k.gk, k.gn); k.where = 'gone'; HOLD_GONE.push(k);
     sound('impact', k.x); spawnSparks(k.x, f, 4, 80); if (k.vy > 160) shakeAt(1, k.x);
@@ -79819,6 +79822,7 @@ function stepShipCranes(dt) {
     };
     magRopeStep(M, G.head[0], G.head[1], dt, craneTag(j), { grab: M.arm, reach: MAG_GRAB + 12, floor: (x, y) => { let f = Infinity; for (const q of jetboats) if (q.state === 'run') f = Math.min(f, holdFloor(q, x)); return Math.min(f, harbourTop(x, y)); }, pick: own });
     if (M.obj) M.arm = false;
+    if (j.crj && j.driven == null) craneWork(j, dt);   // (a character working it - below)
   }
 }
 // ---- the crane drawn over her (drawPicBoat, after her picture): its post, its jib (a box boom, its sheave at the head), the rope and the magnet
@@ -79836,6 +79840,72 @@ function drawBoatCrane(j) {
   const M = j.mag;
   if (M && M.ex != null && M.n) { drawRopeLine(M.n); drawMagnet(M.ex, M.ey, M.ang || 0, !!M.obj || !!M.arm); }
   if (own) thingsEnd();
+}
+/* ---- A CHARACTER WORKING THEIR SHIP'S CRANE (user Nov 20 17:31: "everyone else, like the fishing boat or the cargo boat, are responsible also for bringing
+   the cargo to the dock" - the same crane, the same rollers as the player's). A character's COLLECT or DELIVER with a ship that has a crane, at a place
+   with rollers (placeRolls - 50-zzzzz-place-door.js), is done with the crane (folkCrane, from folkPlan): she ties up where she's taken nearest the door,
+   then her crane works on its own (crj on her row - stepShipCranes): COLLECT - each container the place rolls out lifted off the rollers into her hold,
+   till her hold's full, its HOW MANY is aboard or the place has none left; DELIVER - each container of the good lifted out of her hold onto the empty
+   rollers (it rolls in), till she has none. Swinging, lowering and lifting through the ANGLE / POWER as a player's hands would (craneAim), waiting for
+   the swing to settle before going down. Out of every view (a node), or with no tie-up in the jib's reach of the door: the same goods moved at once,
+   CRANE_LIFT_S a container. ---- */
+const CRANE_LIFT_S = 20;                                               // (s a container takes, crane to crane, out of view)
+// the ANGLE and POWER that put her magnet's face on the point (x, y) - the jib's head over it, the rope down to it: [elev, power]
+function craneAim(j, x, y) {
+  const G = boatCraneGeo(j), K = G.K, L = K.jib * UPM, d = j.dir > 0 ? 1 : -1;
+  const c = clamp((x - G.heel[0]) / (d * L), -1, 1), t = Math.acos(c), hy = G.heel[1] - L * Math.sin(t);
+  const len = (y - MAG_H - hy) / UPM;
+  return [clamp(t * 180 / Math.PI, 5, 175), clamp(1 - (len - 1) / (K.rope - 1), 0, 1)];
+}
+// one step of a crane working on its own: its job { t: 'load' | 'unload', k, o, n, got, ph, T, done }
+function craneWork(j, dt) {
+  const Q = j.crj; if (!Q || Q.done) return;
+  const o = slStr(Q.o), D = o && placeDoor(o), M = j.mag || (j.mag = { len: 0, obj: null, arm: false }), g = craneGun(j), G = boatCraneGeo(j), K = G.K;
+  if (!D) { Q.done = 1; return; }
+  const turn = e => { g.elev += clamp(e - g.elev, -25 * dt, 25 * dt); return Math.abs(e - g.elev) < 0.6; };
+  const wind = p => { g.power += clamp(p - g.power, -0.6 * dt, 0.6 * dt); return Math.abs(p - g.power) < 0.01; };
+  const still = () => M.ex != null && Math.abs(M.ex - G.head[0]) < 0.8 * UPM;
+  const Hd = picBoat(j).hold, room = vehBoxes(j) < Hd.n && vehRoom(j, Q.k) > 0;
+  // where it picks up and where it sets down: [x, top] (null: nothing there yet)
+  const onRoll = rollOn(o, D), slot = () => { const P = tropPic(picBoat(j).art[0]); if (!P) return null; const span = Hd.x[1] - Hd.x[0], bw = Hd.m / (P._m * P.width), gap = Math.max(0, (span - Hd.n * bw) / (Hd.n + 1)), i = vehBoxes(j), ax = Hd.x[0] + gap + i * (bw + gap) + bw / 2, p = boatPt(j, ax, Hd.y); return [p[0], p[1]]; };
+  const pick = () => { if (Q.t === 'load') return onRoll && onRoll.where === 'rest' ? [onRoll.x, onRoll.y - CONT_H / 2] : null; const L = holdBoxes(j).filter(b => b.k === Q.k); const b = L[L.length - 1]; return b ? [b.x, b.y - CONT_H / 2] : null; };
+  const drop = () => Q.t === 'load' ? slot() : (onRoll ? null : [D.cx, D.foot]);
+  Q.T = (Q.T || 0) + dt;
+  switch (Q.ph | 0) {
+    case 0:   // (hook up; then done, or over what's next to pick up)
+      if (!wind(1) && M.len > 3 * UPM) return;
+      if (Q.t === 'load' ? (!room || (Q.n > 0 && Q.got >= Q.n) || (!onRoll && stN(o, Q.k) <= 0 && !(o && [...containers].some(k => k.where === 'roll' && k.rs === o.id))) || (onRoll && onRoll.gk && onRoll.gk !== Q.k && stN(o, Q.k) <= 0)) : !holdBoxes(j).some(b => b.k === Q.k)) { Q.done = 1; return; }
+      Q.ph = 1; Q.T = 0; return;
+    case 1: { const P = pick(); if (!P) return; const [e] = craneAim(j, P[0], P[1]); if (turn(e) && still()) { M.arm = true; Q.ph = 2; Q.T = 0; } return; }
+    case 2: { const P = pick(); if (!P && !M.obj) { M.arm = false; Q.ph = 0; return; } if (M.obj) { Q.ph = 3; Q.T = 0; return; } const [e, p] = P ? craneAim(j, P[0], P[1] + 0.5 * UPM) : [g.elev, g.power]; turn(e); wind(p); if (Q.T > 25) { M.arm = false; Q.ph = 0; } return; }
+    case 3: if (!M.obj) { Q.ph = 0; return; } if (wind(1) || M.len < 4 * UPM) { Q.ph = 4; Q.T = 0; } return;
+    case 4: { if (!M.obj) { Q.ph = 0; return; } const P = drop(); if (!P) return; const [e] = craneAim(j, P[0], P[1] - CONT_H); if (turn(e) && still()) { Q.ph = 5; Q.T = 0; } return; }
+    case 5: { if (!M.obj) { Q.ph = 0; return; } const P = drop(); if (!P) return; const [e, p] = craneAim(j, P[0], P[1] - CONT_H + 0.4 * UPM); turn(e); wind(p);
+      if (M.rest || Q.T > 25) { const k = M.obj; magDrop(k); M.obj = null; M.arm = false; if (Q.t === 'load') Q.got = (Q.got || 0) + (k.gn || 0); Q.ph = 0; Q.T = 0; }
+      return; }
+  }
+}
+// (folkPlan) character c's ship v, COLLECT / DELIVER job J at T.o: with her crane at its rollers. 0: not this way; 1: under way (S.j moved on when done)
+function folkCrane(c, S, v, J, T) {
+  if (!boatCrane(v) || !T.o || (J.do !== 'collect' && J.do !== 'deliver') || !placeRolls(T.o)) return 0;
+  const D = placeDoor(T.o), K = boatCrane(v), Q = v.crj;
+  if (Q && Q.o === T.o.id) {
+    if (Q.far) { if (time < Q.until) return 1; folkJob(c, S, v, J, T); }
+    else if (!Q.done) return 1;
+    else folkLog({ t: 'job', who: c.id, verb: J.do === 'collect' ? 'CRANED ABOARD' : 'CRANED ASHORE', k: J.k, n: Q.got || 0, at: slPlaceName(T.o) });
+    v.crj = null; S.j++; return 1;
+  }
+  const reach = q => Math.abs(q - D.cx) < K.jib * UPM * 0.9;          // (a tie-up whose spot has the door in her jib's reach)
+  const here = v.berth != null ? slStr(v.berth) : null;
+  if (!(here && reach(v.x))) {
+    const P = folkPark(v, D.cx, q => reach(storySpotX(q, Math.max(0, storyFreeSpot(q, v)))));
+    if (P && P !== here) { folkGo(v, P.x, P); return 1; }
+    if (!P) return 0;                                                  // (nowhere to tie up in reach: as before - beside it, by numbers)
+  }
+  const n = J.do === 'collect' ? Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)) : cargoN(v, J.k), boxes = Math.ceil(n / cargoPer(J.k));
+  v.crj = FOLK_FAST || tierAt(v.x) !== 0 ? { o: T.o.id, far: 1, until: time + boxes * CRANE_LIFT_S } : { t: J.do === 'collect' ? 'load' : 'unload', k: J.k, o: T.o.id, n: J.n || 0, got: 0, ph: 0, T: 0 };
+  folkLog({ t: 'job', who: c.id, verb: 'CRANE AT', k: J.k, n: boxes, at: slPlaceName(T.o) });
+  return 1;
 }
 
 //@src 50-zzzzz-story-bench.js:1
@@ -80537,7 +80607,8 @@ function folkPlan(c, S) {
     if (J && J.do === 'hunt') { if (cargoN(v, J.k || 'fish') >= folkN(J, NETP.HOLD)) { S.j++; return; } if (can(v)) { folkGo(v, T.x, null, true); FOLK.v[v.sid].n = folkN(J, NETP.HOLD); return; } }   // (the hold full: the catch is done)
     // COLLECT / DELIVER from the vehicle stopped beside the place (as a market's sellers - it needn't be put away there)
     if (J && T.o && !foot) {
-      { const D = folkBay(c, S, v, J, T); if (D === 1) return; if (D === 2) { folkJob(c, S, v, J, T); return; } }   // (a place with a vehicle door it fits through: in, loaded, out - 50-zzzzz-place-door.js)
+      { const D = folkBay(c, S, v, J, T); if (D === 1) return; if (D === 2) { folkJob(c, S, v, J, T); return; } }
+      if (folkCrane(c, S, v, J, T)) return;                                 // (a ship with her own crane at a place's rollers - 50-zzzzz-ship-crane.js)   // (a place with a vehicle door it fits through: in, loaded, out - 50-zzzzz-place-door.js)
       if (folkBeside(v, T.o)) {
         folkJob(c, S, v, J, T); S.j++; return;
       }
