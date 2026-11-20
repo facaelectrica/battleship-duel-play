@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1213;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 15:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1214;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 15:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71084,9 +71084,9 @@ function wxaSync() {
   for (const p of WXA.pre) {
     const sw = el('span'); sw.style.cssText = `display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:${p.col}`;
     const nm = el('input'); nm.style.cssText = css + ';width:120px'; nm.value = p.name; nm.onchange = () => { p.name = nm.value.trim().toUpperCase() || p.name; wxaChanged(); setTimeout(undoCommit, 0); };
-    const d = btn('X', 'Delete this preset (areas set from it keep their settings)', () => { if (WXA.pre.length < 2) return; WXA.pre = WXA.pre.filter(q => q !== p); for (const a2 of WXA.areas) if (a2.pre === p.id) a2.pre = null; wxaChanged(); setTimeout(undoCommit, 0); });
+    const d = btn('X', 'Delete this preset (areas set from it keep their settings; the last one stays)', () => { if (WXA.pre.length < 2) return; WXA.pre = WXA.pre.filter(q => q !== p); for (const a2 of WXA.areas) if (a2.pre === p.id) a2.pre = null; wxaChanged(); setTimeout(undoCommit, 0); });
     const r = el('div', null, 'row'), l = el('label'); l.append(sw, el('span', `SKY ${Math.round(p.sky * 100)} RAIN ${Math.round(p.rain * 100)} SEA ${Math.round(p.sea * 100)}`)); l.style.cssText = 'font-size:85%;opacity:0.8';
-    r.append(nm, l, d); U.pre.appendChild(r);
+    NSKY.editor.TUNE.need(d, () => WXA.pre.length > 1); r.append(nm, l, d); U.pre.appendChild(r);
   }
   U.story.hidden = !!STORY_WORLD;
 }
@@ -72809,6 +72809,7 @@ function lookBox(box, el, get) {
   view.appendChild(cv);
   hb.title = 'Light: day, sunset or night'; mb.title = 'Pink backdrop to show holes'; db.title = 'Open or close its door';
   bar.style.cssText = 'border:0;margin:4px 0 0;padding:0'; bar.append(hb, mb, db);
+  NSKY.editor.TUNE.need(db, () => { const L = get(); return !!(L && L.door); });   // (no door in the picture: greyed, never hidden - rules.md section 6)
   const zr = el('div', 'row'), zi = el('input'), zo = el('output', '', '1X'); zi.type = 'range'; zi.min = 0.5; zi.max = 6; zi.step = 0.25; zi.value = LOOK.zoom; zi.title = 'Zoom';
   zr.append(el('label', '', 'ZOOM'), zi, zo);
   c.append(view, bar, zr); box.appendChild(c);
@@ -72840,7 +72841,7 @@ function lookBox(box, el, get) {
       else if (L.lights && E0.lamps > 0.05) { g.save(); g.globalAlpha = E0.lamps; g.translate(pad, pad); L.lights(g); g.restore(); }   // (its lamps, as far on as the hour has them)
     }
     gpuCanvasShow(V); gpuSubmit();
-    db.style.display = L.door ? '' : 'none'; db.textContent = LOOK.want ? 'CLOSE' : 'OPEN'; db.classList.toggle('on', !!LOOK.want);
+    db.textContent = LOOK.want ? 'CLOSE' : 'OPEN'; db.classList.toggle('on', !!LOOK.want);
     hb.textContent = LOOK_HOURS[LOOK.hour][0]; hb.classList.toggle('on', LOOK.hour > 0); mb.classList.toggle('on', LOOK.mask);
   };
   const tick = setInterval(() => { if (!cv.isConnected) { clearInterval(tick); if (V) gpuCanvasDrop(V); V = null; return; } const L = get(); if (L && L.live && cv.offsetParent) draw(); }, 200);   // (drawn by the game: its blinking lamps, its rotors, live)
@@ -73209,7 +73210,7 @@ const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;  
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
-function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, wt: PREFABS.wt, theft: PREFABS.theft, rt0: PREFABS.rt0, fishPay: PREFABS.fishPay })); } catch (e) { } }
+function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, vgone: PREFABS.vgone, wt: PREFABS.wt, theft: PREFABS.theft, rt0: PREFABS.rt0, fishPay: PREFABS.fishPay })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v && typeof v === 'object' ? Object.assign({}, v) : v;   // (a record - its MAKES: its own too)   // (a list of records - its PLANTS: each its own)
 const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && !PF_USE.includes(q)).map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
@@ -73316,9 +73317,39 @@ function pfDelete(p) {
   pfSave(); SE.sel = SE.sel.filter(id => strById(id)); strChanged(); pfSync();
 }
 // ---- vehicle prefabs: the vehicle types, and NEW ones made from one (in STR_VEHS as their own types)
+// (run with every world load - 50-zz-struct.js: the page's and the simulation worker's, an undo of DESIGNS too) the vehicle types as PREFABS says:
+// NEW ones in, deleted ones out, renamed ones named, deleted built-in ones gone (PREFABS.vgone - not enumerable: every list leaves them out,
+// an old save that names one still finds it)
+const PF_VGONE = new Set();
 function pfVehRegister() {
+  for (const sv of Object.keys(STR_VEHS)) { const D = STR_VEHS[sv]; if (D.pf && !PREFABS.v.some(v => v.id === sv)) delete STR_VEHS[sv]; else if (D.lab0) D.lab = D.lab0; }
   for (const sv in PREFABS.vn) if (STR_VEHS[sv] && PREFABS.vn[sv]) { if (!STR_VEHS[sv].lab0) STR_VEHS[sv].lab0 = STR_VEHS[sv].lab; STR_VEHS[sv].lab = PREFABS.vn[sv]; }
   for (const v of PREFABS.v) { const B = STR_VEHS[v.base]; if (B && !B.pf) STR_VEHS[v.id] = Object.assign({}, B, { lab: v.name, lab0: undefined, pf: true, base: v.base }); }
+  const gone = new Set(PREFABS.vgone || []);
+  for (const sv of new Set([...PF_VGONE, ...gone])) { const d = Object.getOwnPropertyDescriptor(STR_VEHS, sv); if (!d || !d.configurable) continue; Object.defineProperty(STR_VEHS, sv, { enumerable: !gone.has(sv) }); if (gone.has(sv)) PF_VGONE.add(sv); else PF_VGONE.delete(sv); }
+}
+// (user Nov 20 13:46: "How do I delete an existing Vehicle Design?") a vehicle design's copies in this world: placed, and at structures' spots
+const pfVCopies = sv => PLACED.filter(r => r.sv === sv).length + STRS.reduce((n, o) => n + strVehs(o).filter(e => e && e.v === sv).length, 0);
+// the designs that go with it: itself, and the NEW designs made from it when it's a car made in the VEHICLE EDITOR (their picture is its)
+const pfVFamily = sv => [sv, ...(STR_VEHS[sv] && STR_VEHS[sv].made ? PREFABS.v.filter(v => v.base === sv).map(v => v.id) : [])];
+// delete a vehicle design and what's of it in this world (placed, at spots); everything that names it lets go (a design's VALID VEHICLES,
+// a character's VEHICLE, a type of work's WORK VEHICLE). A NEW design: gone; a car made in the VEHICLE EDITOR: its picture with it (bd_vehnew);
+// a built-in type: gone for good (PREFABS.vgone - the structures' PREFABS.gone)
+function pfDeleteV(sv) {
+  const D = STR_VEHS[sv]; if (!D) return;
+  const L = new Set(pfVFamily(sv));
+  PLACED = PLACED.filter(r => !L.has(r.sv)); placedSave();
+  for (const o of STRS) if (Array.isArray(o.veh) && o.veh.some(e => e && L.has(e.v))) o.veh = o.veh.filter(e => !(e && L.has(e.v)));
+  for (const p of pfAllS()) if (Array.isArray(p.allow)) p.allow = p.allow.filter(k => !L.has(k));
+  for (const c of charsAll()) if (L.has(c.veh)) delete c.veh;
+  for (const k in PREFABS.wt || {}) { const J = PREFABS.wt[k] && PREFABS.wt[k].job; if (J && L.has(J.wv)) delete J.wv; }
+  for (const o of STRS) if (L.has(o.wv)) delete o.wv;
+  for (const k of L) { if (PREFABS.heat) delete PREFABS.heat[k]; delete PREFABS.vn[k]; if (STORY_ZW[k]) { delete STORY_ZW[k]; try { localStorage.setItem('bd_story_zoom', JSON.stringify(STORY_ZW)); } catch (e) { } } }
+  PREFABS.v = PREFABS.v.filter(v => !L.has(v.id));
+  if (!D.pf && !D.made) PREFABS.vgone = [...new Set([...(PREFABS.vgone || []), sv])];
+  pfSave(); ownersSave(); pfVehRegister();
+  if (D.made) { vnewSave(VNEW.list.filter(r => r.id !== sv)); if (typeof vmSave === 'function') vmSave(); }
+  strChanged(); if (typeof edVehRebuild === 'function') edVehRebuild(); pfSync();
 }
 function pfNewV(sv) {
   const B = STR_VEHS[sv]; if (!B) return null;
@@ -74174,7 +74205,7 @@ const STR_VEHS = {
 // (the red and teal fishing boats that were: worlds saved with them get the one fishing boat - never listed)
 for (const k of ['fishRed', 'fishTeal']) Object.defineProperty(STR_VEHS, k, { value: STR_VEHS.fish, enumerable: false });
 
-pfVehRegister();                                              // (the NEW vehicle prefabs as their own types - 50-zz-prefabs.js)
+worldLoad(pfVehRegister);                                     // (the vehicle designs as their own types, each world load - 50-zz-prefabs.js)
 // the vehicle types a structure accepts (its RESTRICT switch on: only its kind's own - fire engines at a fire station...)
 // (user Nov 1: one OWNER for every structure - NOBODY, TEAM 1, TEAM 2 - the battle's two sides and STORY's factions (were CIV 1 / CIV 2, o.fac))
 // (Nov 7: the owners a world has - NOBODY, TEAM 1, TEAM 2, the world's own (OWNERS, WORLD PROPERTIES > STORY > OWNERS), PLAYER - ownersBuild)
@@ -74200,7 +74231,7 @@ worldLoad(() => {
   PLAYER_C = Object.assign({}, P || {}, { id: 'player', name: 'PLAYER' });
   ownersBuild();
 });
-function ownersSave() { if (typeof lotAuto === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on && lotAuto()) strSave();   /* (who lives / works where changed what needs a PARKING / DOCK) */ const L = [...OWNERS]; if (PLAYER_C.home != null || (PLAYER_C.fam || []).length) L.push(PLAYER_C); try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
+function ownersSave() { if (typeof lotAuto === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on && lotAuto()) strSave();   /* (who lives / works where changed what needs a PARKING / DOCK) */ const L = [...OWNERS]; if (Object.keys(PLAYER_C).some(k => k !== 'id' && k !== 'name' && PLAYER_C[k] != null && !(Array.isArray(PLAYER_C[k]) && !PLAYER_C[k].length))) L.push(PLAYER_C);   /* (anything set on the player - HOME, WORK, VEHICLE, FAMILY: kept; was HOME / FAMILY only, so WORK and VEHICLE set alone were lost) */ try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
 
 // (user Nov 1 21:11-21:15: "Every vehicle or structure, I should be able to set the owner"; "PLAYER should be a possible owner. a home
 // base is automatically set as Owner Player") o.own 'player': the person playing's - as a faction / team, player 0's side
@@ -75005,7 +75036,7 @@ function strFill() {
     const r = el('div', 'row'), l = el('label', '', lab); l.title = tip; r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; r.appendChild(l);
     for (const q of charsAll().filter(q => q[key] === o.id)) { const t = el('span', '', q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = key === 'home' ? 'Not a resident' : 'Not a worker'; x.onclick = () => { delete q[key]; ownersSave(); strSync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.append(t, x); }
     const can = charsAll().filter(q => q[key] !== o.id && !(key === 'work' && q === PLAYER_C));
-    if (can.length) { const s = el('select'); s.style.cssText = U.selCss; s.title = key === 'home' ? 'Add a resident (they move here)' : 'Add a worker (they work here)'; for (const [v, t] of [['', key === 'home' ? '+ RESIDENT' : '+ WORKER'], ...can.map(q => [q.id, q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
+    { const s = el('select'); NSKY.editor.TUNE.need(s, () => charsAll().some(q => q[key] !== o.id)); s.style.cssText = U.selCss; s.title = key === 'home' ? 'Add a resident (they move here)' : 'Add a worker (they work here)'; for (const [v, t] of [['', key === 'home' ? '+ RESIDENT' : '+ WORKER'], ...can.map(q => [q.id, q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
       s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q[key] = o.id; ownersSave(); } strSync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); }
     c.appendChild(r);
   }
@@ -75029,8 +75060,13 @@ function strFill() {
   if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));
   if (STORY_WORLD && typeof lotBox === 'function') { const b = lotBox(o, el, U.selCss); if (b) U.box.appendChild(b); }   // (VEHICLES KEPT AT: its PARKING / DOCK - 50-zzzzz-story-work.js)   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
   { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
-  if (strStores(o)) { const g0 = () => strGoods0(o) || {}, gb = cargoBox(el, U.selCss, k => g0()[k] || 0, (k, n) => { cargoPut(o, k, n); strSave(); }, 'STARTING GOODS', keepList(o, STR_KINDS[o.k] || {}));   // (its design's, its own over them - user Nov 20 11:55)
-    if (o.goods && Object.keys(o.goods).length) { const r = el('div', 'row'), b = el('button', '', strWork(o) ? 'USE TYPE\'S' : 'USE DESIGN\'S'); b.title = strWork(o) ? 'Start with its type of work\'s goods again' : 'Start with its design\'s goods again'; b.onclick = () => { delete o.goods; strSave(); strSync(); }; r.append(el('label', '', ''), b); gb.appendChild(r); }
+  if (strStores(o)) {   // (its design's - a workplace's its type of work's - and its own where they differ, user Nov 20 11:55)
+    // (user Nov 20 13:49: "USE DESIGN'S ... If I press it, that button now has disappeared. Even if I change the values it doesn't appear anymore")
+    // a value is its own only where it differs from the default (0 too); REVERT TO DEFAULT always there, greyed with none of its own (TUNE.need)
+    const d0 = () => { const p = pfGet(o.pf), J = strWork(o) ? wtJobOf(o.k) : null; return (J ? J.goods : p && p.goods) || {}; };
+    const gb = cargoBox(el, U.selCss, k => o.goods && k in o.goods ? o.goods[k] : d0()[k] || 0, (k, n) => { if (n === (d0()[k] || 0)) { if (o.goods) { delete o.goods[k]; if (!Object.keys(o.goods).length) delete o.goods; } } else (o.goods || (o.goods = {}))[k] = n; strSave(); }, 'STARTING GOODS', keepList(o, STR_KINDS[o.k] || {}));   // (only what it keeps - a workplace: its type's STORES)
+    { const r = el('div', 'row'), b = el('button', '', 'REVERT TO DEFAULT'); b.title = strWork(o) ? 'Starting goods back to its type of work\'s' : 'Starting goods back to its design\'s';
+      b.onclick = () => { delete o.goods; strSave(); strSync(); }; NSKY.editor.TUNE.need(b, () => !!(o.goods && Object.keys(o.goods).length)); r.append(el('label', '', ''), b); gb.appendChild(r); }
     U.box.appendChild(gb);   // (what it holds - 50-zz-cargo.js; STORES GOODS)
     if (o.makes && o.makes.k) { const c3 = el('div', 'cat'), r = el('div', 'row'), l = el('label', '', 'MAKES'), t = el('output', '', (o.makes.per || 0) + ' ' + ((CARGO.find(C => C.k === o.makes.k) || {}).name || o.makes.k) + ' A DAY'); l.title = t.title = wtSrc(o); c3.appendChild(el('h4', '', 'MAKES')); r.append(l, t); c3.appendChild(r); U.box.appendChild(c3); } }   // (its design's MAKES, read only)   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
   // (Nov 7, user: "select any structure and choose what they sell if they have the market property") a market's SELLS: each kind of cargo on or off
@@ -76154,8 +76190,6 @@ function objFill() {
   if (c == null) { T.item.textContent = ''; T.n.textContent = ''; return; }
   const L = objList(c), cur = objCur(c); opts(T.item, L, cur); OBJ.pick[c] = cur;
   T.n.textContent = L.length + ' OF THIS TYPE';
-  const design = objStrCat(c) || !!STR_VEHS[cur];
-  T.bEd.hidden = !design;
 }
 // EDIT DESIGN (a copy's): its design up in the SPAWN half beside it
 const objEditDesign = o => dsnOpen('s', o.pf);   // (STORY > STRUCTURE DESIGNS - 50-zzzz-designs-tab.js)
@@ -76295,6 +76329,7 @@ for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
   // (user Nov 20 10:25) the designs are the STORY editor's lists: here only which to place, and EDIT DESIGN to open it there
   const bEd = el('button', '', 'EDIT DESIGN'); bEd.title = 'Open this design in STORY > ' + (t === 'VEHICLES' ? 'VEHICLE' : 'STRUCTURE') + ' DESIGNS';
   bEd.onclick = () => { const c = OBJ.tcat[t], id = OBJ.pick[c]; if (objStrCat(c)) dsnOpen('s', id); else if (STR_VEHS[id]) dsnOpen('v', id); };
+  NSKY.editor.TUNE.need(bEd, () => { const c = OBJ.tcat[t], id = c != null && OBJ.pick[c]; return !!id && (objStrCat(c) || !!STR_VEHS[id]); });   // (no design - a wreck, a big ship: greyed, never hidden)
   top.append(lab('TYPE', type), lab(what, item), bSpawn, n, bEd);
   const grid = el('div', 'cats'), spawn = el('div', ''); spawn.style.display = 'contents';
   grid.appendChild(spawn); if (t === 'STRUCTURES') grid.appendChild(U.chk);
@@ -76432,7 +76467,7 @@ function styFill(el) {
       const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'FAMILY'); help(l, 'Who they care about: their needs come first, their vehicles can be used'); r.appendChild(l);
       for (const q of famList(o)) { const t = el('span', '', q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = 'Not family'; x.onclick = () => { famDrop(o.id, q.id); ownersSave(); storyTabSync(); }; r.append(t, x); }
       const can = charsAll().filter(q => q !== o && !famOf(o.id, q.id));
-      if (can.length) r.appendChild(pick([['', '+ FAMILY'], ...can.map(q => [q.id, q.name])], '', v => { if (v !== '') (o.fam || (o.fam = [])).push(cid(v)); }, 110, 'Add someone to their family'));
+      r.appendChild(NSKY.editor.TUNE.need(pick([['', '+ FAMILY'], ...can.map(q => [q.id, q.name])], '', v => { if (v !== '') (o.fam || (o.fam = [])).push(cid(v)); }, 110, 'Add someone to their family'), () => charsAll().some(q => q !== o && !famOf(o.id, q.id))));   // (nobody left: greyed, never hidden)
       c.appendChild(r);
     };
     // the player's own rows: where you live (a new story starts there) and your family
@@ -76504,8 +76539,8 @@ function styFill(el) {
         const x = el('button', '', 'X'); x.title = 'Not made from this'; x.onclick = () => { C.needs.splice(j, 1); if (!C.needs.length) delete C.needs; cargoSave(); storyTabSync(); };
         mf.append(n, s, x);
       });
-      const other = CARGO.find(D => D !== C && !(C.needs || []).some(q => q.k === D.k));
-      if (other) { const a = el('button', '', '+ INGREDIENT'); a.title = 'Made from another good too'; a.onclick = () => { (C.needs || (C.needs = [])).push({ k: other.k, n: 1 }); cargoSave(); storyTabSync(); }; mf.appendChild(a); }
+      { const a = el('button', '', '+ INGREDIENT'); a.title = 'Made from another good too'; a.onclick = () => { const q = CARGO.find(D => D !== C && !(C.needs || []).some(z => z.k === D.k)); if (!q) return; (C.needs || (C.needs = [])).push({ k: q.k, n: 1 }); cargoSave(); storyTabSync(); };
+        NSKY.editor.TUNE.need(a, () => CARGO.some(D => D !== C && !(C.needs || []).some(z => z.k === D.k))); mf.appendChild(a); }   // (every other good already in: greyed, never hidden)
       c.appendChild(mf);
     }
     const add = el('button', '', 'CREATE CARGO'); add.title = 'A new kind of cargo';
@@ -77091,7 +77126,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd
    select and move them and change their unique properties. Then the story would be the story editor, which is kind of similar to the lists we
    have in the world plan, where we can change the characters, the different structures we can drop, vehicles"): STORY > STRUCTURE DESIGNS and
    VEHICLE DESIGNS - each a list down the left (by type), the picked design's settings beside it (pfStructBox / pfVehBox, 50-zz-prefabs.js):
-   NEW (a design copied from the picked one), NAME. Every copy in the world is its design's; the WORLD EDITOR only places them (its SPAWN:
+   NEW (a design copied from the picked one), NAME, DELETE (with its copies). Every copy in the world is its design's; the WORLD EDITOR only places them (its SPAWN:
    TYPE, design, SPAWN - EDIT DESIGN opens it here).
    ================================================================ */
 const DSN = { s: null, v: null, ui: {} };
@@ -77121,7 +77156,7 @@ function dsnSync(w) {
   const { list, body, el, css } = U, G = dsnGroups(w), all = G.flatMap(([, L]) => L.map(q => q[0]));
   if (!all.includes(DSN[w])) DSN[w] = all[0] || null;
   const keep = list.scrollTop; list.textContent = '';
-  for (const [h, L] of G) { list.appendChild(el('h4', '', h)); for (const [id, nm] of L) { const b = el('button', '', nm); b.classList.toggle('on', id === DSN[w]); b.onclick = () => { DSN[w] = id; dsnSync(w); }; list.appendChild(b); } }
+  for (const [h, L] of G) { list.appendChild(el('h4', '', h)); for (const [id, nm] of L) { const b = el('button', '', nm); b.classList.toggle('on', id === DSN[w]); b.onclick = () => { DSN[w] = id; DSN.del = null; dsnSync(w); }; list.appendChild(b); } }
   list.scrollTop = keep;
   const bTop = body.scrollTop, bSame = body._id === DSN[w]; body._id = DSN[w];   // (its own scroll: kept for the same design built again, its top for another)
   body.textContent = ''; const id = DSN[w]; if (id == null) return;
@@ -77132,11 +77167,14 @@ function dsnSync(w) {
   else nm.value = STR_VEHS[id] ? STR_VEHS[id].lab : '';
   nm.onchange = () => { const v = nm.value.trim().toUpperCase(); if (v) { if (w === 's') { const p = pfGet(id); if (p) { p.name = v; p.base = false; pfSave(); strSync(); } } else pfRenameV(id, v); } dsnSync(w); };
   bNew.onclick = () => { if (w === 's') { const p = pfGet(id); if (p) DSN.s = pfNewS(p).id; } else { const v = pfNewV(id); if (v) DSN.v = v; } dsnSync(w); };
-  if (w === 's') {
-    const p = pfGet(id), k = p ? pfCopies(p) : 0; bDel.title = 'Delete this design' + (k ? ' and its ' + k + ' placed in this world' : '');
-    bDel.onclick = () => { if (!p) return; if (DSN.del !== id) { DSN.del = id; bDel.textContent = k ? 'DELETE IT AND ' + k + ' PLACED?' : 'DELETE IT?'; bDel.style.color = '#ff6a5a'; return; } DSN.del = null; pfDelete(p); DSN.s = null; dsnSync(w); };
-  }
-  const L = el('label', 'ocat'); L.append(el('span', '', 'NAME'), nm); bar.append(L, bNew, ...(w === 's' ? [bDel] : []), n); body.appendChild(bar);
+  // DELETE - every design, with its copies in this world, asked again first (structures: user Nov 20 11:31; vehicles: 13:46 "How do I delete an
+  // existing Vehicle Design?" - pfDeleteV, 50-zz-prefabs.js)
+  { const p = w === 's' ? pfGet(id) : null, k = w === 's' ? (p ? pfCopies(p) : 0) : pfVCopies(id), more = w === 'v' ? pfVFamily(id).length - 1 : 0;
+    if (w === 'v') n.textContent = k + ' IN THIS WORLD';
+    bDel.title = 'Delete this design' + (k ? ' and its ' + k + ' placed in this world' : '') + (more ? ', and the ' + more + ' designs made from it' : '');
+    bDel.onclick = () => { if (DSN.del !== id) { DSN.del = id; bDel.textContent = 'DELETE IT' + (more ? ', ' + more + ' MADE FROM IT' : '') + (k ? ' AND ' + k + ' PLACED' : '') + '?'; bDel.style.color = '#ff6a5a'; return; }
+      DSN.del = null; if (w === 's') { if (p) pfDelete(p); } else pfDeleteV(id); DSN[w] = null; dsnSync(w); }; }
+  const L = el('label', 'ocat'); L.append(el('span', '', 'NAME'), nm); bar.append(L, bNew, bDel, n); body.appendChild(bar);
   const box = el('div', 'cats'); body.appendChild(box);
   if (w === 's') { const p = pfGet(id); if (p) pfStructBox(p, box, el, css); } else pfVehBox(id, box, el, css);
   body.scrollTop = bSame ? bTop : 0;
@@ -80941,7 +80979,7 @@ function workBox(o, el, css, sync) {
   { const r = row(); r.appendChild(L('WORKERS', 'Who works here: its day is theirs'));
     for (const q of charsAll().filter(q => q.work === o.id)) { const t = el('span', '', q === PLAYER_C ? 'PLAYER' : q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = 'Not a worker here'; x.onclick = () => { delete q.work; ownersSave(); sync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.append(t, x); }
     const can = charsAll().filter(q => q.work !== o.id);
-    if (can.length) { const s = el('select'); s.style.cssText = css + ';width:110px'; s.title = 'Add a worker (their work moves here)'; for (const [v, t] of [['', '+ WORKER'], ...can.map(q => [q.id, q === PLAYER_C ? 'PLAYER' : q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
+    { const s = el('select'); NSKY.editor.TUNE.need(s, () => charsAll().some(q => q.work !== o.id)); s.style.cssText = css + ';width:110px'; s.title = 'Add a worker (their work moves here)'; for (const [v, t] of [['', '+ WORKER'], ...can.map(q => [q.id, q === PLAYER_C ? 'PLAYER' : q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
       s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q.work = o.id; ownersSave(); } sync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); } }
   const [a, b] = placeH(o), J = workJobs(o);
   row().append(L('ITS DAY', wtSrc(o)), el('output', '', (a === b ? 'ALL DAY' : hourName(a) + '-' + hourName(b)) + ' · ' + ((o.wage | 0) ? (o.wage | 0) + ' A DAY' : 'PAID BY WHAT THEY SELL') + (workVehD(o) ? ' · ' + STR_VEHS[o.wv].lab : '')));
@@ -81541,6 +81579,7 @@ function vnewLoad() {
   vmDefaults();
   for (const r of VNEW.list) if (!L.some(q => q.id === r.id)) vnewOut(r);
   VNEW.list = L; for (const r of L) vnewIn(r);
+  if (typeof pfVehRegister === 'function') pfVehRegister();   // (the NEW designs made from one of these: in once it is - 50-zz-prefabs.js)
   // (their numbers of the vehicles' table: read here - the table's own loader ran before they were in it)
   try { const o = JSON.parse(localStorage.getItem('bd_vtune') || 'null'); if (o && o.car) for (const r of L) for (const [k] of vnewTune(r)) if (typeof o.car[k] === 'number' && isFinite(o.car[k])) VTUNE.car[k] = o.car[k]; } catch (e) { }
 }
@@ -85458,7 +85497,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     d.innerHTML = `<div><div style="margin-bottom:4px">DELETE ${r.lab}?</div><div style="color:#7a8294;margin-bottom:12px">ANY PLACED IN A WORLD GO WITH IT</div><div style="display:flex;gap:6px;justify-content:center"><button data-q="yes" class="on">DELETE</button><button data-q="cancel">CANCEL</button></div></div>`;
     VED.root.appendChild(d);
     d.onclick = e => { const a = e.target && e.target.dataset ? e.target.dataset.q : null; if (!a) return; d.remove(); VED.askEl = null; if (a !== 'yes') return;
-      vnewSave(VNEW.list.filter(q => q.id !== r.id)); vmSave(); VED.undo.length = 0; VED.redo.length = 0; VED.key = null; list(); load(vmKeys()[0]); };
+      pfDeleteV(r.id); VED.undo.length = 0; VED.redo.length = 0; VED.key = null; list(); load(vmKeys()[0]); };
   }
   const say = (name, text) => { VED.foot.innerHTML = (name ? '<b>' + name + '</b>' : '') + (text || ''); };
   // what the panel shows from the state now (the panels' one system - its needs and names, registered as it's built)
