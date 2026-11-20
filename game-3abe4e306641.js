@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1144;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 22:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1145;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 22:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36650,7 +36650,7 @@ const ED_GROUPS = [['SUN', ['DISC', 'LIGHT ON CLOUDS', 'BACKLIGHT & BURN', 'RAYS
 // PROPERTIES: the rest. A top tab not named here is a world property.
 // (user Nov 2 12:54: STRUCTURES and VEHICLE one tab, OBJECTS - "the properties just change depending on what I want to spawn OR what I
 // have selected"; GROUPING its own tab - groups of anything, not only structures: 50-zzz-objects-tab.js)
-const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLES', 'BATTLE ZOOM LEVELS']],
+const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLES', 'BATTLE ZOOM LEVELS']],
   // (user Nov 1 21:55: PREFABS - every structure and vehicle designed there, 50-zz-prefabs.js; DISPLAY - what the editor shows, not the world)
   ['PREFABS', ['PREFABS']], ['DISPLAY', ['COLLISION', 'CHANGE HISTORY']]];   // (CHANGE HISTORY: UNDO's steps - 50-zz-undo.js, user Nov 3)
 // buttons the game adds to a tab (TUNE.buttons): [tab, category, [[label, description, onclick(button)]...]]
@@ -68243,7 +68243,7 @@ fn texel(I: u32, B: bool, t: vec2i) -> vec4f {
      NOBODY, TEAM 1, TEAM 2, these, PLAYER (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
    - The CARGO list itself: 50-zz-cargo.js (CARGO). The tabs: STORY > CHARACTERS, CARGO, STORY SETTINGS (50-zzz-story-tab.js).
    ================================================================ */
-const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, rentStep: 100, fishM: 10, farM: 400 };   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
+const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, rentStep: 100, fishM: 10, farM: 400, keepD: 10, urgD: 3, pri: ['danger', 'call', 'family', 'work'] };   // (keepD / urgD / pri: STORY > PRIORITIES - KEEP FOR, URGENT AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
 //   // (rentStep: RENT DISTANCE - metres a rented vehicle's RENT COST pays for; fishM: FISH A MINUTE - a character's boat fishing out of view, 50-zzzzz-story-folk.js)
 let STORY_CFG = JSON.parse(JSON.stringify(STORY_CFG_DEF));
 function storyClockBuild() {
@@ -75885,7 +75885,7 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    removed (NOBODY, TEAM 1, TEAM 2 and PLAYER are the game's own: locked); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
    created and deleted. The settings: 50-story-0-cfg.js (STORY_CFG, OWNERS); the cargo list: 50-zz-cargo.js (CARGO). ---- */
 const STY = { panes: {}, el: null };
-const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', CARGO: 'CARGO', LINES: 'LINES', SIMULATE: 'SIMULATE' };
+const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', LINES: 'LINES', SIMULATE: 'SIMULATE' };
 const STY_SIM = { days: 3, log: null };   // (the last fast-forward's report - storySim, 50-zzzzz-story-folk.js)
 function storyTabSync() {
   const el = STY.el; if (!el) return;
@@ -75896,6 +75896,7 @@ function storyTabSync() {
   const guide = (tab, txt) => { const P = STY.panes[tab]; if (!P) return; const d = el('div', 'help'); d.textContent = txt; d.style.cssText = 'color:#9aa3b8;padding:6px 8px 10px;line-height:1.4;font-size:11px'; P.appendChild(d); };
   guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER, in OBJECTS) are theirs.');
   guide('LINES', 'What characters say. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
+  guide('PRIORITIES', 'What every character does next, the player included: the first of these that holds, top to bottom. Getting a good is worked out from where things are: buy it where it is sold, and short of coins earn first (fish with a boat they can use, sell the catch). Your objective is the first of the same steps. NOW shows what each would do at the start of a new story, and why.');
   guide('SIMULATE', 'Runs a new story fast - only its clock, stock and characters, every vehicle unseen - for so many days, and lists what happened: each trip and how long it took, each job done or skipped, who waited, and every place\'s stock at the end of each day. Nothing in the world is changed.');
   guide('CARGO', 'Every good in the world: its price at a market, whether the player carries it himself (INVENTORY), and what one is MADE FROM. Places make goods in OBJECTS (MAKES).');
   const help = (l, tip) => { l.title = tip; l.dataset.help = tip; };
@@ -75961,6 +75962,11 @@ function storyTabSync() {
       r2.append(L('NEEDS', 'A good they need from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
       if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), L('A DAY, WITHOUT IT', 'Days they last once there is none'), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
       c.appendChild(r2); famRow(o);
+      // (user Nov 19 21:05-21:10) the coins they start with, and where they work - a job is what their WORK place is short of (PRIORITIES)
+      const r4 = el('div', 'row'); r4.style.cssText = r2.style.cssText;
+      r4.append(L('COINS', 'Coins they start with'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Coins they start with', '1'),
+        L('WORK', 'Where they work: they keep it stocked'), S([[0, 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'));
+      c.appendChild(r4);
       // (user Nov 19: "The fisherman leaves in his car ... goes fish ... drops the fish at the cargo place. And then he drives home") their
       // ROUTINE: the hour they leave home, and their jobs in order - the way there is worked out (50-zzzzz-story-folk.js)
       const r3 = el('div', 'row'); r3.style.cssText = r2.style.cssText;
@@ -76065,6 +76071,29 @@ function storyTabSync() {
     const add = el('button', '', 'ADD LINE'); add.title = 'A new line';
     add.onclick = () => { SLINES.push({ id: slNewId(), who: -1, at: 0, when: [], text: '', to: '', do: 'go', k: '' }); slinesSave(); storyTabSync(); };
     c.appendChild(add); }
+  // PRIORITIES (user Nov 19 21:14: "can you make a way that this logic is visible to me and editable?"): the order, its numbers, and what
+  // each character would do at a new story's start (famPreview, 50-zzzzz-story-family.js)
+  { const c = cat('PRIORITIES');
+    const L = priOrder();
+    L.forEach((k, i) => {
+      const P = PRI_KINDS.find(q => q[0] === k), r = el('div', 'row'); r.style.cssText = 'display:flex;gap:6px;align-items:center';
+      const n = el('label', '', (i + 1) + '. ' + P[1]); help(n, P[2]); n.style.flex = '1';
+      const up = el('button', '', '↑'), dn = el('button', '', '↓'); up.title = 'Before the one above'; dn.title = 'After the one below';
+      const mv = d => { const j = i + d; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; STORY_CFG.pri = L.slice(); storyCfgSave(); storyTabSync(); };
+      up.onclick = () => mv(-1); dn.onclick = () => mv(1);
+      r.append(n, up, dn); c.appendChild(r);
+      const d = el('div', 'help'); d.textContent = P[2]; d.style.cssText = 'color:#9aa3b8;padding:0 8px 6px 18px;font-size:11px'; c.appendChild(d);
+    });
+    slider(c, 'KEEP FOR', 'keepD', 1, 30, 1, 'DAYS', 'A family member\'s home is kept stocked for this many days');
+    slider(c, 'URGENT AT', 'urgD', 0, 10, 0.5, 'DAYS', 'Fewer days than this left: everything else is dropped');
+    const r = el('div', 'row'), go = el('button', '', 'NOW'); go.title = 'What each would do at the start of a new story, and why';
+    go.onclick = () => { try { STY.pre = famPreview(); } catch (e) { STY.pre = [{ who: 'ERROR', why: String(e && e.message || e), steps: [] }]; } storyTabSync(); };
+    r.append(go); c.appendChild(r);
+    for (const p of STY.pre || []) {
+      const h = el('div', ''); h.textContent = p.who + ': ' + p.why; h.style.cssText = 'font-size:11px;line-height:1.5;color:' + (p.steps.length ? '#7fe08a' : '#9aa3b8') + ';padding-top:4px'; c.appendChild(h);
+      p.steps.forEach((t, i) => { const s = el('div', ''); s.textContent = '   ' + (i + 1) + '. ' + t; s.style.cssText = 'font-size:11px;line-height:1.4;white-space:pre'; c.appendChild(s); });
+    }
+  }
   // SIMULATE: DAYS, RUN, and the last run's report
   { const c = cat('SIMULATE');
     const r = el('div', 'row'), l = el('label', '', 'DAYS'), n = el('input'), go = el('button', '', 'RUN');
@@ -76091,7 +76120,7 @@ function storyTabSync() {
         if (e.t === 'day') { line('END OF DAY ' + e.day + (e.stocks.length ? ' - ' + e.stocks.map(([n, g]) => n + ' ' + Object.entries(g).filter(([, v]) => v > 0).map(([k, v]) => v + ' ' + (CARGO_LAB[k] || k)).join(', ')).join('; ') : '') + (e.gone.length ? ' - GONE: ' + e.gone.join(', ') : ''), '#9aa3b8'); continue; }
         if (e.day !== day) { day = e.day; const d = el('h4', '', 'DAY ' + day); c.appendChild(d); }
         const who = folkName(e.who), at = hh(e.h) + '  ';
-        if (e.t === 'leave') line(at + who + ' SETS OUT');
+        if (e.t === 'leave') line(at + who + ' SETS OUT' + (e.why ? ' - ' + e.why : ''));
         else if (e.t === 'go') line(at + who + ': ' + e.veh + ' FROM ' + e.from + ' TO ' + e.to + ' (' + Math.round(e.dist) + ' M)');
         else if (e.t === 'arrive') line(at + who + ' ARRIVES AT ' + e.at + (e.trip ? ' - ' + dur(e.trip, e) : ''));
         else if (e.t === 'job') line(at + who + ': ' + e.verb + ' ' + e.n + ' ' + (CARGO_LAB[e.k] || e.k || '') + ' AT ' + e.at, '#7fe08a');
@@ -76105,7 +76134,7 @@ function storyTabSync() {
     }
   }
 }
-for (const t of ['CHARACTERS', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']) NSKY.editor.TUNE.pane(t, (pane, el) => { STY.panes[t] = pane; STY.el = el; storyTabSync(); });
+for (const t of ['CHARACTERS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']) NSKY.editor.TUNE.pane(t, (pane, el) => { STY.panes[t] = pane; STY.el = el; storyTabSync(); });
 
 //@src 50-zzz-world-ed.js:1
 /* ================================================================
@@ -78710,6 +78739,123 @@ worldLoad(() => {
 const famList = c => charsAll().filter(q => q !== c && famOf(c.id, q.id));
 // one taken off: off both lists
 function famDrop(a, b) { const A = charOf(a), B = charOf(b); for (const [X, y] of [[A, b], [B, a]]) if (X && X.fam) { X.fam = X.fam.filter(q => q !== y); if (!X.fam.length) delete X.fam; } }
+/* ---- PRIORITIES (user Nov 19 21:02-21:10: "If a character has someone in their family who has the property sick, their priority is to make
+   sure they have enough medicine. For 10 days, maybe?"; "the chain that you do when you're playing the game, it would be the same chain they
+   would go through. The pharmacy asks for money. If they don't have money, they go make money"; "they look at the vehicles that make the
+   money"; "they would just make money by doing that naturally, even if they don't need it"). One order for every character (STORY_CFG.pri,
+   STORY > PRIORITIES), the first that holds is what they do next:
+   - DANGER: a family member with less than URGENT AT days of what they need at home - dropping whatever they were doing;
+   - EMERGENCIES: something happened that their work answers - today an impounded vehicle, for one with TOW in their ROUTINE (the police
+     answer a theft from their station - folkAlarm, 50-zzzzz-story-folk.js);
+   - FAMILY: a family member with less than KEEP FOR days of it - when they're home between jobs, from the hour they leave;
+   - WORK: once a day, from the hour they leave (not the sick - those with NEEDS) - their ROUTINE; with none, what their WORK place is short of (a market out of something it
+     sells, a maker short of an ingredient - fetched from a place that has it); with none, earning.
+   Getting what's needed is worked out from where things are, never written (famSteps): BUY it where it's sold and in stock and DELIVER it
+   home; short of coins, earn first - the quickest way they have, today FISH with a fishing boat they can use (their own or their family's)
+   and SELL the catch at a market. The player's objective is the first of the same steps (slWantOf). ---- */
+const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'A family member has less than URGENT AT days of what they need: drop everything'], ['call', 'EMERGENCIES', 'Something happened that their work answers: an impounded vehicle to tow back (TOW in their ROUTINE)'], ['family', 'FAMILY NEEDS', 'A family member has less than KEEP FOR days of what they need: get it when home'], ['work', 'WORK', 'Once a day: their ROUTINE, else what their WORK place is short of, else earning']];
+const priOrder = () => { const L = Array.isArray(STORY_CFG.pri) ? STORY_CFG.pri.filter(k => PRI_KINDS.some(q => q[0] === k)) : []; PRI_KINDS.forEach(([k], i) => { if (!L.includes(k)) L.splice(Math.min(i, L.length), 0, k); }); return L; };   // (a kind missing from a saved order: at its own place)
+// what member m needs and how short their home is of KEEP FOR days of it: { m, k, n (to buy), sd (days of stock), H (their home) }
+function famShort(m) {
+  const N = stNeeds(m), H = stHome(m); if (!N || !H || stGone(m.id)) return null;
+  const u = stU('c' + m.id), have = stN(H, N.k) - u.f, sd = Math.max(0, have) / N.per;
+  const n = Math.ceil(STORY_CFG.keepD * N.per - have - 1e-6); return n >= 1 ? { m, k: N.k, n, sd, H } : null;
+}
+// the family members c cares for who are short, the shortest first
+const famShorts = c => charsAll().filter(m => m !== c && famOf(c.id, m.id)).map(famShort).filter(Boolean).sort((a, b) => a.sd - b.sd);
+// the nearest market to x that has good k
+const famMarket = (k, x) => strsUsed().filter(o => strMarket(o) && marketSells(o).includes(k) && stN(o, k) > 0).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] || null;
+// earning (who: a character id): the quickest way they have - a fishing boat they can use, the fish area nearest it, the market nearest that
+// to sell at; null: no way to earn
+function famEarn(who, x) {
+  const boats = jetboats.filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && v.kind === 'fish' && famCanUse(who, v) && famReaches(who, v));
+  const areas = NATURE.filter(a => a.k === 'fish'), mk = strsUsed().filter(strMarket);
+  let best = null;
+  for (const v of boats) for (const a of areas) { const ax = (a.x0 + a.x1) / 2, d = Math.abs(v.x - x) + Math.abs(ax - v.x); if (!best || d < best.d) best = { d, v, a, ax }; }
+  if (!best || !mk.length) return null;
+  best.M = mk.slice().sort((p, q) => Math.abs(p.x - best.ax) - Math.abs(q.x - best.ax))[0];
+  return best;
+}
+// (a character) whether they can get to vehicle v from home: by hops to where it's put away, or in a car of theirs they can use that drives there
+function famReaches(who, v) {
+  if (who === 'player') return true;
+  const c = charOf(who), H = c && stHome(c), B = v.berth != null ? slStr(v.berth) : null; if (!H || !B) return false;
+  if (folkHops(H, B)) return true;
+  return storyCars.some(q => q.story && q.state === 'run' && q.berth != null && famCanUse(who, q) && folkHops(H, slStr(q.berth)) && folkReach(q, q.x, B.x));
+}
+// a vehicle who may use: their own, or a free one of their family's
+function famCanUse(who, v) { const o = vehOwnerVal(v); if (o === who) return true; return o != null && o !== -1 && famOf(who, o) && v.driven == null && !folkTrip(v) && !(FOLK.st[v.sid] && who !== 'player'); }
+// the steps to keep member m's home stocked, for character who with these coins, carrying so many of the good and so many fish; null: no way
+function famSteps(who, F, coins, carry, fish, x) {
+  const { k, n, H } = F, out = [];
+  if (carry >= 1) return [{ do: 'deliver', k, at: H.id }];
+  const M = famMarket(k, H.x); if (!M) return null;
+  const p = cargoBuyPrice(k);
+  if (coins + cargoCoins('fish', fish) < p) {
+    const E = famEarn(who, x); if (!E) return null;
+    const want = Math.min(NETP.HOLD, Math.ceil((p - coins) / Math.max(1e-6, cargoPrice('fish'))));   // (enough for one: bought, the rest after - as soon as they can)
+    if (fish < want && coins + cargoCoins('fish', fish) < p) out.push({ do: 'fish', k: 'fish', n: want, at: E.a.id, sv: E.v.sv });
+    out.push({ do: 'sell', k: 'fish', at: E.M.id });
+  } else if (coins < p) { const E = famEarn(who, x), S = E ? E.M : strsUsed().filter(strMarket).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]; if (!S) return null; out.push({ do: 'sell', k: 'fish', at: S.id }); }
+  out.push({ do: 'buy', k, n, at: M.id }, { do: 'deliver', k, at: H.id });
+  return out;
+}
+// (a character) what they'll do next, by the order - { pri, why, jobs, start, work } or null: nothing now
+function famDecide(c, S) {
+  const home = stHome(c), x = home ? home.x : 0, day = env.time >= (c.leave ?? 8);
+  for (const kind of priOrder()) {
+    if (kind === 'danger' || kind === 'family') {
+      if (kind === 'family' && !day) continue;
+      for (const F of famShorts(c)) {
+        if (kind === 'danger' && F.sd >= STORY_CFG.urgD) continue;
+        if (OWNERS.some(q => q !== c && FOLK.c[q.id] && FOLK.c[q.id].g && FOLK.c[q.id].g.for === F.m.id)) continue;   // (someone else of the family already on it)
+        const J = famSteps(c.id, F, S.k || 0, 0, 0, x); if (!J) continue;
+        return { pri: kind, for: F.m.id, why: (kind === 'danger' ? 'URGENT: ' : '') + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J };
+      }
+      continue;
+    }
+    const R = folkRoutine(c), tw = R.findIndex(J => J.do === 'tow');
+    if (kind === 'call') { if (tw >= 0 && folkImpNear(0)) return { pri: 'call', why: 'TOWING AN IMPOUNDED VEHICLE BACK', jobs: c.jobs, start: tw }; continue; }
+    // WORK: once a day from the hour they leave; the sick (NEEDS) don't work
+    if (stNeeds(c)) continue;
+    if (!day || W.day === S.day) continue;
+    const RJ = (c.jobs || []).filter(J => J && J.do !== 'tow');   // (a TOW in it is an emergency's, not the day's)
+    if (RJ.length) return { pri: 'work', why: 'ROUTINE', jobs: RJ, work: 1 };
+    if (R.length) continue;   // (on call only)
+    const W0 = c.work != null ? slStr(c.work) : null, sh = W0 && famWorkShort(W0);
+    if (sh) { const src = strsUsed().filter(o => o !== W0 && !strMarket(o) && stN(o, sh) > 0).sort((a, b) => Math.abs(a.x - W0.x) - Math.abs(b.x - W0.x))[0]; if (src) return { pri: 'work', why: 'RESTOCK ' + String(CARGO_LAB[sh] || sh).toUpperCase() + ' AT ' + slPlaceName(W0), jobs: [{ do: 'collect', k: sh, at: src.id }, { do: 'deliver', k: sh, at: W0.id }], work: 1 }; }
+    const E = famEarn(c.id, x); if (E) return { pri: 'work', why: 'EARNING', jobs: [{ do: 'fish', k: 'fish', at: E.a.id }, { do: 'sell', k: 'fish', at: E.M.id }], work: 1 };
+  }
+  return null;
+}
+// what a work place is short of: a good it sells and has none of, or an ingredient of what it makes
+function famWorkShort(o) {
+  if (strMarket(o)) for (const k of marketSells(o)) if (stN(o, k) < 1) return k;
+  const M = stMakes(o); if (M) for (const q of (cargoKind(M.k).needs || [])) if (cargoKind(q.k) && stN(o, q.k) < q.n) return q.k;
+  return null;
+}
+// (STORY > PRIORITIES - NOW) what each character would do at the start of a new story, and why: their first goal's steps, and the player's
+// objective - on a copy of the game's tables, as SIMULATE runs (storySim)
+const famStepTxt = J => { const w = { buy: 'BUY', sell: 'SELL', collect: 'COLLECT', deliver: 'DELIVER', fish: 'FISH', go: 'GO TO', tow: 'TOW' }[J.do] || String(J.do).toUpperCase(), g = J.k ? ' ' + (J.n && J.do !== 'buy' ? J.n + ' ' : '') + String(CARGO_LAB[J.k] || J.k).toUpperCase() : ''; const at = J.do === 'fish' ? 'THE FISH AREA' : J.do === 'tow' ? '' : (slStr(J.at) ? slPlaceName(slStr(J.at)) : ''); return w + g + (at ? ' AT ' + at : ''); };
+function famPreview() {
+  const saved = tablesSave(), was = { STORY, time, sound }, out = [];
+  STORY = true; sound = () => { };
+  try {
+    storyReset(); env.time = Math.max(STORY_CFG.startH, 8); W.day = 1;
+    for (const v of [...storyCars, ...jetboats]) if (v.story && v.state === 'run' && folkOwner(v)) placedPutAway(v);
+    const F = famShorts(PLAYER_C)[0];
+    const P = F && famSteps('player', F, story.coins, slCarry(F.k), slCarry('fish'), (storyHome() || { x: 0 }).x);
+    out.push({ who: 'YOU', why: F ? String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name + ' (' + (F.sd < STORY_CFG.urgD ? 'URGENT' : 'FAMILY NEEDS') + ') - YOUR OBJECTIVE IS THE FIRST' : 'NO FAMILY NEED - NO OBJECTIVE OF ITS OWN', steps: P ? P.map(famStepTxt) : [] });
+    for (const c of OWNERS) {
+      if (stGone(c.id)) continue;
+      const S = { at: (stHome(c) || {}).id || 0, in: 0, j: -1, day: 0, k: c.coins || 0 }; FOLK.c[c.id] = S;
+      const G = famDecide(c, S);
+      out.push({ who: c.name, why: G ? G.why + ' (' + (PRI_KINDS.find(q => q[0] === G.pri) || ['', ''])[1] + ')' : stNeeds(c) ? 'STAYS HOME - SICK' : 'NOTHING TO DO', steps: G ? folkList(G.jobs).slice(G.start || 0).map(J => famStepTxt(Object.assign({}, J, { do: J.pay < 0 ? 'buy' : J.pay > 0 ? 'sell' : J.do }))) : [] });
+      if (G) S.g = G;   // (taken: the next of the family doesn't do the same)
+    }
+  } finally { tablesLoad(saved); STORY = was.STORY; time = was.time; sound = was.sound; }
+  return out;
+}
 
 //@src 50-zzzzz-story-folk.js:1
 /* ================================================================
@@ -78741,8 +78887,10 @@ const folkSid = sid => [...storyCars, ...jetboats].find(v => v.sid === +sid) || 
 const folkTowed = v => !!v && Object.values(FOLK.tow).includes(v.sid);
 // (the fast-forward report - storySim) while it runs: every vehicle a node (FOLK_FAST) and each thing done written down (folkLog)
 let FOLK_FAST = false, FOLK_LOG = null;
+// who is in vehicle v (a family member may be in another's): else its owner
+const folkWho = v => { const c = OWNERS.find(q => FOLK.c[q.id] && FOLK.c[q.id].in === v.sid); return c ? c.id : vehOwnerVal(v); };
 const folkName = id => { const c = OWNERS.find(q => q.id === id); return c ? String(c.name).toUpperCase() : 'SOMEONE'; };
-function folkLog(e) { if (FOLK_LOG) FOLK_LOG.push(Object.assign({ day: W.day || 1, h: env.time || 0, s: time }, e)); }
+function folkLog(e) { if (e.t === 'skip' && FOLK.c[e.who]) FOLK.c[e.who].fail = 1; if (FOLK_LOG) FOLK_LOG.push(Object.assign({ day: W.day || 1, h: env.time || 0, s: time }, e)); }
 const folkWhere = x => { let best = null, bd = Infinity; for (const o of strsUsed()) { const d = Math.abs(o.x - x); if (d < bd) { bd = d; best = o; } } if (best && bd < 30 * UPM) return slPlaceName(best); if (NATURE.some(a => a.k === 'fish' && x > a.x0 && x < a.x1)) return 'THE FISH AREA'; return best && bd < 60 * UPM ? slPlaceName(best) : Math.round(x / UPM) + ' M'; };   // (a place by it first, else the fish area it's in)
 // how many a job wants (its N; none: all - a full hold, all there is, all they carry)
 const folkN = (J, all) => J && J.n > 0 ? Math.min(J.n, all) : all;
@@ -78750,11 +78898,15 @@ const folkTrip = v => v && v.sid != null ? FOLK.v[v.sid] || null : null;
 const folkAway = v => { const T = folkTrip(v); return (!!T && !!T.away) || folkTowed(v); };   // (towed: it follows its truck, nothing of its own stepped)
 const folkBoat = v => jetboats.includes(v);
 // a character's vehicles: the placed cars and boats whose OWNER they are
-const folkVehs = c => [...storyCars, ...jetboats].filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && vehOwnerVal(v) === c.id);
+const folkVehs = c => [...storyCars, ...jetboats].filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && (vehOwnerVal(v) === c.id || (FOLK.c[c.id] || {}).in === v.sid || famCanUse(c.id, v)));   // (and their FAMILY's while free - 50-zzzzz-story-family.js)
 // a job's verb as the routine does it (the one list - VERBS): BUY is COLLECT from a market's stock, SELL is DELIVER into it (a character's
 // coins aren't kept yet)
 const folkDo = J => J.do === 'buy' ? 'collect' : J.do === 'sell' ? 'deliver' : J.do;
-const folkJobs = c => (Array.isArray(c.jobs) ? c.jobs : []).map(J => J && Object.assign({}, J, { do: folkDo(J) })).filter(J => J && (J.do === 'tow' || (J.do === 'fish' ? NATURE.some(a => a.id === J.at) : !!slStr(J.at))));   // (TOW: wherever the impounded are)
+// what they're doing now: the goal the PRIORITIES set (S.g - its jobs: a ROUTINE, a family member's medicine...) - famDecide; their ROUTINE as
+// written (folkRoutine). BUY / SELL pay (pay -1 / 1): their coins (S.k)
+const folkList = L => (Array.isArray(L) ? L : []).map(J => J && Object.assign({}, J, { do: folkDo(J), pay: J.do === 'buy' ? -1 : J.do === 'sell' ? 1 : 0 })).filter(J => J && (J.do === 'tow' || (J.do === 'fish' ? NATURE.some(a => a.id === J.at) : !!slStr(J.at))));   // (TOW: wherever the impounded are)
+const folkRoutine = c => folkList(c.jobs);
+const folkJobs = c => { const S = FOLK.c[c.id]; return folkList(S && S.g ? S.g.jobs : c.jobs); };
 // (a structure kept over the water - a dock - counts as a way for either: a car drives its deck, a boat comes alongside)
 const folkDeck = x => strsUsed().some(o => o.k === 'dock' && (() => { const B = strBox(o); return x > B.x0 && x < B.x1; })());
 // whether vehicle v can go from a to b: a car over land all the way, a boat over water (the ends free within STORY_PARK_M)
@@ -78793,13 +78945,13 @@ const folkAtPlace = (P, T) => !!T.o && folkHops(P, T.o);
 const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
 // send vehicle v off to x, to tie up at structure park (or to a fish area)
 function folkGo(v, x, park, fish) {
-  folkLog({ t: 'go', who: vehOwnerVal(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
+  folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
   if (v.berth != null) { v.berth = null; v.spot = null; }
   FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v))) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 };
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
-  const o = slStr(T.park); delete FOLK.v[v.sid]; if (FOLK.ride && FOLK.ride.sid === v.sid && o) folkJail(o); folkLog({ t: 'arrive', who: vehOwnerVal(v), sid: v.sid, at: o ? slPlaceName(o) : folkWhere(v.x) }); v.npcV = 0; v.vDrive = 0;
+  const o = slStr(T.park); delete FOLK.v[v.sid]; if (FOLK.ride && FOLK.ride.sid === v.sid && o) folkJail(o); folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: o ? slPlaceName(o) : folkWhere(v.x) }); v.npcV = 0; v.vDrive = 0;
   if (!o) return;
   const sp = storyFreeSpot(o, v); if (sp < 0) return;
   v.berth = o.id; v.spot = sp; v.x = storySpotX(o, sp);
@@ -78884,7 +79036,7 @@ function folkArrest(q, st) {
 // back with its owner (towed - TOW); with no one in the world who tows, the one night (user 18:40: "you would stay in prison waiting until your
 // car gets returned by the tow truck. Or at least a day minimum")
 const folkSay = (id, txt, at) => { story.say = { id, txt, who: -1, at, n: ((story.say && story.say.n) || 0) + 1, open: 1 }; };
-const folkTowers = () => OWNERS.some(c => !stGone(c.id) && folkJobs(c).some(J => J.do === 'tow'));
+const folkTowers = () => OWNERS.some(c => !stGone(c.id) && folkRoutine(c).some(J => J.do === 'tow'));
 function folkJail(st) {
   FOLK.ride = null; FOLK.jail = { st: st.id, day: (env.time < 5 ? W.day : W.day + 1) };
   storyGo(0, st.id, true, true, true);
@@ -78954,8 +79106,8 @@ function folkPlan(c, S) {
     // COLLECT / DELIVER from the vehicle stopped beside the place (as a market's sellers - it needn't be put away there)
     if (J && T.o) {
       if (folkBeside(v, T.o)) {
-        if (J.do === 'collect') { const n = folkN(J, stN(T.o, J.k)); if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }
-        else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { cargoAdd(v, J.k, -n); stAdd(T.o, J.k, n); } folkLog({ t: 'job', who: c.id, verb: 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }
+        if (J.do === 'collect') { let n = folkN(J, stN(T.o, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
+        else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { cargoAdd(v, J.k, -n); stAdd(T.o, J.k, n); if (J.pay > 0) S.k = (S.k || 0) + cargoCoins(J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
         S.j++; return;
       }
       if (can(v)) { folkGo(v, T.x, null); return; }
@@ -78989,33 +79141,40 @@ function folkDrive(v, T, dt) {
   const near = !FOLK_FAST && tierAt(v.x) === 0, spd = (v.v || 60) * (T.cop ? 0.95 : 0.6);   // (the police: near its top speed)
   if (!near) {
     T.away = 1; v.npcV = 0; v.vDrive = 0;
-    if (T.fish && Math.abs(T.x - v.x) < spd * dt + 1) { v.x = T.x; T.c = (T.c || 0) + (STORY_CFG.fishM ?? 10) * dt / 60; const want = T.n || NETP.HOLD, n = Math.min(want - cargoN(v, 'fish'), Math.floor(T.c)); if (n > 0) { cargoAdd(v, 'fish', n); T.c -= n; } if (cargoN(v, 'fish') >= want) { delete FOLK.v[v.sid]; folkLog({ t: 'job', who: vehOwnerVal(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); } return; }
+    if (T.fish && Math.abs(T.x - v.x) < spd * dt + 1) { v.x = T.x; T.c = (T.c || 0) + (STORY_CFG.fishM ?? 10) * dt / 60; const want = T.n || NETP.HOLD, n = Math.min(want - cargoN(v, 'fish'), Math.floor(T.c)); if (n > 0) { cargoAdd(v, 'fish', n); T.c -= n; } if (cargoN(v, 'fish') >= want) { delete FOLK.v[v.sid]; folkLog({ t: 'job', who: folkWho(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); } return; }
     const d = T.x - v.x, s = Math.min(Math.abs(d), spd * dt); v.x += Math.sign(d) * s; v.dir = Math.sign(d) || v.dir;
     if (folkBoat(v)) v.y = surfaceY(v.x); else { const g = landTop(v.x, v.lay || 0); if (Number.isFinite(g)) v.y = g; }
-    if (Math.abs(T.x - v.x) < 1 && !T.cop) { if (T.park) folkTie(v, T); else { delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: vehOwnerVal(v), sid: v.sid, at: folkWhere(v.x) }); } }
+    if (Math.abs(T.x - v.x) < 1 && !T.cop) { if (T.park) folkTie(v, T); else { delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } }
     return;
   }
   if (T.away) { T.away = 0; if (!folkBoat(v)) { v.rest = 0; v.set = 0; } }   // (in view: the real vehicle again, where the node is)
   if (T.fish) {                                                            // (near: the net worked to and fro)
     const A = NATURE.find(a => Math.abs((a.x0 + a.x1) / 2 - T.x) < 1);
-    if (cargoN(v, 'fish') >= (T.n || NETP.HOLD)) { if (v.net) v.net.cmd = -1; delete FOLK.v[v.sid]; folkLog({ t: 'job', who: vehOwnerVal(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); return; }
+    if (cargoN(v, 'fish') >= (T.n || NETP.HOLD)) { if (v.net) v.net.cmd = -1; delete FOLK.v[v.sid]; folkLog({ t: 'job', who: folkWho(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); return; }
     if (A && v.x > A.x0 && v.x < A.x1) { if ((v.dir > 0 && v.x > A.x1 - 30) || (v.dir < 0 && v.x < A.x0 + 30)) v.dir = -v.dir; v.npcV = v.v * 0.25; if (v.kind === 'fish') { const N = netOf(v); N.cmd = N.n >= 40 ? -1 : N.L < 18 * UPM ? 1 : 0; } return; }
   }
   const d = T.x - v.x;
   if (v.net) v.net.cmd = -1;
-  if (Math.abs(d) < 1.5 * UPM && !T.cop) { v.x = T.x; if (T.park) folkTie(v, T); else { v.npcV = 0; delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: vehOwnerVal(v), sid: v.sid, at: folkWhere(v.x) }); } return; }
+  if (Math.abs(d) < 1.5 * UPM && !T.cop) { v.x = T.x; if (T.park) folkTie(v, T); else { v.npcV = 0; delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } return; }
   v.dir = Math.sign(d); v.npcV = Math.min(spd, Math.abs(d) * 2 + 4);
 }
 function folkStep(dt) {
   if (!STORY) return;
   for (const c of OWNERS) {
-    if (!folkJobs(c).length || stGone(c.id)) continue;
-    const S = FOLK.c[c.id] || (FOLK.c[c.id] = { at: (stHome(c) || {}).id || 0, in: 0, j: -1, day: 0 });
+    if (stGone(c.id)) continue;
+    const S = FOLK.c[c.id] || (FOLK.c[c.id] = { at: (stHome(c) || {}).id || 0, in: 0, j: -1, day: 0, k: c.coins || 0 });   // (k: their coins - COINS, STORY > CHARACTERS)
+    if (S.k == null) S.k = c.coins || 0;
+    // (user Nov 19 21:02-21:10) what they do next: the first of the PRIORITIES that holds, decided at home between jobs (famDecide, 50-zzzzz-story-family.js);
+    // a family member in danger drops whatever else they're doing at their next stop
     if (S.j < 0) {
-      const home = S.at === ((stHome(c) || {}).id || 0), tw = folkJobs(c).findIndex(J => J.do === 'tow');
-      if (home && W.day !== S.day && env.time >= (c.leave ?? 8)) { S.j = 0; S.day = W.day; folkLog({ t: 'leave', who: c.id }); }
-      else if (home && tw >= 0 && folkImpNear(0)) { S.j = tw; folkLog({ t: 'leave', who: c.id }); }   // (a TOW in their routine: on call - out as soon as something is impounded)
-      else continue;
+      if (S.at !== ((stHome(c) || {}).id || 0) || S.nx > time) continue;
+      if (S.fail) { S.fail = 0; S.nx = time + 30; continue; }   // (a job of the last left undone - no way there: they try again in a while)
+      S.g = null; const G = famDecide(c, S); if (!G) { S.nx = time + 1; continue; }   // (nothing to do: a look a second)
+      S.g = G; S.j = G.start || 0; if (G.work) S.day = W.day; folkLog({ t: 'leave', who: c.id, why: G.why });
+    } else if (S.g && S.g.pri !== 'danger' && !(S.in && FOLK.v[S.in]) && !S.carry) {
+      const F = famShorts(c).find(q => q.sd < STORY_CFG.urgD && !OWNERS.some(o => o !== c && FOLK.c[o.id] && FOLK.c[o.id].g && FOLK.c[o.id].g.for === q.m.id));
+      const v = S.in ? folkSid(S.in) : null, J = F && famSteps(c.id, F, S.k || 0, v ? cargoN(v, F.k) : 0, v ? cargoN(v, 'fish') : 0, v ? v.x : (slStr(S.at) || {}).x || 0);
+      if (J) { S.g = { pri: 'danger', for: F.m.id, why: 'URGENT: ' + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J }; S.j = 0; folkLog({ t: 'leave', who: c.id, why: S.g.why }); }
     }
     if ((S.wait || S.stuck) && S.nx > time) continue;                                  // (waiting: a look a second)
     if (S.j > folkJobs(c).length) S.j = folkJobs(c).length;               // (all done: home - folkTarget with no job)
@@ -79079,7 +79238,7 @@ function storySim(days) {
 function folkNext(o, k) {
   let best = null;
   for (const c of OWNERS) {
-    if (stGone(c.id)) continue; const jobs = folkJobs(c), i = jobs.findIndex(J => J.do === 'deliver' && J.k === k && J.at === o.id); if (i < 0) continue;
+    if (stGone(c.id)) continue; const jobs = folkRoutine(c), i = jobs.findIndex(J => J.do === 'deliver' && J.k === k && J.at === o.id); if (i < 0) continue;
     const S = FOLK.c[c.id], out = S && S.j >= 0 && S.j <= i, later = !(S && S.day === W.day) && env.time < (c.leave ?? 8);
     const d = out || later ? 0 : 1; if (best == null || d < best) best = d;
   }
@@ -79186,13 +79345,16 @@ const slHousehold = c => !!c && famOf('player', c.id);   // (your FAMILY - STORY
 function slWantOf(c) {
   const out = [], N = stNeeds(c), home = stHome(c);
   if (N && !stGone(c.id)) {
-    const u = stU('c' + c.id), left = stN(home, N.k) - u.f;
-    if (left < 1 - 1e-9) {
+    const u = stU('c' + c.id), left = stN(home, N.k) - u.f, F = slHousehold(c) ? famShort(c) : null;
+    // said when less than one whole is left; your family's, short of KEEP FOR days: your objective all the same - the first of the steps
+    // a character would take (famSteps, 50-zzzzz-story-family.js): deliver what you carry, buy it, short of coins earn first (fish, sell)
+    if (left < 1 - 1e-9 || F) {
       const d = stDays(c), n = Math.max(0, Math.ceil(d - 1e-6)), gd = String(CARGO_LAB[N.k] || N.k).toUpperCase();
-      const w = { id: 'w:need:' + c.id + ':' + N.k, who: c.id, txt: 'I NEED ' + gd + '. ' + n + (n === 1 ? ' DAY' : ' DAYS') + ' LEFT.', d, k: N.k, to: '', do: 'go' };
-      if (slHousehold(c)) {
-        if (slCarry(N.k) > 0) Object.assign(w, { to: 's:' + home.id, do: 'deliver' });
-        else { const M = strsUsed().filter(o => strMarket(o) && marketSells(o).includes(N.k) && stN(o, N.k) > 0).sort((a, b) => Math.abs(a.x - home.x) - Math.abs(b.x - home.x))[0]; if (M) Object.assign(w, { to: 's:' + M.id, do: 'buy' }); }
+      const w = { id: 'w:need:' + c.id + ':' + N.k, who: c.id, txt: 'I NEED ' + gd + '. ' + n + (n === 1 ? ' DAY' : ' DAYS') + ' LEFT.', d, k: N.k, to: '', do: 'go', quiet: left >= 1 - 1e-9 };
+      if (F) {
+        const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : home.x) : home.x;
+        const S0 = (famSteps('player', F, story.coins, slCarry(N.k), slCarry('fish'), x) || [])[0];
+        if (S0) Object.assign(w, S0.do === 'fish' ? { to: 'k:' + S0.sv, do: 'fish', k: 'fish', n: S0.n } : { to: 's:' + S0.at, do: S0.do, k: S0.k, n: S0.do === 'buy' ? 0 : S0.n });
       }
       out.push(w);
     }
@@ -79207,14 +79369,14 @@ function slWantOf(c) {
 // the wants said at a place: of those who live there or own it (a market's or a maker's own wants only there)
 function slWantsAt(o) {
   const out = [];
-  for (const c of OWNERS) { if (stGone(c.id) || !(c.home === o.id || o.own === c.id)) continue; for (const w of slWantOf(c)) if (w.at == null ? c.home === o.id || !stHome(c) : w.at === o.id) out.push(w); }
+  for (const c of OWNERS) { if (stGone(c.id) || !(c.home === o.id || o.own === c.id)) continue; for (const w of slWantOf(c)) if (!w.quiet && (w.at == null ? c.home === o.id || !stHome(c) : w.at === o.id)) out.push(w); }
   return out.sort((a, b) => a.d - b.d);
 }
 // no objective: the most pressing of your household's wants that has one (silently - its line is said when you meet them)
 function slAutoObj() {
   if (story.obj) return; let best = null;
   for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id)) for (const w of slWantOf(c)) if (w.to && (!best || w.d < best.d)) best = w;
-  if (best) { story.obj = { to: best.to, do: best.do, k: best.k, line: best.id }; OBJFLY.t = -9; }
+  if (best) { story.obj = { to: best.to, do: best.do, k: best.k, n: best.n || 0, line: best.id }; OBJFLY.t = -9; }
 }
 // the text as said: {N} what the place holds of the objective's good, {DAYS} how long the one speaking lasts on what they need (else
 // the soonest of those who live here, else the countdown's), {COINS}, {PRICE} its price
@@ -79254,7 +79416,7 @@ function slHere(to) {
 function storyObjStep() {
   if (STORY && !story.obj && !(story.say && story.say.open) && !story.wake) slAutoObj();
   const g = story.obj; if (!STORY || !g || (story.say && story.say.open) || story.wake) return;
-  if (g.do === 'collect' || g.do === 'fish') { if (g.k && slCarry(g.k) > 0 && (g.to[0] !== 'k' || storyVehs().some(v => storyYours(v) && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) slObjDone(); return; }
+  if (g.do === 'collect' || g.do === 'fish') { if (g.k && slCarry(g.k) >= Math.max(1, g.n || 0) && (g.to[0] !== 'k' || storyVehs().some(v => storyYours(v) && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) slObjDone(); return; }
   if (!slHere(g.to)) return;
   if (g.do === 'go') { slObjDone(); return; }
   if (g.do === 'deliver' || g.do === 'bring') {
