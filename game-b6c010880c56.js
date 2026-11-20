@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1191;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1192;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79440,10 +79440,10 @@ function benchFill(P, el, css) {
   if (!P.hidden && BENCH.sig !== benchSig()) { BENCH.sig = benchSig(); try { BENCH.out = benchRead(M); BENCH.err = null; } catch (e) { BENCH.out = null; BENCH.err = String(e && e.message || e); } }
   const help = (l, tip) => { l.title = tip; l.dataset.help = tip; return l; };
   const line = (c, t, col) => { const d = el('div', ''); d.textContent = t; d.style.cssText = 'font-size:11px;line-height:1.5;white-space:pre-wrap;color:' + (col || '#d8dce8'); c.appendChild(d); return d; };
-  const sec = name => { const s = el('div', 'osec'); s.appendChild(el('h3', '', name)); P.appendChild(s); return s; };
+  const sec = name => { const s = el('div', 'osec'); s.style.flex = '0 1 auto'; s.appendChild(el('h3', '', name)); P.appendChild(s); return s; };   // (user Nov 20 13:11: "They should resize based on their contents") each half as wide as what's in it
   // LEFT: what they see
   const L = sec('WHAT ' + (mine ? 'YOU SEE' : benchName(M.who) + ' DOES')), O = BENCH.out;
-  L.style.flex = '1 1 0';   // (the halves as wide as each other)
+
   const head = t => { const h = el('h4', '', t); h.style.cssText = 'margin:6px 0 2px;font-size:11px;color:#9aa3b8'; L.appendChild(h); };
   if (BENCH.err) line(L, 'ERROR: ' + BENCH.err, '#ff6a5a');
   if (BENCH.said && BENCH.said.length) { head('JUST SAID'); for (const [w, t] of BENCH.said) line(L, (w === -1 || w == null ? '' : benchName(w) + ': ') + t, '#c08cff'); }
