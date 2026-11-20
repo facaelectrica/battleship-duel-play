@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1166;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 11:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1167;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 11:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -76235,6 +76235,9 @@ function styFill(el) {
   const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:2px 6px';
   const cat = name => { const c = el('div', 'cat'); c.appendChild(el('h4', '', name)); const P = STY.panes[STY_TABS[name]]; if (P) P.appendChild(c); return c; };
   const help = (l, tip) => { l.title = tip; l.dataset.help = tip; };
+  // (user Nov 20 10:25: "similar to the lists we have in the world plan") a list tab: its entries down the left, the picked one's settings beside it
+  const listCat = (tab, head) => { const P = STY.panes[tab] || el('div', ''); if (typeof dsnCss === 'function') dsnCss(); P.className = 'dsn';   // (a tab not built yet: drawn into nothing)
+    const list = el('div', 'dlist'), body = el('div', 'dbody'), c = el('div', 'cat'); c.appendChild(el('h4', '', head)); body.appendChild(c); P.append(list, body); return [list, c]; };
   // a slider row writing STORY_CFG[k]
   const slider = (c, lab, k, lo, hi, st, unit, tip, fmt) => {
     const r = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output'), d = STORY_CFG_DEF[k];
@@ -76262,7 +76265,8 @@ function styFill(el) {
     num(c, 'COINS', () => STORY_CFG.coins, v => { STORY_CFG.coins = v; storyCfgSave(); }, 'Coins a new story starts with');
     for (const C of CARGO.filter(q => q.inv)) num(c, C.name, () => STORY_CFG.inv[C.k] || 0, v => { STORY_CFG.inv[C.k] = v; storyCfgSave(); }, C.name.charAt(0) + C.name.slice(1).toLowerCase() + ' a new story starts with'); }
   // OWNERS
-  { const c = cat('CHARACTERS');
+  { const [list, c] = listCat('CHARACTERS', 'CHARACTER');
+    if (!charsAll().some(q => q.id === STY.open)) STY.open = PLAYER_C.id;   // (one is always open - the player first)
     const sub = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
     const pick = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
     const cid = v => v === 'player' ? 'player' : +v;
@@ -76285,14 +76289,14 @@ function styFill(el) {
       const id = o.id, r = el('div', 'row');
       // (user Nov 19 22:27: "I cannot close after adding a character to be just the name like the other characters ... creating a character and
       // then exiting that to create another character") one character open at a time (STY.open): the others are just their names - pressed, open
-      if (STY.open !== id) { const b = el('button', '', o === PLAYER_C ? 'PLAYER (YOU)' : o.name); b.title = 'Open to edit'; b.style.cssText = 'text-align:left;min-width:160px'; b.onclick = () => { STY.open = id; storyTabSync(); }; r.append(b); c.appendChild(r); continue; }
-      const shut = el('button', '', 'CLOSE'); shut.title = 'Done with this character: back to just the names'; shut.onclick = () => { STY.open = null; storyTabSync(); };
-      if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t, shut); c.appendChild(r); famRows(o, true); continue; }
+      { const b = el('button', '', o === PLAYER_C ? 'PLAYER (YOU)' : o.name); b.title = 'Edit'; b.classList.toggle('on', STY.open === id); b.onclick = () => { STY.open = id; storyTabSync(); }; list.appendChild(b); }
+      if (STY.open !== id) continue;
+      if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); famRows(o, true); continue; }
       const i = el('input'); i.type = 'text'; i.value = o.name; i.style.cssText = css + ';width:140px'; i.title = 'Their name'; if (STY.added === o.id) { STY.added = null; STY.focus = i; }
       i.onchange = () => { o.name = (i.value.trim() || o.name).toUpperCase(); i.value = o.name; ownersSave(); };
       const del = el('button', '', 'DELETE'); del.title = 'Remove this character (what they own: nobody\'s)';
       del.onclick = () => { STY.open = null; for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
-      r.append(i, shut, del); c.appendChild(r);
+      r.append(i, del); c.appendChild(r);
       // (user Nov 19: "we can set any entity as sick") where they live, and what they need a day from its stock (50-zzzzz-story-stock.js)
       const r2 = el('div', 'row'); r2.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
       const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
@@ -76312,7 +76316,7 @@ function styFill(el) {
     }
     const add = el('button', '', 'ADD CHARACTER'); add.title = 'A new character: an owner of places and vehicles';
     add.onclick = () => { const id = Math.max(1, ...OWNERS.map(q => q.id)) + 1; OWNERS.push({ id, name: 'CHARACTER ' + id }); STY.added = id; STY.open = id; ownersSave(); storyTabSync(); };
-    c.appendChild(add); }
+    list.appendChild(add); }
   // CARGO
   { const c = cat('CARGO');
     for (const C of CARGO) {
@@ -76347,7 +76351,8 @@ function styFill(el) {
     c.appendChild(add); }
   // LINES (user Nov 19, story-systems chat): what each place says, when (read from the game), and the objective it sets - the
   // first line of a place whose WHEN holds is the one said (50-zzzzz-story-lines.js)
-  { const c = cat('LINES');
+  { const [list, c] = listCat('LINES', 'LINE');
+    if (!SLINES.some(q => q.id === STY.line)) STY.line = SLINES[0] ? SLINES[0].id : null;   // (one is always open)
     const sel = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + (w || 110) + 'px'; if (tip) s.title = tip; for (const [v, lab] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = lab; s.appendChild(z); } s.value = String(val); s.onchange = () => { set(s.value); slinesSave(); storyTabSync(); }; return s; };
     const goods = CARGO.map(C => [C.k, C.name]), places = STRS.map(o => [o.id, strName(o)]);
     const dests = [['', 'NONE'], ...STRS.map(o => ['s:' + o.id, strName(o)]), ...Object.keys(STR_VEHS).map(sv => ['k:' + sv, 'YOUR ' + String(STR_VEHS[sv].lab).toUpperCase()])];
@@ -76358,16 +76363,15 @@ function styFill(el) {
       // (user Nov 19 22:46, the characters' list: "check if you didn't do similar errors") one line open at a time (STY.line): the others are
       // a row each - who says it and how it starts; pressed, open; CLOSE back
       const who = (whos.find(w => String(w[0]) === String(l.who)) || [0, 'NOBODY'])[1], txt = (l.text || '').trim();
-      if (STY.line !== l.id) { const b = el('button', '', 'LINE ' + (i + 1) + ' · ' + who + (txt ? ' · ' + (txt.length > 34 ? txt.slice(0, 34) + '…' : txt) : '')); b.title = 'Open to edit'; b.style.cssText = 'text-align:left;display:block;width:100%;margin:2px 0'; b.onclick = () => { STY.line = l.id; storyTabSync(); }; c.appendChild(b); return; }
-      const hd = el('h4', '', 'LINE ' + (i + 1)); hd.style.marginTop = '10px'; c.appendChild(hd);
+      { const b = el('button', '', 'LINE ' + (i + 1) + ' · ' + who + (txt ? ' · ' + (txt.length > 24 ? txt.slice(0, 24) + '…' : txt) : '')); b.title = 'Edit'; b.classList.toggle('on', STY.line === l.id); b.onclick = () => { STY.line = l.id; storyTabSync(); }; list.appendChild(b); }
+      if (STY.line !== l.id) return;
       const up = el('button', '', '↑'), dn = el('button', '', '↓'), del = el('button', '', 'DELETE');
       up.title = 'Checked earlier'; dn.title = 'Checked later'; del.title = 'Remove this line';
       up.onclick = () => { if (i) { [SLINES[i - 1], SLINES[i]] = [SLINES[i], SLINES[i - 1]]; slinesSave(); storyTabSync(); } };
       dn.onclick = () => { if (i < SLINES.length - 1) { [SLINES[i + 1], SLINES[i]] = [SLINES[i], SLINES[i + 1]]; slinesSave(); storyTabSync(); } };
       del.onclick = () => { STY.line = null; SLINES.splice(i, 1); slinesSave(); storyTabSync(); };
-      const shut = el('button', '', 'CLOSE'); shut.title = 'Done with this line: back to the list'; shut.onclick = () => { STY.line = null; storyTabSync(); };
       row(lab('SAID BY', 'The character who says it'), sel(whos, l.who, v => { l.who = /^-?\d+$/.test(v) ? +v : v; }, 120, 'Who says it'),
-        lab('WHERE', 'Where it is said'), sel([[0, 'WHERE THEY ARE'], ...places], l.at, v => { l.at = +v; }, 140, 'Where it is said: where they are, or one place'), up, dn, shut, del);
+        lab('WHERE', 'Where it is said'), sel([[0, 'WHERE THEY ARE'], ...places], l.at, v => { l.at = +v; }, 140, 'Where it is said: where they are, or one place'), up, dn, del);
       // WHEN: each condition on a row
       l.when.forEach((q, j) => {
         const kids = [lab(j ? 'AND' : 'ONLY WHEN', 'Said only while this holds'), sel(SL_CONDS, q.t, v => { q.t = v; q.k = v === 'goal' ? 'none' : v === 'said' ? (SLINES[0] || {}).id || '' : v === 'alive' || v === 'lasts' ? (whos[1] || [''])[0] : (goods[0] || [''])[0]; q.op = v === 'said' || v === 'alive' ? 'yes' : v === 'lasts' ? '<' : '>'; q.n = 0; }, 110, 'What is checked')];
@@ -76397,7 +76401,7 @@ function styFill(el) {
     });
     const add = el('button', '', 'ADD LINE'); add.title = 'A new line';
     add.onclick = () => { const id = slNewId(); SLINES.push({ id, who: -1, at: 0, when: [], text: '', to: '', do: 'go', k: '' }); STY.line = id; slinesSave(); storyTabSync(); };
-    c.appendChild(add); }
+    list.appendChild(add); }
   // PRIORITIES (user Nov 19 21:14: "can you make a way that this logic is visible to me and editable?"): the order, its numbers, and what
   // each character would do at a new story's start (famPreview, 50-zzzzz-story-family.js)
   { const c = cat('PRIORITIES');
@@ -76969,6 +76973,7 @@ const DSN_CSS = `
 #skyEd .dsn > .dlist button { text-align: left; }
 #skyEd .dsn > .dbody { flex: 1 1 0; min-width: 0; }
 `;
+const dsnCss = () => { if (!document.getElementById('dsnCss')) { const st = document.createElement('style'); st.id = 'dsnCss'; st.textContent = DSN_CSS; document.head.appendChild(st); } };
 // the list: [heading, [[id, name], ...]] - structures by their type (every house one HOUSE), vehicles by family
 const dsnGroups = w => {
   const G = new Map(), add = (g, q) => { if (!G.has(g)) G.set(g, []); G.get(g).push(q); };
@@ -76996,7 +77001,7 @@ function dsnSync(w) {
   if (w === 's') { const p = pfGet(id); if (p) pfStructBox(p, box, el, css); } else pfVehBox(id, box, el, css);
 }
 for (const [t, w] of [['STRUCTURE DESIGNS', 's'], ['VEHICLE DESIGNS', 'v']]) NSKY.editor.TUNE.pane(t, (pane, el) => {
-  if (!document.getElementById('dsnCss')) { const st = document.createElement('style'); st.id = 'dsnCss'; st.textContent = DSN_CSS; document.head.appendChild(st); }
+  dsnCss();
   pane.className = 'dsn';
   const list = el('div', 'dlist'), body = el('div', 'dbody'); pane.append(list, body);
   DSN.ui[w] = { list, body, el, css: 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:220px' };
