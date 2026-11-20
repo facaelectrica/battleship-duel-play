@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1164, build: 'NOV 20 11:15', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1164, build: 'NOV 20 11:22', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -13170,7 +13170,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1164;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 11:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 20 11:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14728,6 +14728,54 @@ const edTiny = units => !!PHOTO.ed && units * SV < ED_TINY_PX;
    for it: room - the screen pixels between it and its neighbours (a shape's points); a third of that at most, never under
    ED_HANDLE_MIN - one size rule for every handle, in canvas pixels */
 const ED_HANDLE_MIN = 3;
+/* (user Nov 20 10:15: "a major issue with precision selection ... Even if the mouse is exactly on top of the point that I click, it's selecting the
+   terrain segment below ... as if there's this giant fat radius ... or some things are above the others, even if the point visually is away from other
+   objects") ONE PICK FOR THE WORLD EDITOR. Each kind's press handler took a press when anything of its own was within its reach, in the order the
+   handlers were made - the terrain's first, so a terrain line within reach took a press right on an area's corner. Now each kind says what it has
+   under a press and how near (ED_PICKS[kind](ev): [0, distance] a handle - a point, a corner, a mover, an end; [1, distance] a line; [2, area] the
+   inside of a box; null nothing) and the press is the best one's (edPickOf): a handle before a line, a line before a box; the nearest handle or line,
+   the smallest box - a handle or line only within reach (not under the pointer: ED_ON) after the boxes. A kind's handler takes the press only when it's its own (edPickLost). (Markers - drawn over everything - before all: TUNE.press.)
+   A new kind of thing to pick joins ED_PICKS and asks edPickLost first; a click again on the same place picks the next one there (ED_CYC). */
+const ED_PICKS = {};
+/* (user Nov 20 10:19: "like in Unity and 3ds Max, where if I click twice on an area and there's two things overlapping, it would cycle between the
+   different things below") a click again where the last click was, without dragging, picks the next kind of thing under it (each kind's own
+   things in turn first - the terrain's points and lines: islCycleAt / islCycleUp); a press there keeps what's picked (so it still drags).
+   ED_CYC: where the last click was and what it picked (cx, cy, k); press: this press - what's under it in order (L), the pick (k), where */
+const ED_ON = [8, 4];   // (screen points: a handle, a line under the pointer)
+const ED_CYC = { cx: -1e9, cy: -1e9, k: null, press: null };
+function edPickOf(ev) {
+  if (ev.__edPick !== undefined) return ev.__edPick;
+  const L = [];
+  // (a handle or a line only within reach but not under the pointer - more than ED_ON screen points from it - comes after the boxes the press is in:
+  // the reach is for a press beside nothing else)
+  const u = Math.abs(screenToWorld(ev.clientX + 10, ev.clientY)[0] - screenToWorld(ev.clientX, ev.clientY)[0]) / 10 || 1;   // (world units a screen point)
+  for (const k in ED_PICKS) { let c = null; try { c = ED_PICKS[k](ev); } catch (e) { c = null; } if (c) L.push([k, c[0] < 2 && c[1] > ED_ON[c[0]] * u ? c[0] + 3 : c[0], c[1]]); }
+  L.sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+  let w = L.length ? L[0][0] : null;
+  const again = !ev.shiftKey && Math.hypot(ev.clientX - ED_CYC.cx, ev.clientY - ED_CYC.cy) <= 8;
+  if (again && L.some(c => c[0] === ED_CYC.k)) w = ED_CYC.k;   // (a press where the last click was: what it picked kept)
+  if (!ev.__edSynth) ED_CYC.press = { id: ev.pointerId, cx: ev.clientX, cy: ev.clientY, L: L.map(c => c[0]), k: w, again, moved: false, tgt: ev.target, type: ev.pointerType };
+  return (ev.__edPick = w);
+}
+window.addEventListener('pointermove', ev => { const P = ED_CYC.press; if (P && P.id === ev.pointerId && Math.hypot(ev.clientX - P.cx, ev.clientY - P.cy) > 6) P.moved = true; }, { capture: true, passive: true });
+window.addEventListener('pointerup', ev => {
+  const P = ED_CYC.press; if (!P || P.id !== ev.pointerId || ev.__edSynth) return; ED_CYC.press = null;
+  if (P.moved || Math.hypot(ev.clientX - P.cx, ev.clientY - P.cy) > 6) { ED_CYC.cx = ED_CYC.cy = -1e9; ED_CYC.k = P.k; return; }   // (a drag: no click to click again on)
+  Object.assign(ED_CYC, { cx: P.cx, cy: P.cy, k: P.k });
+  if (!P.again || P.L.length < 2 || P.k == null) return;
+  // (the terrain's own things under it first - its points, then its lines: islCycleUp steps them, the next kind once they've all been picked)
+  if (P.k === 'terrain' && typeof ISL_ED !== 'undefined' && ISL_ED.cyc && ISL_ED.cyc.id === ev.pointerId && ISL_ED.cyc.i + 1 < ISL_ED.cyc.L.length) return;
+  if (typeof ISL_ED !== 'undefined') ISL_ED.cyc = null;
+  const nk = P.L[(Math.max(0, P.L.indexOf(P.k)) + 1) % P.L.length]; if (nk === P.k) return;
+  ED_CYC.k = nk;
+  // the next one picked as a press on it would: a press and a let go at the same place, given to that kind (its handler's own way of picking)
+  setTimeout(() => {
+    const o = { bubbles: true, cancelable: true, clientX: P.cx, clientY: P.cy, pointerId: P.id, pointerType: P.type || 'mouse', isPrimary: true, button: 0 }, T = P.tgt && P.tgt.isConnected ? P.tgt : window;
+    for (const [type, b] of [['pointerdown', 1], ['pointerup', 0]]) { const e = new PointerEvent(type, Object.assign({ buttons: b }, o)); e.__edSynth = true; e.__edPick = nk; T.dispatchEvent(e); }
+  }, 0);
+}, { capture: true });
+const edPickLost = (kind, ev) => { const w = edPickOf(ev); return w !== null && w !== kind; };
+const boxArea = b => Math.max(0, b[1] - b[0]) * Math.max(0, b[3] - b[2]);   // ([x0, x1, y0, y1])
 const edHandle = (px = 4.5, room = Infinity) => Math.max(ED_HANDLE_MIN, Math.min(Math.max(Math.ceil(px), Math.round(px * dpr / PIXW)), Math.floor(room / 3)));
 // closing it from the game (Escape, a pad's B): as its own CLOSE does
 function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
@@ -49931,8 +49979,9 @@ function islPick(e) {
   if (!H.length) ISLANDS.forEach((I, n) => { const q = shpNearEdge(x, y, r * 1.6, n); if (q) E.push(q); });
   E.sort((a, b) => a.d - b.d || b.n - a.n);
   const ed = E[0] || null;
-  return { x, y, r, h: H.length ? H[0][1] : null, line: ed ? ed.n : null, edge: ed, hs: H.map(a => a[1]), es: E };
+  return { x, y, r, h: H.length ? H[0][1] : null, hd: H.length ? Math.sqrt(H[0][0]) : 0, line: ed ? ed.n : null, edge: ed, hs: H.map(a => a[1]), es: E };
 }
+ED_PICKS.terrain = e => { if (!floorEdOn() || !ISLANDS.length) return null; const q = islPick(e); return q.h ? [0, q.hd] : q.edge ? [1, q.edge.d] : null; };   // (the one pick - 18-zz-photo.js)
 function islRemovePt(n, k, batch) {
   const I = ISLANDS[n]; if (!I) return; const note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
   if (shpLay(I) && k === 0) { note('That point joins the layer to its shape - delete the layer instead.'); return; }
@@ -49952,6 +50001,7 @@ const islPieceAt = (I, x, y) => { const n = ISLANDS.indexOf(I), q = n >= 0 ? shp
 window.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button === 1) return;   // (the middle button only pans, never picks or drags - user Oct 29: "That is only LMB")
   if (!floorEdOn() || onEdUI(e) || !ISLANDS.length) return;
+  if (edPickLost('terrain', e)) { ISL_ED.lastDown = null; return; }   // (something else nearer under the press - edPickOf, 18-zz-photo.js)
   const q = islPick(e), now = performance.now();
   if (!q.h && q.line === null) { ISL_ED.lastDown = null; return; }
   // (user Nov 3 16:46: a runway on the ground couldn't be picked - the press took the line under it) a press inside a structure's
@@ -52011,6 +52061,7 @@ function lakeEdPick(e) {
   for (const K of lakeEdPockets()) { const lv = lakeEdLevel(K), hx = lakeEdHandleX(K, lv); if (Math.abs(x - hx) < r * 1.4 && Math.abs(y - lv) < r * 1.4) return { K, x, y }; }
   return null;
 }
+ED_PICKS.lake = e => { if (!floorEdOn()) return null; const q = lakeEdPick(e); if (!q) return null; const lv = lakeEdLevel(q.K); return [0, Math.hypot(q.x - lakeEdHandleX(q.K, lv), q.y - lv)]; };   // (its level's handle - the one pick, 18-zz-photo.js)
 function lakeSetLevel(K, y) {
   if (K.cave) { K.cave.wl = K.lv = Math.round(clamp(y, K.spill, K.bot)); islChanged(); if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); return; }   // (built as the WATER LEVEL slider's is)
   const lv = Math.round(clamp(y, K.spill, K.bot + 40));
@@ -52020,7 +52071,7 @@ function lakeSetLevel(K, y) {
 }
 window.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button === 1) return;
-  if (!floorEdOn() || onEdUI(e)) return;
+  if (!floorEdOn() || onEdUI(e) || edPickLost('lake', e)) return;
   const q = lakeEdPick(e); if (!q) return;
   e.stopImmediatePropagation(); e.preventDefault(); edClaim('line');
   if (e.button === 2) { lakeSetLevel(q.K, q.K.cave ? caveWlDef(q.K.cave) : Math.max(q.K.spill, WATER_Y)); return; }   // (right-click: back to its default)
@@ -59541,9 +59592,10 @@ function seaPick(kraken, wk) {
   if (wk != null && !SEAPICK.wrecks.includes(wk)) SEAPICK.wrecks.push(wk);
   edClaim('sea');
 }
+ED_PICKS.sea = e => { if (!landEdOn()) return null; const q = landPick(e), w = wreckPick(q.x, q.y, q.r), k = !w && krakenPick(q.x, q.y, q.r); return w ? [2, boxArea(wreckBox(w))] : k ? [2, boxArea(krakenBox(k))] : null; };   // (a pirate wreck, the kraken - the one pick, 18-zz-photo.js)
 window.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button === 1) return;   // (the middle button only pans, never picks or drags - user Oct 29: "That is only LMB")
-  if (!landEdOn() || onEdUI(e) || e.button === 2) return;
+  if (!landEdOn() || onEdUI(e) || e.button === 2 || edPickLost('sea', e)) return;
   const q = landPick(e); if (q.h) return;                       // (a point's handle first)
   const wk = wreckPick(q.x, q.y, q.r);
   if (wk) {                                                      // (a pirate wreck: dragged anywhere; let go, she lies there)
@@ -71145,9 +71197,11 @@ function wxaHit(ev) {
   if (Y >= G.t - 4 * G.q && Y <= G.t + G.h + 4 * G.q) { const a = wxaIn(X); if (a) return { k: 'strip', a }; }
   return { k: 'band', a: wxaIn(X) };
 }
+ED_PICKS.weather = ev => { if (!wxaOpen()) return null; const H = wxaHit(ev); return H.k === 'band' ? null : [0, 0]; };   // (its ends and its strip at the top: handles - the one pick, 18-zz-photo.js; a press in a band picks it and lets what stands there take the press too)
 window.addEventListener('pointerdown', ev => {
   if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaOpen() || onEdUI(ev)) return;
   const H = wxaHit(ev), [X] = wxaPtr(ev);
+  if (H.k !== 'band' && edPickLost('weather', ev)) return;   // (its ends and strip: only when nothing nearer is under the press - edPickOf; a band is picked always, below)
   WXE.sel = H.a ? H.a.id : 'base'; wxaSync(); wxaPreview();
   if (H.k === 'edge') WXE.drag = { id: ev.pointerId, a: H.a, s: H.s, lim: wxaLimit(H.a, H.s) };
   else if (H.k === 'strip') WXE.drag = { id: ev.pointerId, a: H.a, off: X - H.a.x0, x0: H.a.x0, x1: H.a.x1 };
@@ -71278,8 +71332,9 @@ function atmoSet(k, m) {
   else { NSKY.P[k] = v; NSKY.saveP(); }
   atmoSync();
 }
+ED_PICKS.atmo = ev => { if (!NSKY.editor.TUNE.world()) return null; const [, Y, r] = vehWorld(ev); let bd = r * 1.2, hit = false; for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; hit = true; } } return hit ? [1, bd] : null; };   // (the air's layers: lines - the one pick, 18-zz-photo.js)
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !NSKY.editor.TUNE.world() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !NSKY.editor.TUNE.world() || onEdUI(ev) || edPickLost('atmo', ev)) return;
   const [, Y, r] = vehWorld(ev);
   let best = null, bd = r * 1.2;
   for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; best = k; } }
@@ -71342,12 +71397,13 @@ const bgNewId = () => 1 + BGS.reduce((m, r) => Math.max(m, r.id), 0);
 const BGE = { sel: [], drag: null, box: new Map() };
 const bgOpen = () => NSKY.editor.TUNE.world();
 function bgPick(X, Y) { for (const r of BGS.slice().reverse()) { const b = BGE.box.get(r.id); if (b && X > b[0] && X < b[1] && Y > b[2] && Y < b[3]) return r; } return null; }
+ED_PICKS.background = ev => { if (!bgOpen()) return null; const [X, Y] = vehWorld(ev), r = bgPick(X, Y); return r ? [2, boxArea(BGE.box.get(r.id))] : null; };   // (the one pick - 18-zz-photo.js)
 // (a screen pixel moved = this much of the layer's own x: the far layer moves slower than the world - its parallax)
 const bgPerWorld = () => SV / (layerScale(COAST_L.q) * COAST_L.p);
 // (registered after every other editor's press - setTimeout: a structure, a boat, an area in front of it is picked first; a background
 // is the furthest thing back)
 setTimeout(() => window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !bgOpen() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !bgOpen() || onEdUI(ev) || edPickLost('background', ev)) return;
   const [X, Y] = vehWorld(ev), r = bgPick(X, Y); if (!r) return;
   if (!WED.shift) BGE.sel = [];
   if (!BGE.sel.includes(r.id)) BGE.sel.push(r.id);
@@ -72146,6 +72202,7 @@ function vehInHost(e) {
   const B = strBox(o), [x, y] = vehPos(e);
   return x >= B.x0 && x <= B.x1 && y >= B.top && y <= B.foot;
 }
+ED_PICKS.vehicle = ev => { if (!vehTabOpen()) return null; const [X, Y, r] = vehWorld(ev), e = vehPick(X, Y, r); if (!e) return null; const [x0, x1, y0, y1] = vehBox(e); return [2, boxArea([x0, x1, y0, y1])]; };   // (the one pick - 18-zz-photo.js)
 function vehPick(X, Y, rPx) {
   let best = null, ba = 1e30;
   for (const e of vehAll()) {
@@ -72200,7 +72257,7 @@ function vehRestBad(e) {
 // ---- the pointer over the world while the tab is open (before the game's own, as the caves' editor)
 const vehWorld = ev => { const [x, y] = screenToWorld(ev.clientX, ev.clientY), i = ONEVIEW() || ev.clientX * dpr / PIXW < Math.floor(bw / 2) ? 0 : 1; return [x, y, (ev.pointerType === 'touch' ? 26 : 14) * dpr / PIXW / (S * cam.view[i].z)]; };
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !vehTabOpen() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !vehTabOpen() || onEdUI(ev) || edPickLost('vehicle', ev)) return;
   const [X, Y, r] = vehWorld(ev), e = vehPick(X, Y, r);
   if (!e) return;
   if (ev.shiftKey && VE.sel && VE.sel.v !== e.v) { const j = VE.more.findIndex(q => q.v === e.v); if (j >= 0) VE.more.splice(j, 1); VE.more.push(VE.sel); }   // (shift: the one picked before stays picked)
@@ -72625,8 +72682,15 @@ function naturePick(X, Y, r) {
   }
   return null;
 }
+// (the one pick - 18-zz-photo.js) its + and corners are handles, its sides lines
+ED_PICKS.nature = ev => {
+  if (!natureOpen()) return null; const [X, Y, r] = vehWorld(ev), h = naturePick(X, Y, r); if (!h) return null; const a = h.a;
+  if (h.move) return [0, Math.hypot(X - (a.x0 + a.x1) / 2, Y - (a.y0 + a.y1) / 2)];
+  if (h.ex && h.ey) return [0, Math.hypot(X - a[h.ex], Y - a[h.ey])];
+  return [1, h.ex ? Math.abs(X - a[h.ex]) : Math.abs(Y - a[h.ey])];
+};
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !natureOpen() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !natureOpen() || onEdUI(ev) || edPickLost('nature', ev)) return;
   const [X, Y, r] = vehWorld(ev), h = naturePick(X, Y, r); if (!h) return;
   NE.sel = h.a.id; natureSync();
   NE.drag = { id: ev.pointerId, h, X, Y, o: { x0: h.a.x0, x1: h.a.x1, y0: h.a.y0, y1: h.a.y1 }, moved: false };
@@ -74811,8 +74875,17 @@ function strStretchTo(o, s, X, fixed) {
   if (o.len === L) return; o.len = L; o.x += fixed - (s < 0 ? strBox(o).x1 : strBox(o).x0);   // (moved so its other end is where it was)
   strSave();
 }
+// (the one pick - 18-zz-photo.js) a stretch handle's end and a spot's vehicle are handles, the structure its box (a plant standing over it is a
+// smaller box: the plant's - user Nov 20 00:37, the special case here before)
+ED_PICKS.struct = ev => {
+  if (!strTabOpen()) return null; const [X, Y, r] = vehWorld(ev);
+  let hd = Infinity; for (const h of SE.hnd || []) { const d = Math.hypot(X - h.x, Y - h.y); if (d < Math.max(h.r, r)) hd = Math.min(hd, d); }
+  if (hd < Infinity) return [0, hd];
+  if (spotAt(X, Y, r * 0.5)) return [0, 0];
+  const o = strPick(X, Y, r); if (!o) return null; const B = strPickBox(o); return [2, boxArea([B.x0, B.x1, B.top, B.foot])];
+};
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev) || !(SE.hnd || []).length) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev) || !(SE.hnd || []).length || edPickLost('struct', ev)) return;
   const [X, Y, r] = vehWorld(ev), H = SE.hnd.find(h => Math.hypot(X - h.x, Y - h.y) < Math.max(h.r, r)); if (!H) return;
   const o = strById(H.o); if (!o) return; const B = strBox(o);
   SE.str = { id: ev.pointerId, o, s: H.s, fixed: H.s < 0 ? B.x1 : B.x0, off: X - (H.s < 0 ? B.x0 : B.x1) };
@@ -74824,13 +74897,10 @@ window.addEventListener('pointerup', strStretchUp, { capture: true });
 window.addEventListener('pointercancel', strStretchUp, { capture: true });
 // ---- the pointer over the world while the tab is open (before the game's own, as the vehicles' tab)
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev) || edPickLost('struct', ev)) return;
   const [X, Y, r] = vehWorld(ev);
   // (a spot's vehicle drawn over its structure: picked, never dragged - it's part of the structure; 50-zzzz-spots.js)
   { const b = spotAt(X, Y, r * 0.5); if (b) { SP.sel = { s: b.s, i: b.i }; SE.sel = []; strSync(); ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('spot'); return; } }
-  // (user Nov 20 00:37: "How do I remove a plant from a structure? How do I MOVE a plant I added to a structure?") a plant standing over it is
-  // smaller than it: the plant's press (the smallest under the press - strPick's rule), picked and dragged as any plant (50-zzzz-hand-plants.js)
-  if (typeof hplOpen === 'function' && hplOpen() && hplPick(X, Y, r * 0.5)) return;
   const o = strPick(X, Y, r);
   if (!o) { if (!ev.shiftKey) { SE.sel = []; strSync(); } return; }
   if (ev.shiftKey) { SE.sel = SE.sel.includes(o.id) ? SE.sel.filter(i => i !== o.id) : SE.sel.concat(o.id); strSync(); }
@@ -77306,8 +77376,9 @@ function hplPick(X, Y, rr) {
   for (const r of hplAll()) { const b = hplBox(r); if (!b || X < b[0] - rr || X > b[1] + rr || Y < b[2] - rr || Y > b[3] + rr) continue; const d = (b[1] - b[0]) * (b[3] - b[2]); if (d < bd) { bd = d; best = r; } }
   return best;
 }
+ED_PICKS.plant = ev => { if (!hplOpen()) return null; const [X, Y, rr] = vehWorld(ev), r = hplPick(X, Y, rr); return r ? [2, boxArea(hplBox(r))] : null; };   // (the one pick - 18-zz-photo.js)
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !hplOpen() || onEdUI(ev) || !(HPL.length || STRS.some(o => o.pl && o.pl.length))) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !hplOpen() || onEdUI(ev) || !(HPL.length || STRS.some(o => o.pl && o.pl.length)) || edPickLost('plant', ev)) return;
   const [X, Y, rr] = vehWorld(ev), r = hplPick(X, Y, rr); if (!r) return;
   if (!WED.shift) HPE.sel = [];
   if (!HPE.sel.includes(r.id)) HPE.sel.push(r.id);
