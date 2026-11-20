@@ -12965,8 +12965,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1160;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 02:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1161;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 10:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36658,13 +36658,13 @@ const ED_SHORT = { sunrise: 'SUNRISE', sunmid: 'MIDDAY', sunset: 'SUNSET', sunh:
 const ED_GROUPS = [['SUN', ['DISC', 'LIGHT ON CLOUDS', 'BACKLIGHT & BURN', 'RAYS']], ['CLOUDS', ['SHAPE', 'TYPES', 'LIGHT & SHADOW', 'DECKS', 'DECK DETAIL', 'COLOURS']],
   ['WEATHER', ['COVER', 'SPREAD']], ['WIND', ['ON THE CLOUDS', 'MOTION']], ['BACKGROUND', ['GRADIENT', 'CAMERA', 'ATMOSPHERE', 'BG']], ['PARTICLES', ['SMOKE', 'FIRE & WATER']],
   // (user Nov 1: the caves' and the vehicles' settings are the world's properties - caves/40-editor.js, 50-zz-editor-vehicles.js)
-  ['CAVE', ['CAVE']], ['VEHICLES', ['TOWERS & TANKS', 'PLANES', 'SUB', 'BOATS', 'HELIS', 'WEAPONS']]];   // (each vehicle type's Story zoom and price: its prefab - PREFABS)
+  ['CAVE', ['CAVE']], ['VEHICLE SETTINGS', ['TOWERS & TANKS', 'PLANES', 'SUB', 'BOATS', 'HELIS', 'WEAPONS']]];   // (each vehicle type's Story zoom and price: its prefab - PREFABS)
 // (user Nov 1, 12:31: "two main Toggles: WORLD EDITOR and WORLD PROPERTIES") WORLD EDITOR: what's built in the world - every one of
 // its things editable at once, over the world, its tab only the PROPERTIES of what's picked (the editor opens here); WORLD
 // PROPERTIES: the rest. A top tab not named here is a world property.
 // (user Nov 2 12:54: STRUCTURES and VEHICLE one tab, OBJECTS - "the properties just change depending on what I want to spawn OR what I
 // have selected"; GROUPING its own tab - groups of anything, not only structures: 50-zzz-objects-tab.js)
-const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLES', 'BATTLE ZOOM LEVELS']],
+const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'STRUCTURES', 'VEHICLES', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLE SETTINGS', 'BATTLE ZOOM LEVELS']],
   // (user Nov 1 21:55: PREFABS - every structure and vehicle designed there, 50-zz-prefabs.js; DISPLAY - what the editor shows, not the world)
   ['PREFABS', ['PREFABS']], ['DISPLAY', ['COLLISION', 'CHANGE HISTORY']]];   // (CHANGE HISTORY: UNDO's steps - 50-zz-undo.js, user Nov 3)
 // buttons the game adds to a tab (TUNE.buttons): [tab, category, [[label, description, onclick(button)]...]]
@@ -36684,7 +36684,7 @@ if (typeof window !== 'undefined') {
   // this listener is the first of theirs, so each reads it as its own shift)
   window.addEventListener('pointerdown', e => {
     if (TUNE.gate && TUNE.gate(e)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
-    if (TUNE.multi && TUNE.world() && (TUNE.page === 'OBJECTS' || TUNE.page === 'GROUPING') && !e.shiftKey) try { Object.defineProperty(e, 'shiftKey', { value: true }); } catch (x) { }
+    if (TUNE.multi && TUNE.world() && (['STRUCTURES', 'VEHICLES', 'OBJECTS', 'GROUPING'].includes(TUNE.page)) && !e.shiftKey) try { Object.defineProperty(e, 'shiftKey', { value: true }); } catch (x) { }
     if (TUNE.press) TUNE.press(e);
   }, { capture: true, passive: false });
   window.addEventListener('pointermove', e => { if (TUNE.gate && TUNE.gate(e)) e.stopImmediatePropagation(); }, { capture: true, passive: true });
@@ -75811,16 +75811,21 @@ function grpEdDraw() {
 }
 
 // ---- OBJECTS
-const OBJ = { cat: 's', pick: {}, ui: null };
-const OBJ_CATS = [['s', 'STRUCTURES'], ['prop', 'PROPS'], ['sub', 'SUBMARINES'], ['boat', 'BOATS'], ['car', 'CARS'], ['air', 'PLANES'], ['space', 'SPACE'], ['crt', 'CREATURES'], ['bg', 'BACKGROUNDS'], ['veg', 'VEGETATION'], ['spc', 'SPECIAL']];   // (SPECIAL: editor aids - the MARKER, 50-zzzz-markers.js)
-// (user Nov 3 07:20: "Kraken should be under CREATURES in the OBJECTS section. Otherwise, there's no way I can place it"; "Sunken
-// Pirate ships also") the kraken and the four pirate wrecks, each one of a kind: SPAWN brings it into the view (back if deleted)
-// (user Nov 3 08:10-08:12: "shipwrecks moves under structures, and creatures will have the kraken and the different types of ocean
-// life, the whales, the sharks and fish") the pirate wrecks at the end of STRUCTURES; CREATURES: the kraken and an area of each
-// kind of sea life (50-zz-nature.js - SPAWN puts a box in the view, MIN / MAX how many live in it)
+const OBJ = { cat: 's:DOCK', pick: {}, ui: null, tab: 'STRUCTURES', tcat: {} };
+// (user Nov 20 09:20: "structures ... should be filtered by type, because we're going to have different police stations, different
+// hospitals, different schools ... I think we should have one tab for structures and one for vehicles") three tabs, each the same two
+// levels - TYPE, then the one of that type: STRUCTURES (s:<type> - a kind's name, every kind of house one HOUSE; the pirate wrecks theirs), VEHICLES, and
+// OBJECTS for the rest. The SELECTED section is one, shown in whichever of the three is up (objShowTab)
+const OBJ_TABS = {
+  STRUCTURES: () => { const ts = []; for (const p of pfSorted()) { const t = objStrType(p.k); if (!objIsProp(p) && !ts.includes(t)) ts.push(t); } return [...ts.map(t => ['s:' + t, t]), ['s:wreck', 'PIRATE WRECK']]; },
+  VEHICLES: () => [['sub', 'SUBMARINES'], ['boat', 'BOATS'], ['car', 'CARS'], ['air', 'PLANES'], ['space', 'SPACE']],
+  OBJECTS: () => [['prop', 'PROPS'], ['crt', 'CREATURES'], ['bg', 'BACKGROUNDS'], ['veg', 'VEGETATION'], ['spc', 'SPECIAL']],   // (SPECIAL: editor aids - the MARKER, 50-zzzz-markers.js)
+};
+const OBJ_TAB_NAMES = Object.keys(OBJ_TABS);
+const objStrType = k => STR_KINDS[k].res ? 'HOUSE' : STR_KINDS[k].lab;   // (the cottages, the porch house... each its own kind: all HOUSE)
 const OBJ_WRECKS = () => [0, 1, 2, 3].map(k => ['wreck:' + k, 'PIRATE WRECK ' + (k + 1)]);   // (the user's four pictures: each SPAWN a new one - user Nov 3 08:36)
 const OBJ_ONE = { veg: () => hplPrefabs(), crt: () => [['kraken', 'KRAKEN'], ...Object.keys(NAT_KINDS).map(k => ['area:' + k, NAT_KINDS[k].lab])], bg: () => BG_PICS.map(([lab, v]) => ['bgpic:' + v, lab]), spc: () => [['marker', 'MARKER']] };
-const objOneName = (c, id) => [...(OBJ_ONE[c] ? OBJ_ONE[c]() : []), ...(c === 's' ? OBJ_WRECKS() : [])].find(q => q[0] === id);
+const objOneName = (c, id) => [...(OBJ_ONE[c] ? OBJ_ONE[c]() : []), ...(c === 's:wreck' ? OBJ_WRECKS() : [])].find(q => q[0] === id);
 // which dropdown a spawnable vehicle type is in (the structures' types by family, the rest by kind)
 function objCatOf(sv) {
   const D = STR_VEHS[sv];
@@ -75833,19 +75838,28 @@ function objCatOf(sv) {
 // 50-zz-placed.js ARMY_PLACE); one starting at a hangar is that hangar's SPOT (50-zzz-spots.js)
 // (PROPS - user Nov 3 16:53: the small things - buoys, street lamps: structure kinds marked prop, 50-zz-struct.js; STRUCTURES the rest)
 const objIsProp = p => !!(STR_KINDS[p.k] && STR_KINDS[p.k].prop);
-const objStrCat = c => c === 's' || c === 'prop';
-const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's' ? [...pfSorted().filter(p => !objIsProp(p)).map(p => [p.id, p.name]), ...OBJ_WRECKS()] : c === 'prop' ? pfSorted().filter(objIsProp).map(p => [p.id, p.name]) : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
+const objStrCat = c => c.startsWith('s:') && c !== 's:wreck' || c === 'prop';
+const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's:wreck' ? OBJ_WRECKS() : c.startsWith('s:') ? pfSorted().filter(p => objStrType(p.k) === c.slice(2) && !objIsProp(p)).map(p => [p.id, p.name]) : c === 'prop' ? pfSorted().filter(objIsProp).map(p => [p.id, p.name]) : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
 const objCur = c => { const L = objList(c); return L.some(q => q[0] === OBJ.pick[c]) ? OBJ.pick[c] : L[0] ? L[0][0] : null; };
+// the shown tab's two dropdowns: TYPE (its kinds) and the one of that type (what SPAWN brings)
 function objFill() {
   const U = OBJ.ui; if (!U) return;
-  for (const [c] of OBJ_CATS) {
-    const s = U.sels[c].s, L = objList(c), cur = objCur(c); s.textContent = '';
-    for (const [v, lab] of L) { const o = document.createElement('option'); o.value = v; o.textContent = lab; s.appendChild(o); }
-    if (cur != null) s.value = cur; OBJ.pick[c] = cur;
-  }
-  objMark();
+  const T = U.tabs[OBJ.tab]; if (!T) return;
+  const cats = OBJ_TABS[OBJ.tab](); if (!cats.some(q => q[0] === OBJ.tcat[OBJ.tab])) OBJ.tcat[OBJ.tab] = cats[0] && cats[0][0];
+  const c = OBJ.tcat[OBJ.tab]; OBJ.cat = c;
+  const opts = (s, L, cur) => { s.textContent = ''; for (const [v, lab] of L) { const o = document.createElement('option'); o.value = v; o.textContent = lab; s.appendChild(o); } if (cur != null) s.value = cur; };
+  opts(T.type, cats, c);
+  if (c == null) { T.item.textContent = ''; T.n.textContent = ''; return; }
+  const L = objList(c), cur = objCur(c); opts(T.item, L, cur); OBJ.pick[c] = cur;
+  T.n.textContent = L.length + ' OF THIS TYPE';
 }
-const objMark = () => { const U = OBJ.ui; if (U) for (const [c] of OBJ_CATS) U.sels[c].w.classList.toggle('on', c === OBJ.cat); };
+// a tab of the three shown: the SELECTED section moved into it, its type the one SPAWN uses
+function objShowTab(t) {
+  const U = OBJ.ui; if (!U || !U.tabs[t]) return;
+  OBJ.tab = t; const P = U.tabs[t].pane;
+  if (U.sSel.parentNode !== P) P.appendChild(U.sSel);
+  objFill(); objSync();
+}
 /* (user Nov 8 16:32: "When I spawn an object in the editor, it should spawn in the middle of where I am ... Right now it tries to snap
    to stuff and sometimes its too high or too low ... You can then snap it when I'm close enough to the right surface") where SPAWN
    puts anything: the middle of what the editor shows - the view's centre above the editor's panel (as GO TO centres a marker) -
@@ -75897,22 +75911,26 @@ function objSelText() {
 function objSync() {
   const U = OBJ.ui; if (!U) return;
   U.sel.textContent = objSelText(); if (U.none) U.none.hidden = U.sel.textContent !== 'NONE';
-  U.spawn.textContent = '';
-  if (SE.sel.length || VE.sel) return;
+  for (const t in U.tabs) U.tabs[t].spawn.textContent = '';
+  const B = U.oBox; B.textContent = '';
   const el = U.el, sea = seaNames();
-  if (HPE.sel.length && hplFill(U.spawn, el)) return;   // (a plant placed by hand: its own - 50-zzzz-hand-plants.js)
-  if (MKE.sel.length && mkFill(U.spawn, el)) return;   // (a marker: its NAME - 50-zzzz-markers.js)
-  if (BGE.sel.length && bgFill(U.spawn, el)) return;   // (a background: its PICTURE, FLIP - 50-zz-backgrounds.js)
-  if (NE.sel != null && natureFill(U.spawn, el)) return;   // (a creature area: its MIN / MAX - 50-zz-nature.js)
-  if (SEAPICK.wrecks.length === 1 && !SEAPICK.krakens.length && objWreckFill(U.spawn, el, SEAPICK.wrecks[0])) return;   // (a wreck: its own)
-  if (sea.length) { const k = el('div', 'cat'); k.append(el('h4', '', sea.join(', ')), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); return; }   // (a kraken, several)
+  // what's picked that isn't a structure or a vehicle: its own, in SELECTED
+  if (HPE.sel.length && hplFill(B, el)) return;   // (a plant placed by hand: its own - 50-zzzz-hand-plants.js)
+  if (SE.sel.length || VE.sel) return;
+  if (MKE.sel.length && mkFill(B, el)) return;   // (a marker: its NAME - 50-zzzz-markers.js)
+  if (BGE.sel.length && bgFill(B, el)) return;   // (a background: its PICTURE, FLIP - 50-zz-backgrounds.js)
+  if (NE.sel != null && natureFill(B, el)) return;   // (a creature area: its MIN / MAX - 50-zz-nature.js)
+  if (SEAPICK.wrecks.length === 1 && !SEAPICK.krakens.length && objWreckFill(B, el, SEAPICK.wrecks[0])) return;   // (a wreck: its own)
+  if (sea.length) { const k = el('div', 'cat'); k.append(el('h4', '', sea.join(', ')), el('div', 'tabnote', 'Nothing to set.')); B.appendChild(k); return; }   // (a kraken, several)
+  // nothing picked: the SPAWN section shows what SPAWN brings
+  const T = U.tabs[OBJ.tab]; if (!T) return; const SP = T.spawn;
   const c = OBJ.cat, id = objCur(c); if (id == null) return;
   const one = objOneName(c, id), name = one ? one[1] : objStrCat(c) ? (pfGet(id) || { name: id }).name : placedLab(id);
-  U.spawn.appendChild(el('div', 'tabnote', 'SPAWNS: ' + name + (one ? '' : ' - its prefab\'s settings (every copy)')));
-  if (one) { const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', id.startsWith('area:') ? 'SPAWN an area, then set its counts.' : id.startsWith('bgpic:') ? 'Far backdrop picture: SPAWN, drag, FLIP.' : id === 'marker' ? 'Named spot for GO TO, seen only here.' : 'SPAWN puts a new one in the view.')); U.spawn.appendChild(k); }
-  else if (objStrCat(c)) { const p = pfGet(id); if (p) pfStructBox(p, U.spawn, el, U.css); }
-  else if (STR_VEHS[id]) pfVehBox(id, U.spawn, el, U.css);
-  else { vehLook(id, U.spawn, el); const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); }   // (its LOOK - 50-zz-prefab-look.js)
+  SP.appendChild(el('div', 'tabnote', 'SPAWNS: ' + name + (one ? '' : ' - its prefab\'s settings (every copy)')));
+  if (one) { const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', id.startsWith('area:') ? 'SPAWN an area, then set its counts.' : id.startsWith('bgpic:') ? 'Far backdrop picture: SPAWN, drag, FLIP.' : id === 'marker' ? 'Named spot for GO TO, seen only here.' : 'SPAWN puts a new one in the view.')); SP.appendChild(k); }
+  else if (objStrCat(c)) { const p = pfGet(id); if (p) pfStructBox(p, SP, el, U.css); }
+  else if (STR_VEHS[id]) pfVehBox(id, SP, el, U.css);
+  else { vehLook(id, SP, el); const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); SP.appendChild(k); }   // (its LOOK - 50-zz-prefab-look.js)
 }
 const OBJ_CSS = `
 #skyEd .ocat { display: flex; flex-direction: column; gap: 1px; font-size: 10px; letter-spacing: .06em; color: #7a8294; }
@@ -75936,40 +75954,49 @@ function multiBtn(el) {
   b.onclick = () => { const T = NSKY.editor.TUNE; T.multi = !T.multi; for (const x of multiBtns) x.classList.toggle('on', T.multi); };
   b.classList.toggle('on', !!NSKY.editor.TUNE.multi); multiBtns.push(b); return b;
 }
-NSKY.editor.TUNE.pane('OBJECTS', (pane, el) => {
-  pane.className = 'opane';   // (user Nov 20 00:35: SPAWN and SELECTED side by side - "we have more room horizontally")
-  { const st = document.createElement('style'); st.textContent = OBJ_CSS; document.head.appendChild(st); }
-  const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:160px';
-  const top = el('div', 'cvbar'), bSpawn = el('button', '', 'SPAWN'); bSpawn.title = 'Add the highlighted kind at the view centre'; bSpawn.onclick = objSpawn;
-  top.appendChild(bSpawn);
-  const sels = {};
-  for (const [c, lab] of OBJ_CATS) {
-    const w = el('label', 'ocat'), s = el('select'); s.style.cssText = css; w.append(el('span', '', lab), s); top.appendChild(w); sels[c] = { w, s };
-    const take = () => { const was = OBJ.cat; OBJ.cat = c; OBJ.pick[c] = s.value; objMark(); if (was !== c || !SE.sel.length && !VE.sel) objSync(); };
-    s.addEventListener('change', take); s.addEventListener('pointerdown', () => { if (OBJ.cat !== c) take(); }); s.addEventListener('focus', () => { if (OBJ.cat !== c) take(); });
-  }
-  // (user Nov 20 00:29: "it should be 2 clearly separated sections - 1 To spawn a structure - 2 To edit the selected structure with its own
-  // heading so its clear") SPAWN: the kinds, SPAWN, the highlighted kind's prefab (nothing picked) and the WORLD CHECK; SELECTED: its name as the
-  // heading, PICK MORE, DUPLICATE and its own sections. (user Nov 2: "use the horizontal space") each a grid across the panel
-  const sec = (head, tip) => { const s = el('div', 'osec'), h = el('h3', ''); h.title = tip; if (head) h.textContent = head; s.appendChild(h); return [s, h]; };
-  const [sSpawn] = sec('SPAWN', 'Add a new one to the world: pick its kind, then SPAWN');
-  const [sSel, hSel] = sec('', 'What is picked in the world - its own settings');
-  const sel = el('span', 'osel', 'NONE'); hSel.append(el('span', 'olab', 'SELECTED: '), sel);
-  const grid = el('div', 'cats'), chk = el('div', 'cat'), part = () => { const d = el('div', ''); d.style.display = 'contents'; return d; };
-  const sBox = part(), vBox = part(), spawn = part();
+// the SELECTED section, one for the three tabs (in the shown one - objShowTab): its name as the heading, PICK MORE, DUPLICATE and its own sections
+function objSelSec(el) {
+  const s = el('div', 'osec'), h = el('h3', ''); h.title = 'What is picked in the world - its own settings'; s.appendChild(h);
+  const sel = el('span', 'osel', 'NONE'); h.append(el('span', 'olab', 'SELECTED: '), sel);
+  const part = () => { const d = el('div', ''); d.style.display = 'contents'; return d; };
+  const sBox = part(), vBox = part(), oBox = part();
   const selBar = el('div', 'cvbar'), dup = el('button', '', 'DUPLICATE'); dup.title = 'Copy the pick and place it beside (Ctrl+D)'; dup.disabled = true; dup.onclick = () => wedDuplicate();   // (50-zzzz-zdup.js)
   selBar.append(multiBtn(el), dup);
   const none = el('div', 'tabnote', 'Nothing picked: click something in the world.');
-  const grid2 = el('div', 'cats'); grid2.append(sBox, vBox);
-  grid.append(spawn, chk);
-  sSpawn.append(top, grid); sSel.append(selBar, none, grid2);
-  pane.append(sSpawn, sSel);
-  Object.assign(SE.ui, { el, box: sBox, chk, selCss: css }); SE.pane = pane;
-  Object.assign(VE.ui, { el, box: vBox }); VE.pane = pane;
-  OBJ.ui = { el, css, sels, sel, spawn, dup, none };
-  new MutationObserver(() => { if (!pane.hidden) { objFill(); strSync(); vehSync(); } }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
-  objFill(); strSync(); vehSync();
+  const grid2 = el('div', 'cats'); grid2.append(sBox, vBox, oBox);
+  s.append(selBar, none, grid2);
+  return { sSel: s, sel, sBox, vBox, oBox, dup, none };
+}
+for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
+  pane.className = 'opane';   // (user Nov 20 00:35: SPAWN and SELECTED side by side - "we have more room horizontally")
+  const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:200px';
+  if (!OBJ.ui) {
+    { const st = document.createElement('style'); st.textContent = OBJ_CSS; document.head.appendChild(st); }
+    const S = objSelSec(el), chk = el('div', 'cat');
+    Object.assign(SE.ui, { el, box: S.sBox, chk, selCss: css });
+    Object.assign(VE.ui, { el, box: S.vBox });
+    OBJ.ui = { el, css, tabs: {}, sel: S.sel, sSel: S.sSel, oBox: S.oBox, dup: S.dup, none: S.none, chk };
+  }
+  const U = OBJ.ui, what = t === 'STRUCTURES' ? 'STRUCTURE' : t === 'VEHICLES' ? 'VEHICLE' : 'OBJECT';
+  // SPAWN: TYPE, the one of that type, SPAWN; under them what SPAWN brings (nothing picked) - and on STRUCTURES the WORLD CHECK
+  const sSpawn = el('div', 'osec'), h = el('h3', '', 'SPAWN'); h.title = 'Add a new one to the world: pick its type, then which one, then SPAWN'; sSpawn.appendChild(h);
+  const top = el('div', 'cvbar'), bSpawn = el('button', '', 'SPAWN'); bSpawn.title = 'Add the picked one at the view centre'; bSpawn.onclick = objSpawn;
+  const lab = (txt, s) => { const w = el('label', 'ocat'); w.append(el('span', '', txt), s); return w; };
+  const type = el('select'), item = el('select'); type.style.cssText = css; item.style.cssText = css;
+  type.title = 'Every ' + what.toLowerCase() + ' is under its type'; item.title = 'Which ' + what.toLowerCase() + ' of that type SPAWN adds';
+  const n = el('span', 'olab', '');
+  type.onchange = () => { OBJ.tcat[t] = type.value; objFill(); objSync(); };
+  item.onchange = () => { OBJ.pick[OBJ.tcat[t]] = item.value; objSync(); };
+  top.append(lab('TYPE', type), lab(what, item), bSpawn, n);
+  const grid = el('div', 'cats'), spawn = el('div', ''); spawn.style.display = 'contents';
+  grid.appendChild(spawn); if (t === 'STRUCTURES') grid.appendChild(U.chk);
+  sSpawn.append(top, grid);
+  pane.appendChild(sSpawn);
+  U.tabs[t] = { pane, type, item, n, spawn };
+  new MutationObserver(() => { if (!pane.hidden) { objShowTab(t); strSync(); vehSync(); } }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
+  if (t === 'STRUCTURES') { objShowTab(t); strSync(); vehSync(); }
 });
+
 
 // ---- GROUPING
 const GRP = { ui: null, until: 0, note: t => { if (GRP.ui) { GRP.ui.msg.textContent = t; GRP.until = performance.now() + 1600; } } };
@@ -76377,13 +76404,13 @@ const WK = {
     el: () => TERRAIN_ED.skinBtns && TERRAIN_ED.skinBtns[0] && TERRAIN_ED.skinBtns[0][0],
   },
   struct: {
-    tab: 'OBJECTS',
+    get tab() { return SE.sel.length && SE.sel.map(strById).every(o => o && STR_KINDS[o.k].prop) ? 'OBJECTS' : 'STRUCTURES'; },   // (props: OBJECTS)
     items: () => SE.sel.map(strById).filter(Boolean).map(o => ({ noun: STR_KINDS[o.k].lab.toUpperCase(), del: true })),
     clear() { if (SE.sel.length) { SE.sel = []; strSync(); } },
     del: () => strDelete(),
   },
   vehicle: {
-    tab: 'OBJECTS',
+    tab: 'VEHICLES',
     items() {
       if (!VE.sel) return [];
       const live = new Set(vehAll().map(q => q.v)); VE.more = VE.more.filter(q => live.has(q.v));
@@ -76415,7 +76442,7 @@ const WK = {
 };
 // (the krakens and the pirate wrecks - picked by their boxes in 50-land-tshape.js, SEAPICK; as many as placed - OBJECTS)
 WK.sea = {
-  tab: 'OBJECTS',
+  get tab() { return SEAPICK.wrecks.length && !SEAPICK.krakens.length ? 'STRUCTURES' : 'OBJECTS'; },   // (the wrecks are a type of structure)
   items: () => [...SEAPICK.krakens.filter(id => KRAKENS.some(k => k.rid === id)).map(() => ({ noun: 'KRAKEN', del: true })), ...SEAPICK.wrecks.filter(k => pirateWrecks.some(w => w.k === k)).map(() => ({ noun: 'PIRATE WRECK', del: true }))],
   clear() { SEAPICK.krakens = []; SEAPICK.wrecks = []; if (typeof objSync === 'function') objSync(); },
   del() { seaDelete(); objSync(); },
@@ -77100,7 +77127,7 @@ function hplStrBox(o, el, css) {
   return c;
 }
 WK.plant = {
-  tab: 'OBJECTS',
+  get tab() { const P = NSKY.editor.TUNE.page; return P === 'STRUCTURES' || P === 'VEHICLES' ? P : 'OBJECTS'; },   // (a building's plant picked on STRUCTURES: stays there)
   items: () => { const A = hplAll(); return HPE.sel.filter(id => A.some(r => r.id === id)).map(() => ({ noun: 'PLANT', del: true })); },
   clear() { if (HPE.sel.length) { HPE.sel = []; if (typeof objSync === 'function') objSync(); } },
   del() { hplDelete(); objSync(); },
@@ -78046,7 +78073,7 @@ function spotFill(U) {
   return true;
 }
 WK.spot = {
-  tab: 'OBJECTS',
+  tab: 'STRUCTURES',
   items: () => { const o = SP.sel && strById(SP.sel.s); return o && strVehs(o)[SP.sel.i] ? [{ noun: 'SPOT', del: true }] : []; },
   clear() { if (SP.sel) { SP.sel = null; strSync(); } },
   del() { const o = SP.sel && strById(SP.sel.s); if (o) spotRemove(o, SP.sel.i); SP.sel = null; spotsChanged(); },
