@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1202;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1203;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71295,9 +71295,10 @@ const cargoMine = v => !!v && (v.own || v.driven === 0);
 function cargoGive(v, k, n) { if (STORY && cargoInv(k) && cargoMine(v)) storyInvAdd(k, n); else cargoAdd(v, k, n); }
 const cargoCoins = (k, n) => Math.floor(n * cargoPrice(k) + 1e-9);
 // ---- the editor: a CARGO box, one row per kind (the structures', the vehicles', the wrecks' panels)
-function cargoBox(el, css, get, set, head = 'CARGO') {
+function cargoBox(el, css, get, set, head = 'CARGO', only = null) {   // (only: the goods shown - a workplace's: what its type STORES)
   const c = el('div', 'cat'); c.appendChild(el('h4', '', head));
   for (const [k, lab] of CARGO_KINDS) {
+    if (only && !only.includes(k)) continue;
     const r = el('div', 'row'), i = el('input'), l = el('label', '', lab); i.type = 'number'; i.min = '0'; i.step = '1'; i.style.cssText = css + ';width:80px'; i.value = String(get(k));
     i.onchange = () => { set(k, Math.max(0, Math.floor(+i.value || 0))); i.value = String(get(k)); };
     l.title = 'How much ' + lab.toLowerCase() + ' it holds'; r.append(l, i); c.appendChild(r);
@@ -71327,13 +71328,15 @@ const vehHasCargoRec = v => !!v && (!!placedRec(v) || (v.hb != null && v.hs != n
 const strProp = (o, key, def) => { if (!o) return false; if (o[key] !== undefined) return !!o[key]; const p = typeof pfGet === 'function' ? pfGet(o.pf) : null; return p && p[key] !== undefined ? !!p[key] : def(STR_KINDS[o.k] || {}); };
 const strMarket = o => strProp(o, 'market', K => !!K.market);
 const strRes = o => strProp(o, 'res', K => !!K.res);
-const strStores = o => strProp(o, 'stores', K => !K.noGoods && !K.prop);   // (by default every building; not a runway, road, lamp, gun, crane, windsock, buoy, pad - STR_KINDS noGoods)
+const strStores = o => typeof strWork === 'function' && strWork(o) ? keepList(o, STR_KINDS[o.k] || {}).length > 0 : strProp(o, 'stores', K => !K.noGoods && !K.prop);   // (a workplace: what its type of work STORES - keepList, 50-zzzzz-story-work.js)
+// whether it keeps good k in stock: a workplace what its type STORES (and trades, makes), anything else every good while it STORES GOODS
+const strKeeps = (o, k) => typeof strWork === 'function' && strWork(o) ? keepList(o, STR_KINDS[o.k] || {}).includes(k) : strStores(o);   // (by default every building; not a runway, road, lamp, gun, crane, windsock, buoy, pad - STR_KINDS noGoods)
 const strHoldsVehs = o => !!o && (strTakes(o) || []).length > 0;
 // what it does, in a line (the OBJECTS panel; WP: "A placed thing's panel shows these read only")
 function strDoesLine(o) {
   const L = [];
   if (strHoldsVehs(o)) L.push('STORES ' + strTakes(o).map(f => (STR_FAMS.find(q => q[0] === f) || [f, f])[1]).join(', '));
-  if (strStores(o)) L.push('STORES GOODS');
+  if (strStores(o)) L.push(typeof strWork === 'function' && strWork(o) ? 'STORES ' + keepList(o, STR_KINDS[o.k] || {}).map(k => CARGO_LAB[k] || k).join(', ') : 'STORES GOODS');
   if (strMarket(o)) L.push('SELLS GOODS');
   if (strRes(o)) L.push('RESIDENCE');
   return L.length ? L.join(' · ') : 'NOTHING';
@@ -73200,12 +73203,12 @@ function vehLookOf(sv) {
    ================================================================ */
 const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'takes', 'rep', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt', 'makes'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js; sells... its MARKET; work...: its WORK - 50-zzzzz-story-work.js)
 const PF_USE = ['res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'rt', 'makes', 'goods'];   // (what it does - not what it is: left out of a copy's prefab found from its looks, pfSig)
-const JOB_KEYS = ['market', 'sells', 'buys', 'openH', 'closeH', 'makes', 'rep', 'wv', 'wage', 'rt'];   // (a workplace's job: its TYPE OF WORK's, never its design's - wtJobOf, 50-zzzz-work-types.js)
+const JOB_KEYS = ['keeps', 'market', 'sells', 'buys', 'openH', 'closeH', 'makes', 'rep', 'wv', 'wage', 'rt'];   // (a workplace's job: its TYPE OF WORK's, never its design's - wtJobOf, 50-zzzz-work-types.js)
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
-function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, wt: PREFABS.wt, theft: PREFABS.theft })); } catch (e) { } }
+function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, wt: PREFABS.wt, theft: PREFABS.theft, rt0: PREFABS.rt0 })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v && typeof v === 'object' ? Object.assign({}, v) : v;   // (a record - its MAKES: its own too)   // (a list of records - its PLANTS: each its own)
 const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && !PF_USE.includes(q)).map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
@@ -73221,6 +73224,7 @@ function pfBases() {
     if (K.res) p.res = true;
     if (K.rep) p.rep = true;                                   // (a kind that mends: REPAIR on - MECHANIC & TOW)
     if (K.rt) p.rt = pfClone(K.rt);                            // (its routine - the POLICE STATION's ANSWER THEFTS)
+    if (K.keeps) p.keeps = K.keeps.slice();                    // (what a type of work STORES - the FISHERY's fish)
     if (K.pl) p.pl = pfClone(K.pl);                            // (its own plants - the houses' gardens)
     L.push(p);
     if (k === 'hangarAir' || k === 'hangarSea') L.push(Object.assign({}, p, { id: 'k:' + k + ':L', name: K.lab + ' (LARGE)', big: true }));
@@ -73369,11 +73373,12 @@ function pfStructBox(p, box, el, css) {
   const takes = (p.takes || K.takes || []);
   { const t = T.toggle(takes.length ? 1 : 0); t.addEventListener('input', () => { if (+t.value) { p.takes = (K.takes && K.takes.length ? K.takes : ['car']).slice(); if (!Number.isInteger(p.n) && p.k !== 'dock') p.n = 1; } else p.takes = []; ed(); pfSync(); });
     const r = row('STORES VEHICLES', t); r.title = 'Vehicles are put away here (which ones: VALID VEHICLES, how many: SPOTS)'; d.appendChild(r); }
-  { const t = T.toggle((p.stores ?? (!K.noGoods && !K.prop)) ? 1 : 0); t.addEventListener('input', () => { p.stores = !!+t.value; ed(); pfSync(); }); const r = row('STORES GOODS', t); r.title = 'It keeps a stock of goods: its STARTING GOODS, what it MAKES, what is delivered here'; d.appendChild(r); }
+  if (!job) { const t = T.toggle((p.stores ?? (!K.noGoods && !K.prop)) ? 1 : 0); t.addEventListener('input', () => { p.stores = !!+t.value; ed(); pfSync(); }); const r = row('STORES GOODS', t); r.title = 'It keeps a stock of goods: its STARTING GOODS, what it MAKES, what is delivered here'; d.appendChild(r); }
   box.appendChild(d);
   // (user Nov 20 11:55) STARTING GOODS - "defined with a default value at the structure design but we can customize it in the world editor": p.goods, each
   // copy's own o.goods over it (strGoods0, 50-zzzzz-story-stock.js)
-  if (p.stores ?? (!K.noGoods && !K.prop)) box.appendChild(cargoBox(el, css, k => cargoN(p, k), (k, n) => { cargoPut(p, k, n); ed(); }, 'STARTING GOODS'));
+  { const only = job ? keepList(Object.assign({}, p, wtJobOf(p.k) || {}), K) : null;   // (a workplace: only what its type STORES)
+    if (job ? only.length : (p.stores ?? (!K.noGoods && !K.prop))) box.appendChild(cargoBox(el, css, k => cargoN(p, k), (k, n) => { cargoPut(p, k, n); ed(); }, 'STARTING GOODS', only)); }
   if (!job) pfJobBox(p, K, d, box, el, css, ed, () => { ed(); pfSync(); });   // (not a workplace: what it does is its design's own)
   if (!takes.length) return;
   const v = el('div', 'cat'); v.appendChild(el('h4', '', 'VALID VEHICLES'));
@@ -73427,6 +73432,14 @@ function pfJobBox(J, K, d, box, el, css, ed, sync) {
       for (const [k, kl] of CARGO_KINDS) { const t = T.toggle(cur().includes(k) ? 1 : 0); t.addEventListener('input', () => { const S = new Set(cur()); if (+t.value) S.add(k); else S.delete(k); J[key] = [...S]; ed(); }); const r = row(kl, t); r.title = tip + kl.toLowerCase(); m.appendChild(r); } };
     goods('SELLS', 'sells', false, 'Bought here: '); goods('BUYS', 'buys', true, 'Sold here for coins: ');
     box.appendChild(m);
+  }
+  // STORES (a type's): the goods its places keep in stock, each on or off; what its market trades and what it makes (and from what) - kept, said why
+  if (type) {
+    const st = el('div', 'cat'); st.appendChild(el('h4', '', 'STORES'));
+    for (const [k, kl] of CARGO_KINDS) { const why = keepWhy(J, K, k), t = T.toggle(why || (J.keeps || []).includes(k) ? 1 : 0);
+      t.addEventListener('input', () => { const S = new Set(J.keeps || []); if (+t.value) S.add(k); else S.delete(k); J.keeps = CARGO_KINDS.map(q => q[0]).filter(q => S.has(q)); sync(); });
+      if (why) T.need(t, () => false); const r = row(kl, t); r.title = why ? 'Kept: ' + why : 'Its places keep ' + kl.toLowerCase(); st.appendChild(r); }
+    box.appendChild(st);
   }
   if (type && typeof workPrefabBox === 'function') box.appendChild(workPrefabBox(J, el, css, sync, Object.keys(STR_KINDS).find(k => STR_KINDS[k] === K)));   // (its WORK - 50-zzzzz-story-work.js)
 }
@@ -74067,12 +74080,12 @@ const STR_KINDS = {
   town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true, pl: [PL('pf-13', 22, 0, 0.45)] },
   town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-7', 28, 0, 0.45)] },
   // (a garage that mends cars - REPAIR on; the Story's tow trucks live here: a character's routine TOW - 50-zzzzz-story-folk.js)
-  mechanic: { lab: 'MECHANIC & TOW', work: true, art: 'mechanic', enclosed: true, takes: ['car'], rep: true, one: true },
+  mechanic: { lab: 'MECHANIC & TOW', work: true, art: 'mechanic', enclosed: true, takes: ['car'], rep: true, one: true, rt: [{ do: 'tow' }] },   // (rt: its type's starting ROUTINE - TOW, 50-zzzzz-story-folk.js)
   market: { lab: 'MARKET', work: true, art: 'market', market: true, one: true },
   // (user Nov 20 09:38: "FISHERY ... sits on a dock. Its workers drop their catch there ... the marketplace person goes to the fishery to get their fish
   // to sell") a market that BUYS fish and sells nothing - the fishermen's workplace (50-zzzzz-story-work.js). Its picture: the user's (Nov 20 12:56,
   // ref-fishery-cargo-nov20.png - 6.5 x 4.5 m by its freezer door, cut01.py)
-  fishery: { lab: 'FISHERY', work: true, art: 'fishery', market: true, buys: ['fish'], one: true },   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
+  fishery: { lab: 'FISHERY', work: true, art: 'fishery', market: true, buys: ['fish'], one: true, keeps: ['fish'], rt: [{ do: 'fish', to: 'near' }, { do: 'deliver', k: 'fish', to: 'self' }] },   // (keeps: what its type STORES; rt: its starting ROUTINE - its workers fish and bring the catch here, user Nov 20 13:29)   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
   tower: { lab: 'CONTROL TOWER', plain: true, art: 'control-tower' },
   // (user Nov 19 13:30: "lighthouses are the only place where you can save your progress, so we will have a library of them") arts: its
   // other pictures - each its own prefab, LIGHTHOUSE 2... (pfBases), and a PICTURE any of its prefabs can take; a new lighthouse is one more
@@ -79118,6 +79131,14 @@ function wtJobsFill() {
     const J = {}; if (src) for (const q of JOB_KEYS) if (src[q] !== undefined && src[q] !== null) J[q] = pfClone(src[q]);
     PREFABS.wt = Object.assign({}, PREFABS.wt, { [k]: Object.assign({}, (PREFABS.wt || {})[k], { job: J }) });
   }
+  // (Nov 20 13:34) STORES on the type: a type with none yet - what its designs start with, and its kind's own (the FISHERY's fish); the game's own
+  // types' starting ROUTINE (the FISHERY: fish, then the catch here; the MECHANIC: TOW) where a type has none written - once (PREFABS.rt0)
+  for (const k of Object.keys(STR_KINDS).filter(q => STR_KINDS[q].work)) {
+    const J = wtJobOf(k); if (!J) continue;
+    if (!Array.isArray(J.keeps)) { const S = new Set(STR_KINDS[k].keeps || []); for (const p of pfAllS()) if (p.k === k && p.goods) for (const g in p.goods) if (p.goods[g] > 0) S.add(g); J.keeps = [...S]; }
+    if (!PREFABS.rt0 && STR_KINDS[k].rt && !(J.rt || []).length) J.rt = JSON.parse(JSON.stringify(STR_KINDS[k].rt));
+  }
+  PREFABS.rt0 = 1;
   for (const p of pfAllS()) if (pfUse(p) === 'work' && !p.base) for (const q of JOB_KEYS) delete p[q];
   for (const o of STRS) { const p = pfGet(o.pf); if (p) pfApply(o, p); }
 }
@@ -80516,7 +80537,8 @@ function stockReset() { STOCK.s = {}; STOCK.u = {}; STOCK.gone = {}; STOCK.h = n
 const strGoods0 = o => { const p = typeof pfGet === 'function' ? pfGet(o.pf) : null, g = Object.assign({}, p && p.goods || {}, o.goods || {}); return Object.keys(g).length ? g : null; };
 const stGoods = o => strStores(o) ? STOCK.s[o.id] || strGoods0(o) : null;   // (STORES GOODS off: none - 50-zz-cargo.js)
 const stN = (o, k) => { const g = stGoods(o); return (g && g[k]) || 0; };
-function stAdd(o, k, n) { if (!strStores(o)) return; const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, strGoods0(o) || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
+function stAdd(o, k, n) { if (!strKeeps(o, k)) return;   // (only what it keeps - a workplace's type STORES)
+  const g = STOCK.s[o.id] || (STOCK.s[o.id] = Object.assign({}, strGoods0(o) || {})); g[k] = Math.max(0, Math.floor((g[k] || 0) + n)); }
 const stU = key => STOCK.u[key] || (STOCK.u[key] = { f: 0, g: 0, m: 0 });
 const stGone = id => !!STOCK.gone[id];
 const stMakes = o => o.makes && cargoKind(o.makes.k) && o.makes.per > 0 ? o.makes : null;
@@ -80753,8 +80775,8 @@ const strWork = o => !!(STR_KINDS[o.k] || {}).work && strProp(o, 'work', K => !!
 // where routine job J of workplace W is: a structure id, a fish area id - null: none in the world
 /* ---- WHAT A PLACE CAN BE IN A ROUTINE (user Nov 20 13:26: "the at location should show me the only locations that actually are allowed to store fish and
    to sell goods ... The drop-downs must take into account the systems themselves") - one rule for the editor's AT list and the game's pick (workAt):
-   BUY a good where its market SELLS it; SELL where its market BUYS it; COLLECT where it stores goods and can hold that one (it MAKES it, starts with it,
-   its market trades it, a routine DELIVERs or SELLs it there - kindGets); DELIVER where it stores goods; GO TO anywhere. X: a placed copy (its design's and its type's job on it) or a design with its
+   BUY a good where its market SELLS it; SELL where its market BUYS it; COLLECT where it stores that good (a workplace: its type's STORES) and can hold it (it MAKES it, starts with it,
+    its market trades it, a routine DELIVERs or SELLs it there - kindGets); DELIVER where it stores it; DELIVER where it stores goods; GO TO anywhere. X: a placed copy (its design's and its type's job on it) or a design with its
    type's job over it; goods: what it starts with ---- */
 // a good g brought to a type of place by a routine: some type's DELIVER / SELL of it AT that type (or THIS PLACE, of its own type) - the fishery's catch
 function kindGets(k, g) {
@@ -80763,8 +80785,21 @@ function kindGets(k, g) {
     if (J.rt.some(q => q && (q.do === 'deliver' || q.do === 'sell') && q.k === g && (q.to === 'k:' + k || (q.to === 'self' && T === k)))) return true; }
   return false;
 }
-function placeCan(X, K, verb, g, goods = X.goods, gets = false) {
-  const stores = X.stores ?? (!K.noGoods && !K.prop), mk = X.market ?? !!K.market;
+// WHAT A WORKPLACE STORES (user Nov 20 13:29-13:34: "the fishery stores fish that the market goes and pick up to sell, but I have no option for the
+// fishery to store stuff"): its type's STORES (keeps), and whatever its job handles anyway - its market's SELLS and BUYS (none listed: every good), what
+// it MAKES and what that's made from. X: a copy, or a design with its type's job over it
+function keepWhy(X, K, k) {
+  const mk = X.market ?? !!K.market, M = X.makes && X.makes.k ? X.makes : null;
+  if (mk && Array.isArray(X.sells) && X.sells.includes(k)) return 'its market sells it';
+  if (mk && (!Array.isArray(X.buys) || X.buys.includes(k))) return 'its market buys it';
+  if (M && M.k === k) return 'it makes it';
+  if (M && ((cargoKind(M.k) || {}).needs || []).some(q => q.k === k)) return 'what it makes is made from it';
+  return '';
+}
+const keepList = (X, K) => CARGO_KINDS.map(q => q[0]).filter(k => (X.keeps || []).includes(k) || !!keepWhy(X, K, k));
+function placeCan(X, K, verb, g, goods = X.goods, gets = false, work = false) {
+  const kept = k => work ? (k ? keepList(X, K).includes(k) : keepList(X, K).length > 0) : (X.stores ?? (!K.noGoods && !K.prop));   // (a workplace: its type's STORES)
+  const stores = kept(g), mk = X.market ?? !!K.market;
   const sells = mk && (g ? Array.isArray(X.sells) && X.sells.includes(g) : true), buys = mk && (g ? !Array.isArray(X.buys) || X.buys.includes(g) : true);
   if (verb === 'go') return true;
   if (verb === 'buy') return stores && sells;
@@ -80778,11 +80813,11 @@ function kindCan(k, verb, g) {
   const K = STR_KINDS[k]; if (!K || K.gone) return false;
   const J = typeof wtJobOf === 'function' ? wtJobOf(k) : null;
   const gets = verb === 'collect' && kindGets(k, g);
-  return pfAllS().some(p => p.k === k && placeCan(pfUse(p) === 'work' && J ? Object.assign({}, p, J) : p, K, verb, g, p.goods, gets));
+  return pfAllS().some(p => { const w = pfUse(p) === 'work'; return p.k === k && placeCan(w && J ? Object.assign({}, p, J) : p, K, verb, g, p.goods, gets, w); });
 }
 // the types of place a routine names (by type: each workplace finds its own) - the types of work and the lots; not homes (whose?), roads or props
 const routineKinds = () => Object.keys(STR_KINDS).filter(k => !STR_KINDS[k].gone && pfAllS().some(p => p.k === k && (() => { const g = pfGroup(p); return g && g !== 'RESIDENCES' && g !== 'ROADS' && g !== 'PROPS'; })()));
-const copyCan = (o, J) => placeCan(o, STR_KINDS[o.k] || {}, J.do, J.k, typeof strGoods0 === 'function' ? strGoods0(o) : o.goods, J.do === 'collect' && kindGets(o.k, J.k));
+const copyCan = (o, J) => placeCan(o, STR_KINDS[o.k] || {}, J.do, J.k, typeof strGoods0 === 'function' ? strGoods0(o) : o.goods, J.do === 'collect' && kindGets(o.k, J.k), strWork(o));
 function workAt(W, J) {
   if (WORK_DUTY.includes(J.do)) return null;
   if (J.do === 'fish') { if (J.to !== 'near' && J.at != null && NATURE.some(a => a.id === J.at)) return J.at; const A = NATURE.filter(a => a.k === 'fish').sort((a, b) => Math.abs((a.x0 + a.x1) / 2 - W.x) - Math.abs((b.x0 + b.x1) / 2 - W.x))[0]; return A ? A.id : null; }
