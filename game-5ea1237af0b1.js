@@ -12967,7 +12967,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1173;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 12:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 20 12:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79319,7 +79319,7 @@ function famReaches(who, v) {
   return storyCars.some(q => q.story && q.state === 'run' && q.berth != null && famCanUse(who, q) && folkHops(H, slStr(q.berth)) && folkReach(q, q.x, B.x));
 }
 // a vehicle who may use: their own, or a free one of their family's
-function famCanUse(who, v) { if (v.wk != null) { const c = who === 'player' ? PLAYER_C : stChar(who), W0 = c && workOf(c); return !!W0 && W0.id === v.wk && v.driven == null && !folkTrip(v); } const o = vehOwnerVal(v); if (o === who) return true;   // (a work vehicle: its workplace's workers', while free - user Nov 20 11:04)
+function famCanUse(who, v) { if (v.wk != null) return v.wfor === who; const o = vehOwnerVal(v); if (o === who) return true;   // (a work vehicle: only its worker's)
   return o != null && o !== -1 && famOf(who, o) && v.driven == null && !folkTrip(v) && !(FOLK.st[v.sid] && who !== 'player'); }
 // the steps to keep member m's home stocked, for character who with these coins, carrying so many of the good and so many fish; null: no way
 function famSteps(who, F, coins, carry, fish, x) {
@@ -79437,8 +79437,8 @@ const folkAway = v => { const T = folkTrip(v); return (!!T && !!T.away) || folkT
 const folkBoat = v => jetboats.includes(v);
 // a character's vehicles: the placed cars and boats whose OWNER they are
 // (user Nov 20 09:25: "they leave from their residence to their work in their own car, and then at work they use the work car") at work (S.wk, from START
-// WORK to END WORK): only their workplace's vehicle, while no one else has it (user Nov 20 11:04: one a workplace, shared); else their own and their family's, never a work vehicle - 50-zzzzz-story-work.js
-const folkVehs = c => { const S = FOLK.c[c.id] || {}; return [...storyCars, ...jetboats].filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && (S.wk ? v.wk === S.wk && (S.in === v.sid || (v.driven == null && !folkTrip(v) && !folkMine(v))) : v.wk == null && (vehOwnerVal(v) === c.id || S.in === v.sid || famCanUse(c.id, v)))); };   // (and their FAMILY's while free - 50-zzzzz-story-family.js)
+// WORK to END WORK): only their work vehicle; else their own and their family's, never a work vehicle - 50-zzzzz-story-work.js
+const folkVehs = c => { const S = FOLK.c[c.id] || {}; return [...storyCars, ...jetboats].filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && (S.wk ? v.wfor === c.id && v.wk != null : v.wk == null && (vehOwnerVal(v) === c.id || S.in === v.sid || famCanUse(c.id, v)))); };   // (and their FAMILY's while free - 50-zzzzz-story-family.js)
 // a job's verb as the routine does it (the one list - VERBS): BUY is COLLECT from a market's stock, SELL is DELIVER into it (a character's
 // coins aren't kept yet)
 // a SELL pays as the player's does: at a market that BUYS it (marketBuys, 50-zz-cargo.js)
@@ -79522,7 +79522,7 @@ const folkFam = v => { const c = folkOwner(v); return !!c && v.wk == null && fam
 const folkFamFree = v => !!v && folkFam(v) && !folkMine(v) && folkFree(v);
 const folkStealable = v => !!folkOwner(v) && !folkFam(v) && !folkMine(v) && folkFree(v);
 // a vehicle that's yours to use: your own, or one you've taken - stolen, or your family's (selling from it, what you carry, your objectives)
-const storyYours = v => !!v && (!!v.own || folkMine(v) || (v.wk != null && (W0 => !!W0 && W0.id === v.wk)(workOf(PLAYER_C))));   // (and your workplace's - 50-zzzzz-story-work.js)
+const storyYours = v => !!v && (!!v.own || folkMine(v));
 // boarding one of your family's: kept as taken (folkMine) - where it was, to tell its owner
 function folkFamTake(v) { if (folkFamFree(v)) FOLK.st = Object.assign({}, FOLK.st, { [v.sid]: { berth: v.berth, spot: v.spot, x: v.x, fam: 1 } }); }
 ACTS.storySteal = (p, sid) => {
@@ -80202,7 +80202,7 @@ function stockBox(el, css, o, save) {
      work vehicle lost: no other till the next morning.
    A worker's day (famDecide's WORK, 50-zzzzz-story-family.js): START WORK at the workplace - there on foot, their own vehicle put away
    where it's taken nearest it (a parking) - the routine in their work vehicle, END WORK there on foot (paid), home in their own vehicle.
-   The player is a worker like any (PLAYER_C.work): his workplace's vehicle is his to use in its hours, and a day there pays
+   The player is a worker like any (PLAYER_C.work): his work vehicle is made as he's at his workplace in its hours, and a day there pays
    its WAGE at its end.
    ================================================================ */
 const WORK_DEF = { startH: 8, endH: 17 };
@@ -80251,35 +80251,24 @@ function workVehMake(W, who, sv = W.wv, tag = { wk: W.id }) {
   let v;
   if (D.fam === 'boat') { const B = strBox(W); v = Object.assign(newJetboat(B.x0, B.x1, D.col, D.kind), { story: true, sid, own: mine, sv, berth: null, spot: 0, hb: null, hs: null, fuel: 1, x: W.x, dir }); }
   else v = storyCarMade({ sid, own: mine, sv, art: D.art, berth: null, spot: 0, hb: null, hs: null, x: W.x, dir: -dir });
-  Object.assign(v, tag, { wfor: who }); if (!mine && who != null) v.fac = who;   // (its character's: theirs to drive, stolen from them as anything of theirs - vehOwnerVal)
+  Object.assign(v, tag, { wfor: who }); if (!mine) v.fac = who;   // (its character's: theirs to drive, stolen from them as anything of theirs - vehOwnerVal)
   const P = workSpot(W, v, D.fam); if (!P) return null;
   const [o, s] = P; v.berth = o.id; v.spot = s; v.x = storySpotX(o, s); const on = strSpotOn(o, v.x); if (on) Object.assign(v, on);
   if (D.fam === 'boat') jetboats.addRow(v); else storyCars.addRow(v);
   folkLog({ t: 'wv', who, at: slPlaceName(o), veh: slVehName(v.sv) });
   return v;
 }
-// a workplace's work vehicles (in the world, whole)
-const workVehsAt = W0 => [...storyCars, ...jetboats].filter(v => v.wk === W0.id);
+// who's work vehicles (in the world, whole)
+const workVehsOf = who => [...storyCars, ...jetboats].filter(v => v.wfor === who && v.wk != null);
 const ownVehsOf = who => [...storyCars, ...jetboats].filter(v => v.wfor === who && v.cv != null);
 function workVehGone(v) { const t = tableOf(v); if (t) emit('tableRemove', { t, o: v }); }
-/* ---- A WORKPLACE'S VEHICLE (user Nov 20 11:04: "A workplace has vehicles that are used by the workers. So if we have 5 police officers, we won't have
-   5 police vehicles, we just have one. That shows what kind of vehicle that structure spawns"): its WORK VEHICLE, one, made at a free spot of it or
-   of a structure joined to it as a story starts; lost, a new one there the next morning - while the workplace stands. Its workers share it: whoever
-   is on shift and finds it free takes it (folkVehs), the others wait on duty. ---- */
-function workVehStep() {
-  for (const W0 of strsUsed()) {
-    if (!workVehD(W0) || strDown(W0)) continue;
-    const L = workVehsAt(W0); if (L.some(v => v.state === 'run')) continue;
-    if (L.some(v => v.state !== 'run' && (v.lostDay === W.day || env.time < STORY_WAKE_H))) continue;   // (lost: the next morning)
-    workVehMake(W0, null, W0.wv, { wk: W0.id });
-  }
-}
+// a work vehicle can be lost (sunk, wrecked): that day none other - the lost one's row taken away the next morning
+function workLostToday(who) { return workVehsOf(who).some(v => v.state !== 'run' && v.lostDay === W.day); }
 /* ---- A CHARACTER'S OWN VEHICLE (user Nov 20 09:50: "when we create a character, we would assign them their default vehicle. So if you place a character in a
    residence, their default vehicle will appear in their residence parking location or hangar"; 09:38: "As long as their house exists, when they respawn they
    get their vehicle again"): VEHICLE (c.veh - STORY > CHARACTERS, the player's too), made at a free spot of their HOME or of a structure joined to it as a
    story starts; lost, a new one there the next morning - while their home stands. ---- */
 function ownVehStep() {
-  workVehStep();
   for (const c of charsAll()) {
     const sv = c.veh; if (!sv || !STR_VEHS[sv] || (c !== PLAYER_C && stGone(c.id))) continue;
     const who = c === PLAYER_C ? 'player' : c.id, H = stHome(c); if (!H || strDown(H)) continue;
@@ -80288,13 +80277,15 @@ function ownVehStep() {
     workVehMake(H, who, sv, { cv: 1 });
   }
 }
-// START WORK: at the workplace, on foot - its work vehicle theirs to use while it's free
+// START WORK: at the workplace, on foot - their work vehicle made (one a day; lost today: none)
 function workIn(c, S, W0) {
   S.wk = W0.id; S.paid = 0;
+  if (!workVehsOf(c.id).some(v => v.state === 'run') && !workLostToday(c.id)) workVehMake(W0, c.id);
   folkLog({ t: 'job', who: c.id, verb: 'START WORK', k: '', n: 0, at: slPlaceName(W0) });
 }
-// END WORK: back at the workplace, on foot (its work vehicle left at its spot for the next) - the day's WAGE
+// END WORK: back at the workplace, on foot - the work vehicle put away (gone), the day's WAGE
 function workOut(c, S, W0) {
+  for (const v of workVehsOf(c.id)) if (v.state === 'run' && v.driven == null && !folkTrip(v) && !folkMine(v)) workVehGone(v);
   const w = Math.max(0, W0.wage | 0); if (w && !S.paid) { S.k = (S.k || 0) + w; S.paid = 1; }
   S.wk = 0; folkLog({ t: 'job', who: c.id, verb: 'END WORK', k: '', n: w, at: slPlaceName(W0) });
 }
@@ -80319,12 +80310,15 @@ function workAgain(c, S, W0) {
   if (R.length && !S.fail && !(time - (S.lt || -1e9) < 20)) { S.j = 1; S.lt = time; return true; }   // (at most once in 20 s: a routine done in no time waits)
   S.duty = 1; S.nx = time + 5; return true;
 }
-// ---- the player's own (STORY): at his workplace in its hours, its work vehicle his to use; a day there pays its WAGE at its end
+// ---- the player's own (STORY): at his workplace in its hours, his work vehicle is made (one a day); a day there pays its WAGE at its end
 function workPlayerStep() {
   const W0 = workOf(PLAYER_C), P = FOLK.pw || (FOLK.pw = { day: 0, paid: 0 });
   if (W0 && STORY && !ui.title) {
     const at = storyAt(), here = at && (at === W0 || folkHops(at, W0));
-    if (here && workOn(W0)) P.day = W.day;
+    if (here && workOn(W0)) {
+      P.day = W.day;
+      if (workVehD(W0) && !workVehsOf('player').some(v => v.state === 'run') && !workLostToday('player')) workVehMake(W0, 'player');
+    }
     if (P.day === W.day && P.paid !== W.day && !workOn(W0) && env.time >= workH(W0)[1]) { P.paid = W.day; const w = Math.max(0, W0.wage | 0); if (w) story.coins += w; }
   }
   // (a lost work vehicle's or own vehicle's row, the next morning: taken away - its new one made)
@@ -80379,7 +80373,7 @@ function workPrefabBox(p, el, css, ed) {
   { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(p.wage | 0); n.style.cssText = css + ';width:64px'; n.title = 'Coins a day of work pays (0: paid by what they sell)';
     n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) p.wage = v; else delete p.wage; ed(); };
     row().append(L('WAGE', 'Coins a day, whatever there was to do'), n, L((p.wage | 0) ? 'A DAY' : 'PAID BY WHAT THEY SELL', '0: only what they sell pays')); }
-  row().append(L('WORK VEHICLE', 'The one vehicle this place has, shared by its workers: lost, a new one the next morning'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], p.wv || '', v => { if (v) p.wv = v; else delete p.wv; }, 130, 'Each worker\'s vehicle'));
+  row().append(L('WORK VEHICLE', 'Made for each worker as they start, put away as they finish'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], p.wv || '', v => { if (v) p.wv = v; else delete p.wv; }, 130, 'Each worker\'s vehicle'));
   // ROUTINE: its jobs in order, done again and again through the day (none: on duty) - places by type
   const kinds = Object.keys(STR_KINDS).filter(k => !STR_KINDS[k].prop && !STR_KINDS[k].noGoods).map(k => ['k:' + k, 'THE ' + STR_KINDS[k].lab]);
   { const r = row(); r.append(L('ROUTINE', 'Its jobs in order, again through the day')); if (!(p.rt || []).length) r.appendChild(L('NONE: ON DUTY HERE', 'Workers stay here till the day ends')); }
@@ -80441,7 +80435,7 @@ function workLinksDraw(q) {
       if (c.veh && STR_VEHS[c.veh]) { const sp = workSpotsAt(o, c.veh)[0]; if (sp) { if (sp !== o) line(A, mid(sp), WL_COL.veh, nm(c) + '\'S ' + STR_VEHS[c.veh].lab); } else drawTextC(C, 'NO SPOT FOR ' + nm(c) + '\'S ' + STR_VEHS[c.veh].lab, Math.round(PX(A[0])), Math.round(PY(strBox(o).top) - 14 * q), WL_COL.bad, q, 'center', [4, 7, 15]); }
     }
     for (const c of workers(o)) { const H = stHome(c); if (H && H !== o) line(A, mid(H), WL_COL.home, nm(c) + ' LIVES HERE'); }
-    if (workVehD(o)) { const L = workSpotsAt(o); for (const s of L) if (s !== o) line(A, mid(s), WL_COL.veh, STR_VEHS[o.wv].lab); if (!L.length) drawTextC(C, 'NO SPOT FOR ITS ' + STR_VEHS[o.wv].lab, Math.round(PX(A[0])), Math.round(PY(strBox(o).top) - 14 * q), WL_COL.bad, q, 'center', [4, 7, 15]); }
+    if (workVehD(o)) { const L = workSpotsAt(o); for (const s of L) if (s !== o) line(A, mid(s), WL_COL.veh, STR_VEHS[o.wv].lab + 'S'); if (!L.length) drawTextC(C, 'NO SPOT FOR ITS ' + STR_VEHS[o.wv].lab + 'S', Math.round(PX(A[0])), Math.round(PY(strBox(o).top) - 14 * q), WL_COL.bad, q, 'center', [4, 7, 15]); }
     workJobs(o).forEach((J, i) => { const B = J.do === 'fish' ? area(J.at) : J.do === 'tow' ? null : (s => s && s !== o ? mid(s) : null)(slStr(J.at)); line(A, B, WL_COL.job, (i + 1) + '. ' + famStepTxt(J).replace(/ AT .*$/, '')); });
     for (const W0 of strsUsed()) if (W0 !== o && Array.isArray(W0.rt)) workJobs(W0).forEach(J => { if (J.do !== 'fish' && J.at === o.id) line(mid(W0), A, WL_COL.job, strName(W0) + ': ' + famStepTxt(J).replace(/ AT .*$/, '')); });
   }
@@ -80449,7 +80443,7 @@ function workLinksDraw(q) {
 /* ---- WHERE THE VEHICLES START, SHOWN IN THE EDITOR (user Nov 20 10:55: "the parking should show the vehicle that that person owns. You cant pick
    it in the editor but you can see its correctly assigned (that is how the world would be when it starts)"; "For locations that have hangars or
    store vehicles inside (e.g. police station) the vehicle would appear above as we do for hangars"): every character's VEHICLE at the spot it's
-   made at (ownVehStep), then every workplace's one WORK VEHICLE (workVehStep) - an open place (a parking, a dock) shows it standing at its
+   made at (ownVehStep), then every workplace's WORK VEHICLE once - the type it makes for each worker as they start (workIn) - an open place (a parking, a dock) shows it standing at its
    spot, an enclosed one (a hangar, a police station) over it as its spots are; no spot free: over the home / workplace in red, NO SPOT.
    Never picked: only drawn. ---- */
 const ASG = { t: -9, gen: -1, at: new Map() };   // (at: structure id -> [{ sv, who, s, red }])
@@ -80475,7 +80469,7 @@ function assignPlan() {
   };
   const nm = c => c === PLAYER_C ? 'PLAYER' : (c.name || '').toUpperCase();
   for (const c of charsAll()) { if (!c.veh || (c !== PLAYER_C && stGone(c.id))) continue; const H = stHome(c); if (H) place(H, c.veh, nm(c)); }
-  for (const W of strsUsed()) if (workVehD(W)) place(W, W.wv, '');
+  for (const W of strsUsed()) if (workVehD(W)) place(W, W.wv, '');   // (one: the type it makes for each worker as they start - user Nov 20 11:04 / 11:09)
   return at;
 }
 function assignEdDraw(o, X0, X1, Y0, q) {
