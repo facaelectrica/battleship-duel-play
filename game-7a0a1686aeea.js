@@ -12322,19 +12322,20 @@ const AIM_ELEV_RATE = 60, AIM_POWER_RATE = 0.6;
 function elevMin(p) {
   if (lampOf(p)) return 0;                                     // (the minisub's light: right round below it, never up - user Oct 27)
   if (controlling(p) === 'heli') return -80;                 // (LAND TEST: the helicopter's nose gun, well down)
+  if (controlling(p) === 'civ' && boatCrane(crew[p].civ)) return 5;   // (a ship's crane: its jib from just over her bow - 50-zzzzz-ship-crane.js)
   if (controlling(p) === 'civ') return -80;                  // (the fire helicopter's water cannon)
   if (controlling(p) === 'tank') return -6;
   if (controlling(p) !== 'tower') return ELEV_MIN;
   return -15;                             // (user Oct 25: down to 15 below, for subs close to the dock; your own pier your rounds pass)
 }
 const gunOf = sh => sh.gun || guns[sh.id];      // (a STORY raider carries its own gun)
-function activeGun(p) { const m = controlling(p); { const L = lhLampOf(p); if (L) return L; } if (m === 'civ' && civHelis.includes(crew[p].civ)) return hoseGun(crew[p].civ); if (m === 'civ' && msOf(p)) return msOf(p).lamp; if (m === 'sub' && subLampOf(p)) return subLampOf(p); return m === 'heli' ? hguns[p] : m === 'ship' || m === 'tank' ? guns[p] : tguns[p]; }
+function activeGun(p) { const m = controlling(p); { const L = lhLampOf(p); if (L) return L; } if (m === 'civ' && civHelis.includes(crew[p].civ)) return hoseGun(crew[p].civ); if (m === 'civ' && msOf(p)) return msOf(p).lamp; if (m === 'civ' && boatCrane(crew[p].civ)) return craneGun(crew[p].civ); if (m === 'sub' && subLampOf(p)) return subLampOf(p); return m === 'heli' ? hguns[p] : m === 'ship' || m === 'tank' ? guns[p] : tguns[p]; }
 
 
 // what you're in has an ANGLE / POWER (activeGun) that the keys, the right stick, the guest's link aim - one path
 // for every one (user Oct 27: "The controls should be UNIVERSAL. Like the normal helicopter."); the minisub's light
 // is pointed on its own (msOf, below its hull)
-function hasGuns(p) { const m = crew[p].mode; return m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli' || (m === 'civ' && isFireHeli(crew[p].civ)); }
+function hasGuns(p) { const m = crew[p].mode; return m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli' || (m === 'civ' && (isFireHeli(crew[p].civ) || !!boatCrane(crew[p].civ))); }   // (a ship's crane: its jib and hook - 50-zzzzz-ship-crane.js)
 // a helicopter's gun (the army one's nose gun, the fire one's water cannon): up / down fly it, so the power keys
 // tilt the gun instead
 const heliAim = p => crew[p].mode === 'heli' || (crew[p].mode === 'civ' && isFireHeli(crew[p].civ));
@@ -12369,9 +12370,9 @@ function holdsFor(p, dt) {
   }
 }
 
-function unitFacing(p) { const m = crew[p].mode; return m === 'tower' ? myTw(p).facing : m === 'tank' && tankOf(p) ? tankOf(p).facing : m === 'heli' && heliOf(p) ? heliOf(p).facing : shipOf(p).facing; }
+function unitFacing(p) { const m = crew[p].mode; if (m === 'civ' && boatCrane(crew[p].civ)) return crew[p].civ.dir > 0 ? 1 : -1; return m === 'tower' ? myTw(p).facing : m === 'tank' && tankOf(p) ? tankOf(p).facing : m === 'heli' && heliOf(p) ? heliOf(p).facing : shipOf(p).facing; }
 // the battleship's turrets swing right round (up to 180 degrees, firing astern); the tower's gun to straight up
-function elevMax(p) { const m = crew[p].mode; if (lampOf(p)) return 180; return m === 'ship' || m === 'tank' || m === 'tower' ? 180 : m === 'heli' ? 25 : m === 'civ' ? 35 : ELEV_MAX; }   // (the tower right round too, user Oct 25: planes going the other way)
+function elevMax(p) { const m = crew[p].mode; if (lampOf(p)) return 180; if (m === 'civ' && boatCrane(crew[p].civ)) return 175; return m === 'ship' || m === 'tank' || m === 'tower' ? 180 : m === 'heli' ? 25 : m === 'civ' ? 35 : ELEV_MAX; }   // (the tower right round too, user Oct 25: planes going the other way)
 const SUB_TURN = 140;                                        // world units of depth per turn of the (keyboard) dive wheel
 // the keyboard's dive keys turn an imaginary wheel: the sub's target depth follows
 function turnWheel(p, degs) {
@@ -12632,7 +12633,7 @@ const ACTS = {
   release: p => releaseFire(p),
   dc: p => dropDepthCharge(shipOf(p)),
   bomb: p => dropBomb(planeOf(p)),
-  magnet: p => { if (crew[p].mode === 'civ' && crew[p].civ && cranes.includes(crew[p].civ)) { craneMagnet(crew[p].civ); return; } if (crew[p].mode === 'civ') civMagnet(crew[p].civ && civClass(crew[p].civ) === 'heli' ? crew[p].civ : null); else heliMagnet(heliOf(p)); },   // (a civilian helicopter's too, user Oct 25 late)
+  magnet: p => { if (crew[p].mode === 'civ' && crew[p].civ && cranes.includes(crew[p].civ)) { craneMagnet(crew[p].civ); return; } if (crew[p].mode === 'civ' && boatCrane(crew[p].civ)) { boatCraneMagnet(crew[p].civ); return; } if (crew[p].mode === 'civ') civMagnet(crew[p].civ && civClass(crew[p].civ) === 'heli' ? crew[p].civ : null); else heliMagnet(heliOf(p)); },   // (a civilian helicopter's too, user Oct 25 late)
   water: p => { if (crew[p].mode === 'civ') hoseToggle(crew[p].civ); },   // (the fire helicopter's water cannon, user Oct 27)
   sails: p => toggleSails(yachtFor(p)),          // (a yacht: set or furl her sails, user Oct 26)
   cw: (p, wk) => civWeapon(p, wk),               // (user Oct 27: a vehicle's own green button - anchor, horn, fireworks, magnet, sails, ping, smoke, satellite)
@@ -12967,8 +12968,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1231;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 18:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1232;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 18:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23529,7 +23530,7 @@ function physics(dt) {
   // (LAND TEST: the sea in the middle and a country each side - their tanks, helicopters, lakes)
   { if (LAND) stepLandUnits(dt); stepLandWorld(dt); }
   ut = uLap('uLand', ut);   // (BATTLE too: the ground's own - what rests on it, the plants, a plane's wreck burning - 50-land-units)
-  if (LAND) { let uo = performance.now(); stepTraffic(dt); uo = uLap('o:stepTraffic', uo); stepBalloons(dt); uo = uLap('o:stepBalloons', uo); stepCivHelis(dt); uo = uLap('o:stepCivHelis', uo); stepHose(dt); uo = uLap('o:stepHose', uo); stepCivDrivers(); uo = uLap('o:stepCivDrivers', uo); stepAirports(dt); uo = uLap('o:stepAirports', uo); armyWreckHits(); uo = uLap('o:armyWreckHits', uo); stepSpace(dt); uo = uLap('o:stepSpace', uo); stepSeaplanes(dt); uo = uLap('o:stepSeaplanes', uo); stepBlimps(dt); uo = uLap('o:stepBlimps', uo); stepCranes(dt); uo = uLap('o:stepCranes', uo); stepCivMagnets(dt); uo = uLap('o:stepCivMagnets', uo); krTick(dt); uo = uLap('o:krTick', uo); }
+  if (LAND) { let uo = performance.now(); stepTraffic(dt); uo = uLap('o:stepTraffic', uo); stepBalloons(dt); uo = uLap('o:stepBalloons', uo); stepCivHelis(dt); uo = uLap('o:stepCivHelis', uo); stepHose(dt); uo = uLap('o:stepHose', uo); stepCivDrivers(); uo = uLap('o:stepCivDrivers', uo); stepAirports(dt); uo = uLap('o:stepAirports', uo); armyWreckHits(); uo = uLap('o:armyWreckHits', uo); stepSpace(dt); uo = uLap('o:stepSpace', uo); stepSeaplanes(dt); uo = uLap('o:stepSeaplanes', uo); stepBlimps(dt); uo = uLap('o:stepBlimps', uo); stepCranes(dt); uo = uLap('o:stepCranes', uo); stepCivMagnets(dt); uo = uLap('o:stepCivMagnets', uo); stepShipCranes(dt); uo = uLap('o:stepShipCranes', uo); krTick(dt); uo = uLap('o:krTick', uo); }
   uLap('uOpenWorld', ut);
   time += dt;
 }
@@ -45682,7 +45683,7 @@ function civWeapons(v) {
   if (k === 'sub') return ['ping'];
   if (k === 'air') return v.kind === 'cessna' ? ['csmoke'] : [];
   if (k === 'boat' && v.kind === 'fish') return ['hold', 'horn'];
-  if (k === 'boat' && HORN_HZ[v.kind]) return ['horn'];   // (user Nov 20 17:06: the cargo ship's horn, as the big ships')
+  if (k === 'boat' && HORN_HZ[v.kind]) return boatCrane(v) ? ['magnet', 'horn'] : ['horn'];   // (a ship's own crane: its MAGNET - 50-zzzzz-ship-crane.js)   // (user Nov 20 17:06: the cargo ship's horn, as the big ships')
   if (k === 'car') return ['horn', ...(carHasEl(v) ? ['elight'] : []), ...(carSiren(v) ? ['siren'] : [])];   // (user Nov 20 13:03: her emergency LIGHTS where she has them marked - carHasEl; the police car's SIREN - STR_VEHS siren)   // (user Nov 7 10:44: "The horn should be a green button on the bottom" - the car's own button, as the boats' horn)   // (11:08: her horn, as the big ships')   // (a fishing boat's hold: how many fish she has aboard - 50-story-net.js, user Nov 2)
   if (k === 'shuttle') return [v.state === 'pad' || v.state === 'count' || v.state === 'climb' ? 'launch' : 'bay'];
   return [];
@@ -45732,7 +45733,7 @@ function civWeaponState(p, wk) {
   if (wk === 'csmoke') { const b = smokeBtn(v, CESSNA_SMOKE_S, false); return { f: b.f, off: b.off, n: b.n, on: b.on }; }
   if (wk === 'bay') return { f: 0, off: !bayReady(v), n: -1, on: !!v.bayOp };
   if (wk === 'sails') return { f: 0, off: v.state !== 'sail', n: -1, on: v.sailsUp === false };
-  if (wk === 'magnet') return { f: 0, off: !!v.magBroken, n: -1, on: !!(v.mag && v.mag.out) };   // (its cable shot through: grey till it's mended at home)
+  if (wk === 'magnet') return { f: 0, off: !!v.magBroken, n: -1, on: !!(v.mag && (v.mag.out || v.mag.obj || v.mag.arm)) };   // (its cable shot through: grey till it's mended at home)
   if (wk === 'ping') return { f: 0, off: false, n: -1 };
   if (wk === 'hold') return netHoldState(v);
   return no;
@@ -47759,6 +47760,9 @@ const CSLOT = {"deck": 62.2, "w": 16, "h": 9, "rows": 3, "cols": [20.5, 37.2, 54
 // pixels, CONT_PW, CONT_PH. Stacked as high as the old, taller boxes stood: 8 rows where there were 3)
 const CONT_W = BOX_M[0] * UPM, CONT_H = BOX_M[1] * UPM, CONT_ROWS = Math.round(CSLOT.rows * CSLOT.h * CIV.container.k / CONT_H);
 const CONT_PW = CONT_W / CIV.container.k, CONT_PH = CONT_H / CIV.container.k;
+// (user Nov 20 17:06-17:34: the small cargo ship's hold takes three 20-ft boxes) a box is 40 ft (the big ships', the piers') or 20 ft (sz 1 - the goods'
+// boxes, a ship crane's - 50-zzzzz-ship-crane.js): its length, every place that asks a box's own
+const CONT_W20 = 6.06 * UPM, contW = k => k && k.sz ? CONT_W20 : CONT_W;
 const CONT_COLS = [[226, 110, 40], [236, 172, 44], [34, 84, 160], [178, 42, 40], [214, 214, 208], [140, 142, 148], [46, 120, 76], [150, 44, 90]];
 /* (user Oct 27: "The dock crane: should berth further in so it can get all the containers. Can we extend the red arm
    towards the sea for that?" - and then: the ship must not come further in, "The dock should not be 'enterable' unless
@@ -47786,7 +47790,7 @@ const cranes = new ColTable(ColTable.rec('num: out sea0 off offMax legs tx hy t 
    magnet's (50-land-magnet.js); from - the stack it was taken from (beside the row). The stacks, the cargo, the magnets hold a box as
    its row's handle (04-zz-coltable.js handle: the same object for the same box, saved as { row: ['containers', id] }) */
 const containers = new ColTable({ sq: 'id', ci: 'u8', dead: 'u8', where: 'str', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', a: 'f64', va: 'f64', on: 'ref', deck: 'obj',
-  inWater: 'u8', knocked: 'u8', carried: 'opt', hookA: 'opt', hookT: 'f64', spd: 'f64', from: 'obj' });
+  inWater: 'u8', knocked: 'u8', carried: 'opt', hookA: 'opt', hookT: 'f64', spd: 'f64', from: 'obj', gk: 'str', gn: 'f64', sz: 'u8' });   // (gk / gn: the good it holds and how many - 50-zzzzz-ship-crane.js; sz 1: a 20-ft box - contW)
 let craneArt = null;
 /* (engine stage 3) the cranes' and the boxes' own random source, and their tables. A box's colour is its own copy of its
    CONT_COLS entry (so a loaded one, merged into a live box, never writes into the shared list). A crane's dock (d), and what its
@@ -48147,7 +48151,7 @@ function cargoAway(c) {
 // (opt-fight, Oct 30: every round and shell asked this each physics step through civHit, and each call built the whole
 // list of boxes first - an array for every box on every pier. contFind walks the same boxes in the same order (contPlaces')
 // and stops at the first one the point is in: the same box taken, nothing made for the others)
-const contIn = (x, y, cx, cy) => !(Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1);
+const contIn = (x, y, cx, cy, w = CONT_W) => !(Math.abs(x - cx) > w / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1);
 /* (Nov 1, the architecture chat: a shell over a container ship worked out every box's place (cargoAt) every physics step - ~5 ms a
    frame in the everything scene) can any of her boxes hold the point? A box's middle is turned with her about one point - her
    middle at the waterline (civPoint), or once she's broken each half's break point (civHalfPoint) - so it always lies as far from
@@ -48179,7 +48183,7 @@ function contFind(x, y) {
     const cg = c.cargo;
     for (let i = 0; i < cg.length; i++) { const st = cg[i]; for (let j = 0; j < st.length; j++) { const [cx, cy, a] = cargoAt(c, i, j); if (contIn(x, y, cx, cy)) return [st[j], cx, cy, a, 'ship', c, i]; } }
   }
-  for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || k.where === 'hook') && contIn(x, y, k.x, k.y)) return [k, k.x, k.y, k.a, k.where];
+  for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || k.where === 'hook') && contIn(x, y, k.x, k.y, contW(k))) return [k, k.x, k.y, k.a, k.where];
   return null;
 }
 /* (user Oct 31 21:17: "If I fire a missile at a container ship and I hit a container, the explosion should destroy more than one
@@ -48210,7 +48214,7 @@ function contHit(x, y, dmg, vx, P) {
   for (const [k, cx, cy, ca, where, owner, i] of P) {
     if (where === 'ship' && owner.cargo[i].indexOf(k) < 0) continue;   // (already knocked off this frame)
     if (where === 'ship' && CIV_SKIP && CIV_SKIP.includes(owner)) continue;   // (a ship the battleship is passing: her boxes too)
-    if (Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1) continue;
+    if (Math.abs(x - cx) > contW(k) / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1) continue;
     spawnSparks(x, y, 10, 160); sound('impact', x);
     const away = () => (vx ? Math.sign(vx) : (crR() < 0.5 ? -1 : 1)) * crRnd(30, 70);
     if (where === 'ship') {
@@ -48283,6 +48287,7 @@ function stepContainers(dt) {
     const yb0 = k.y + CONT_H / 2;
     k.vy += 320 * dt; k.y += k.vy * dt;
     if (k.vy > 0 && boxOnBox(k, yb0)) continue;                     // (onto a pier's stack or a box lying loose)
+    if (k.vy > 0 && holdCatch(k, yb0)) continue;                    // (a goods box into a ship's hold with room: her goods - 50-zzzzz-ship-crane.js)
     // (user Oct 26, GTA: a ship's top is solid) falling onto a ship: over one of the container ship's slots it joins that
     // stack; anywhere else on her (the bridge's roof, her deck) it lands and rides with her (one knocked off her by a hit
     // goes on into the sea)
@@ -48302,6 +48307,7 @@ function stepContainers(dt) {
       if (k.y + CONT_H / 2 >= g) { k.y = g - CONT_H / 2; k.where = 'rest'; k.deck = null; k.a = 0; k.vx = 0; kickLandDust(k.x, g, 4); sound('impact', k.x); }
     }
   }
+  holdGoneFlush();
 }
 /* (user Oct 27: "Containers: a falling box should not pass through pier stacks and loose boxes") what a box coming down
    meets besides the ground, the water and a ship's top (shipTopAt has her stacks): a stack on a pier - over it, it
@@ -48312,18 +48318,19 @@ function boxOnBox(k, yb0) {
   const yb = k.y + CONT_H / 2;
   let top = Infinity, hit = null, hs = null;
   for (const cr of cranes) for (const s of cr.slots) {
-    if (!s.stack.length || Math.abs(k.x - s.x) >= CONT_W - 1) continue;
+    if (!s.stack.length || Math.abs(k.x - s.x) >= (contW(k) + CONT_W) / 2 - 1) continue;
     const t = (s.deck ?? DECK_Y) - s.stack.length * CONT_H;
     if (yb0 <= t + 3 && yb >= t && t < top) { top = t; hit = null; hs = s; }
   }
   for (const q of containers) {
-    if (q === k || q.where !== 'rest' || q.carried != null || !!q.inWater !== !!k.inWater || Math.abs(k.x - q.x) >= CONT_W - 1) continue;
+    if (q === k || q.where !== 'rest' || q.carried != null || !!q.inWater !== !!k.inWater || Math.abs(k.x - q.x) >= (contW(k) + contW(q)) / 2 - 1) continue;
     const t = q.y - CONT_H / 2;
     if (yb0 <= t + 3 && yb >= t && t < top) { top = t; hit = q; hs = null; }
   }
   if (!hs && !hit) return false;
   const cx = hs ? hs.x : hit.x, side = Math.sign(k.x - cx) || 1;
-  if (Math.abs(k.x - cx) > CONT_W * 0.6 || (hs && hs.stack.length > CONT_ROWS)) { k.x = cx + side * CONT_W; k.vx = side * Math.max(20, Math.abs(k.vx)); k.va += side * 0.8; return false; }   // (on its edge: off it goes)
+  const ow = hs ? CONT_W : contW(hit);
+  if (Math.abs(k.x - cx) > ow * 0.6 || (hs && hs.stack.length > CONT_ROWS)) { k.x = cx + side * (ow + contW(k)) / 2; k.vx = side * Math.max(20, Math.abs(k.vx)); k.va += side * 0.8; return false; }   // (on its edge: off it goes)
   if (k.vy > 160) shakeAt(1.2, k.x);
   if (!k.inWater) { sound('impact', k.x); spawnSparks(k.x, top, 4, 80); }
   if (hs) { hs.stack.push(k); Object.assign(k, { where: 'stack', x: hs.x, a: 0, vx: 0, vy: 0, va: 0, deck: null, on: null, knocked: false }); }
@@ -48356,7 +48363,7 @@ function drawContainerPx(X, Y, W, H, col, dead, put = CONT_PUT) {
 }
 const CONTK = [0, 0, 0];
 function drawContainerAt(x, y, a, k) {
-  const W = Math.round(CONT_W * SV), H = Math.round(CONT_H * SV);
+  const W = Math.round(contW(k) * SV), H = Math.round(CONT_H * SV);
   const own = thingsOwn(); CONT_M = thgMat();
   if (!a) drawContainerPx(Math.round(PX(x) - W / 2), Math.round(PY(y) - H / 2), W, H, CONT_COLS[k.ci], k.dead);
   else { thgRotate(thgTranslate(CONT_M, PX(x), PY(y)), a); drawContainerPx(-Math.round(W / 2), -Math.round(H / 2), W, H, CONT_COLS[k.ci], k.dead); }
@@ -51216,7 +51223,7 @@ function krGather() {
   if (img.shark) for (const k of sharks) if (near(k.x, k.y)) krProxy(k, 'SHARK', { w: img.shark.swim[0].width * img.shark.px, h: img.shark.swim[0].height * img.shark.px });
   for (const p of pieces) if (!p.settled && p.y > waterLv(p.x) + 30 && near(p.x, p.y)) krProxy(p, 'PIECE', { w: 2 * p.hl, h: 34, oy: 0.65 });
   for (const sb of subs) if (sb && sb.parts) for (const q of sb.parts) if (!q.rest && near(q.x, q.y)) krProxy(q, 'SUBHALF', { w: (q.s1 - q.s0) / SUB_SECTIONS * SUB_L, h: KR_SUB_ART.h, oy: KR_SUB_ART.oy }, { sb });
-  if (LAND) for (const k of containers) if (k.where === 'free' && k.inWater && near(k.x, k.y)) krProxy(k, 'BOX', { w: CONT_W, h: CONT_H });
+  if (LAND) for (const k of containers) if (k.where === 'free' && k.inWater && near(k.x, k.y)) krProxy(k, 'BOX', { w: contW(k), h: CONT_H });
   for (const o of linerLoose) if (o.inWater && !o.rest && near(o.x, o.y)) krProxy(o, 'PART', { w: o.p.w * o.k, h: o.p.h * o.k });
   // (gone out of reach, and nothing has it or is going for it: let go of)
   for (let i = KR.objs.length - 1; i >= 0; i--) { const o = KR.objs[i]; if (!o.seen && !o.taken && o.st === 'free' && !o.held.length && !o.claim) { KR.map.delete(o.ref); KR.objs.splice(i, 1); } }
@@ -52818,14 +52825,24 @@ function stepCivMagnets(dt) {
     if (h.state !== 'fly' && h.state !== 'landed') { cutRope(h, 1, true); h.magBroken = false; continue; }   // (its cable and magnet fall loose with it - user Oct 27, [15]; the shared cutRope)
     M.len = M.out ? Math.min(CMAG_L, M.len + 140 * dt) : Math.max(0, M.len - 180 * dt);
     if (!M.out && M.len <= 0) { h.mag = null; continue; }
-    // (user Oct 26: "the cable that's carrying the magnet seems to behave like a single stiff line. It should feel more
-    // like a rope. So there's more momentum to it... if you stop the helicopter, the weight of the thing you're
-    // carrying would carry the momentum forward") a rope of knots, as the army helicopter's: each keeps its way and
-    // falls, held to the rope's length; the magnet heavy, a load far heavier - so it lags behind as the helicopter sets
-    // off, and swings on ahead when it stops
-    const ax = h.x, ay = h.y + chSkid(h) * 0.4, N = 10;
+    const ax = h.x, ay = h.y + chSkid(h) * 0.4;
+    magRopeStep(M, ax, ay, dt, civTag(h), { grab: M.out && M.len > 30, reach: MAG_GRAB + 12 });
+    // (the swing tugs the helicopter toward its load: you feel its weight)
+    if (M.obj) { const L = Math.max(20, Math.hypot(M.ex - ax, M.ey - ay)); h.vx = (h.vx || 0) + clamp((M.ex - ax) / L, -1, 1) * 90 * dt; }
+  }
+}
+/* ---- ONE MAGNET ON A ROPE (Nov 20: the civilian helicopters' and the ship cranes' - 50-zzzzz-ship-crane.js): M { len, n (its knots), obj (its load),
+   ex, ey, ang (the magnet), rest (its load set down), wet } hanging from (ax, ay). O: grab (it may take hold now), reach, floor (x, y) -> the floor under a
+   point besides the ground and the bottom (a ship's deck), pick (ex, ey) -> a load it may take that isn't a target of every magnet (a ship's hold's box)
+   (user Oct 26: "the cable that's carrying the magnet seems to behave like a single stiff line. It should feel more like a rope. So there's more momentum
+   to it... if you stop the helicopter, the weight of the thing you're carrying would carry the momentum forward") a rope of knots, as the army
+   helicopter's: each keeps its way and falls, held to the rope's length; the magnet heavy, a load far heavier - so it lags behind as what it hangs
+   from sets off, and swings on ahead when it stops ---- */
+function magRopeStep(M, ax, ay, dt, tag, O) {
+    const N = 10;
     if (!M.n) M.n = Array.from({ length: N + 1 }, (_, i) => [ax, ay + i * 0.1, ax, ay + i * 0.1]);
     const P = M.n, seg = Math.max(0.3, M.len / N), damp = Math.pow(0.8, dt), G = 900 * dt * dt, heavy = !!M.obj;
+    const flo = (x, y) => { const b = dryLand(x) ? landBelow(x, y) : seaUnder(x, y); const c = O.floor ? O.floor(x, y) : Infinity; return Math.min(b, c); };
     // (user Oct 26: "the magnet should sink into the water, not drag the container as if it was solid ground") the
     // water is no floor: under the surface the rope and the magnet go on down - slowed hard by the water, the load
     // lighter in it - to the bottom; going in, a splash
@@ -52842,28 +52859,25 @@ function stepCivMagnets(dt) {
         if (d <= seg) continue;
         const k = (d - seg) / d / (wa + wb); a[0] += dx * k * wa; a[1] += dy * k * wa; b[0] -= dx * k * wb; b[1] -= dy * k * wb;
       }
-      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : seaUnder(e[0], e[1] - 20);
+      const e = P[N], fl = flo(e[0], e[1] - 20);
       if (e[1] + under > fl) { e[1] = fl - under; e[2] += (e[0] - e[2]) * 0.5; }   // (resting on the ground or the bottom: it drags)
     }
-    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : seaUnder(q[0], q[1] - 8); if (q[1] > gy - 1) q[1] = gy - 1; }
+    for (let i = 1; i < N; i++) { const q = P[i], gy = flo(q[0], q[1] - 8); if (q[1] > gy - 1) q[1] = gy - 1; }
     const e = P[N], q1 = P[N - 1], ex = e[0], ey = e[1];
     { const wetNow = !dryLand(ex) && ey + MAG_H > surfaceY(ex);
       if (wetNow && !M.wet && !SIM_ONLY) { lakeSplash(ex, M.obj ? 0.9 : 0.4); for (let k = 0; k < 6; k++) spawnFoam(ex + magRnd(-8, 8), magRnd(1.5, 3)); }
       if (wetNow && !SIM_ONLY && magR() < dt * 6) addBubble(ex + magRnd(-5, 5), ey + magRnd(0, 8), magRnd(-4, 4), -magRnd(15, 30), magRnd(0.8, 1.6));
       M.wet = wetNow; }
     M.ex = ex; M.ey = ey; M.ang = clamp(-Math.atan2(ex - q1[0], ey - q1[1] + 0.01), -1.1, 1.1);   // (the magnet hangs along the rope's end)
-    // (the swing tugs the helicopter toward its load: you feel its weight)
-    if (heavy) { const L = Math.max(20, Math.hypot(ex - ax, ey - ay)); h.vx = (h.vx || 0) + clamp((ex - ax) / L, -1, 1) * 90 * dt; }
-    if (M.obj && (M.obj.carried !== civTag(h) || !magHoldable(M.obj))) { magLetGo(M.obj, civTag(h)); M.obj = null; }   // (destroyed on it, or taken: let go, never destroyed again - user Oct 27, a plane counted lost twice)
-    if (!M.obj && M.out && M.len > 30) {
-      const best = magNearest(magTargetsAll(), ex, ey, MAG_GRAB + 12);
-      if (best) { M.obj = best; magTake(best, civTag(h)); }
+    if (M.obj && (M.obj.carried !== tag || !magHoldable(M.obj))) { magLetGo(M.obj, tag); M.obj = null; }   // (destroyed on it, or taken: let go, never destroyed again - user Oct 27, a plane counted lost twice)
+    if (!M.obj && O.grab) {
+      const best = magNearest(magTargetsAll(), ex, ey, O.reach), own = O.pick ? O.pick(ex, ey, best ? Math.hypot(ex - best.x, ey + MAG_H - (best.y - magTop(best))) : O.reach) : null;
+      if (own || best) { M.obj = own || best; magTake(M.obj, tag); }
     }
     M.rest = false;
     if (M.obj) { const o = M.obj; magPlace(o, ex, ey, (e[0] - e[2]) / Math.max(dt, 1e-3), (e[1] - e[3]) / Math.max(dt, 1e-3), M.ang);
       // (on the ground under it, the load rests there: the cable goes slack)
-      const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : seaUnder(o.x, o.y - 20) - magFoot(o); if (o.y >= fl - 0.5) { o.y = Math.min(o.y, fl); M.rest = true; } }
-  }
+      const fl = flo(o.x, o.y - 20) - magFoot(o); if (o.y >= fl - 0.5) { o.y = Math.min(o.y, fl); M.rest = true; } }
 }
 function drawCivMagnets() {
   const own = thingsOwn();
@@ -54042,7 +54056,7 @@ function msFallersNow() {
   for (const h of civHelis) if (h.state === 'sink') down(h, h.x, h.y - 8, 18, 10);
   for (const pl of planes) if (pl && (pl.state === 'wreck' || pl.state === 'down')) down(pl, pl.x, pl.y, 18, 7);
   for (const v of landAll()) if (v && v.state === 'sink') { if (v.kind === 'heli') down(v, v.x, v.y - 8, 18, 10); else down(v, v.x, v.y - 6, 16, 8); }   // (the lost ones still going down too)
-  for (const k of containers) if (k.where === 'free' && k.inWater) down(k, k.x, k.y, CONT_W / 2, CONT_H / 2);
+  for (const k of containers) if (k.where === 'free' && k.inWater) down(k, k.x, k.y, contW(k) / 2, CONT_H / 2);
   for (const o of linerLoose) if (o.inWater && !o.rest) down(o, o.x, o.y, o.p.w * o.k / 2, o.p.h * o.k / 2);
   return L;
 }
@@ -54495,8 +54509,8 @@ function stepLandRest(dt) {
   // the launch pads: on the ground under their whole width (the stack on one tips with it - stepShuttle)
   for (const R of padKeys()) { const P = padRestOf(R); stepPadBoom(P, dt); if (woke(P, 115) && restSettle(P, P.x, P.y, 105, dt)) { P.y = RS.foot; P.a += (RS.a - P.a) * Math.min(1, dt * 6); restLanded(P.x, P.y, RS.hit, 1); } }
   // boxes lying on the ground: its ground gone, a box falls (as a loose one - stepContainers)
-  for (const k of containers) if (k.where === 'rest' && !k.deck && !k.on && !k.inWater && dryLand(k.x) && landWoke(k.x, CONT_W / 2) && !docks.some(d => harbourHit(d, k.x, DECK_Y + dkY(d)))) {
-    const [want] = restGround(k.x, k.y + CONT_H / 2, CONT_W * 0.4); if (want > k.y + CONT_H / 2 + 1) Object.assign(k, { where: 'free', vx: 0, vy: 0, va: lrRnd(-0.4, 0.4) });
+  for (const k of containers) if (k.where === 'rest' && !k.deck && !k.on && !k.inWater && dryLand(k.x) && landWoke(k.x, contW(k) / 2) && !docks.some(d => harbourHit(d, k.x, DECK_Y + dkY(d)))) {
+    const [want] = restGround(k.x, k.y + CONT_H / 2, contW(k) * 0.4); if (want > k.y + CONT_H / 2 + 1) Object.assign(k, { where: 'free', vx: 0, vy: 0, va: lrRnd(-0.4, 0.4) });
   }
   // pieces lying on the ground (a wing, rubble): they fall again
   if (landWake.n) for (const id of restChunksWhere(k => k.land && !k.uw && landWoke(k.x, 6), landWake)) { let k = chunkById(id); const f = k.y + k.hh * 0.45; if (landBelow(k.x, f - 6) > f + 1) { if (k._rest) k = restWakeChunk(k); k.rest = false; k.vx = k.vy = 0; k.w = lrRnd(-1, 1); } }
@@ -58874,7 +58888,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
 const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av bod flood',
-'txt: kind state','val: lake net anc ai home', ...STORY_REC, ...CIV_REC));
+'txt: kind state','val: lake net anc ai home mag cg', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
 defTable('jetboats', null, { cols: jetboats, skip: ['_smS'] });
@@ -70539,6 +70553,9 @@ const PIC_BOATS = {
   // hold: her open deck (shares of her side picture from the bow - x its ends, y the deck's top - measured on cargo-ship.png: x 68-260, y 89 of
   // 361 x 126) and its container slots (n, one high), each box m metres long (a 20-ft box) - what she carries is shown there (picBoatHold)
   coaster: { art: ['cargo-ship'], draft: 0.095, turn: [], beam: 7.5, hold: { x: [0.188, 0.72], y: 0.706, n: 3, m: 6.06 },
+    // crane: her pedestal crane (50-zzzzz-ship-crane.js) - its post's foot at the hold's after end (x 265 of 361) on her deck, the post 4 m, the jib 22 m (it
+    // reaches the hold's fore end and a quay beside her), 30 m of rope
+    crane: { post: [0.734, 0.706], h: 4, jib: 22, rope: 30 },
     lamps: [[0.817, 0.05, 1], [0.105, 0.175, 1], [0.731, 0.635, 0.9, 'side'], [0.992, 0.77, 0.8]], dp: { lamp2: 'n' },
     funnel: [0.925, 0.508], screw: [0.956, 0.96], wl: [0.075, 0.99], creak: true, fb: [36, 12.6] },
 };
@@ -70606,6 +70623,7 @@ function drawPicBoat(j) {
     vehRopesDraw(j, B.ropes, (ax, ay) => { const lx = -j.dir * (ax - 0.5) * w, ly = -h + ay * h; return [j.x + lx * ca - ly * sa, y0 + lx * sa + ly * ca]; }, q => Math.hypot((q[2] - q[0]) * w, (q[3] - q[1]) * h) * (q[4] || 1.05));
   }
   drawStoryNet(j, h);   // (a boat with a net out - 50-story-net.js)
+  if (B.crane && j.state === 'run') drawBoatCrane(j);   // (her own crane - 50-zzzzz-ship-crane.js)
 }
 // (user Nov 20 17:21) her load as containers on her hold's deck (vehRoom, 50-zz-cargo.js): each good ceil(n / PER CONTAINER) boxes in its colour, from
 // her bow aft, never more than her slots; a box BOX20_M (its length the hold's m), drawn as the big ships' (drawContainerPx) in her things' batch
@@ -79602,6 +79620,119 @@ window.addEventListener('keydown', e => {
   const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'range' || t.isContentEditable)) return;
   e.preventDefault(); e.stopImmediatePropagation(); wedDuplicate();
 }, { capture: true });
+
+//@src 50-zzzzz-ship-crane.js:1
+/* ================================================================
+   A SHIP'S OWN CRANE (user Nov 20 17:28-17:34: "the small cargo ship that I'm based on actually had its own crane, but I took it out so you could make
+   a dynamic one. So that ship has a crane that rotates and can pick the containers from the dock"; "You don't need to switch the controls to the crane
+   because you can use the right joystick, like we do with the angle and power ... You just have the button for the magnet. The left joystick controls
+   the actual ship"; "It's the person controlling the ship that also controls the crane"; "design the crane for the boat with physics and everything ...
+   accurate to real-world cranes in ships, but still fun and easy to control").
+   A picture boat with a `crane` row (PIC_BOATS - its post's foot on its side picture, the post's height, the jib's and the rope's length, metres) has a
+   pedestal crane: a post on her deck, a jib hinged at its top, a rope from the jib's head with the game's one magnet on it (magRopeStep, 50-land-magnet.js -
+   the civilian helicopters' rope: knots that swing, a load that lags and carries on).
+   - Its controls are the universal ANGLE / POWER (activeGun -> craneGun: the right stick, the angle and power keys, the tape): ANGLE swings the jib
+     (0 along her bow, 90 straight up, 180 over her stern), POWER is the hook's height (full: wound up to the jib's head; none: all the rope out). The left
+     stick sails her. MAGNET (her green button) takes hold of the box under the magnet, or lets go of the one it holds.
+   - Its load: anything a magnet takes (magTargetsAll), and her own hold's boxes - each of the hold's boxes is her goods (vehRoom, 50-zz-cargo.js):
+     taken out, it's a box of its own with that good in it (gk / gn - 50-land-crane.js's table); a goods box let down into a hold with room
+     (holdCatch - any ship's hold, from any magnet or falling) is her goods again.
+   ================================================================ */
+const boatCrane = v => { if (!v || v.car || !jetboats.includes(v)) return null; const B = picBoat(v); return B && B.crane ? B.crane : null; };
+const craneGun = v => v.cg || (v.cg = { elev: 75, power: 1, reload: 0, aimShow: 0, press: 0, mgT: 0 });
+const craneTag = v => -100000 - (v.sid || 0);                          // (what her magnet marks its load with - civTag's way)
+const CRANE_WINCH = 5;                                                 // (m/s the rope pays out and hauls in)
+// a point of boat j's side picture (ax, ay: shares from its bow and top) in the world, turned with her (drawPicBoat's frame)
+function boatPt(j, ax, ay) {
+  const [w, h] = storyBoatSize(j), B = picBoat(j), dr = h * B.draft, d = j.dir > 0 ? 1 : -1, a = j.a || 0;
+  const lx = -d * (ax - 0.5) * w, ly = -h + ay * h, c = Math.cos(a), s = Math.sin(a);
+  return [j.x + lx * c - ly * s, j.y + dr + (j.susY || 0) + lx * s + ly * c];
+}
+// the crane's joints: the post's foot, the jib's heel (the post's top), the jib's head - and her bow's way and her up, turned with her
+function boatCraneGeo(j) {
+  const K = boatCrane(j), g = craneGun(j), a = j.a || 0, d = j.dir > 0 ? 1 : -1, t = g.elev * Math.PI / 180;
+  const fw = [d * Math.cos(a), d * Math.sin(a)], up = [Math.sin(a), -Math.cos(a)];
+  const foot = boatPt(j, K.post[0], K.post[1]), heel = [foot[0] + up[0] * K.h * UPM, foot[1] + up[1] * K.h * UPM];
+  const L = K.jib * UPM, dir = [fw[0] * Math.cos(t) + up[0] * Math.sin(t), fw[1] * Math.cos(t) + up[1] * Math.sin(t)];
+  return { foot, heel, head: [heel[0] + dir[0] * L, heel[1] + dir[1] * L], dir, fw, up, K };
+}
+// her hold's deck at world x (the floor her magnet comes down on over her), else Infinity
+function holdFloor(j, x) {
+  const B = picBoat(j), Hd = B && B.hold; if (!Hd) return Infinity;
+  const a = boatPt(j, Hd.x[0], Hd.y), b = boatPt(j, Hd.x[1], Hd.y), lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+  if (x < lo || x > hi) return Infinity;
+  return a[1] + (b[1] - a[1]) * (x - a[0]) / ((b[0] - a[0]) || 1);
+}
+// her hold's boxes as they lie (picBoatHold's order): [{ k, x, y }] - each box's middle in the world
+function holdBoxes(j) {
+  const B = picBoat(j), Hd = B && B.hold; if (!Hd || !j.goods) return [];
+  const L = []; for (const [k] of CARGO_KINDS) if (!cargoLiq(k)) for (let i = Math.ceil(cargoN(j, k) / cargoPer(k)); i > 0 && L.length < Hd.n; i--) L.push(k);
+  const P = tropPic(B.art[0]); if (!P) return [];
+  const span = Hd.x[1] - Hd.x[0], bw = Hd.m / (P._m * P.width), gap = Math.max(0, (span - Hd.n * bw) / (Hd.n + 1));
+  return L.map((k, i) => { const ax = Hd.x[0] + gap + i * (bw + gap) + bw / 2, [x, y] = boatPt(j, ax, Hd.y); return { k, x, y: y - CONT_H / 2, i }; });
+}
+// a box of good k out of boat j's hold (taken by a magnet): the good's last box - what's past its full ones
+function holdTake(j, hb) {
+  const per = cargoPer(hb.k), n = cargoN(j, hb.k), m = n - per * (Math.ceil(n / per) - 1);
+  cargoAdd(j, hb.k, -m);
+  const k = newCont(); Object.assign(k, { ci: cargoBoxCol(hb.k), gk: hb.k, gn: m, sz: 1, x: hb.x, y: hb.y, a: j.a || 0 });
+  return k;
+}
+// (stepContainers, a box falling) a goods box come down onto a ship's hold with room for it: her goods (the row gone - holdGoneFlush)
+const HOLD_GONE = [];
+function holdCatch(k, yb0) {
+  if (!k.gk || !(k.gn > 0)) return false;
+  for (const j of jetboats) {
+    if (j.state !== 'run' || !picBoat(j) || !picBoat(j).hold) continue;
+    const f = holdFloor(j, k.x); if (f === Infinity) continue;
+    const yb = k.y + CONT_H / 2; if (!(yb0 <= f + 3 && yb >= f)) continue;
+    if (vehRoom(j, k.gk) < 1 || vehBoxes(j) >= picBoat(j).hold.n) continue;   // (no room: it lands on her as on anything - it falls on)
+    cargoAdd(j, k.gk, k.gn); k.where = 'gone'; HOLD_GONE.push(k);
+    sound('impact', k.x); spawnSparks(k.x, f, 4, 80); if (k.vy > 160) shakeAt(1, k.x);
+    return true;
+  }
+  return false;
+}
+function holdGoneFlush() { while (HOLD_GONE.length) { const i = containers.indexOf(HOLD_GONE.pop()); if (i >= 0) containers.cut(i); } }
+// MAGNET pressed in a boat with a crane: holding - let go; else the magnet's on, taking hold of what it next touches (pressed again: off)
+function boatCraneMagnet(j) {
+  if (!boatCrane(j)) return;
+  const M = j.mag || (j.mag = { len: 0, obj: null, arm: false });
+  if (M.obj) { magDrop(M.obj); M.obj = null; M.arm = false; } else M.arm = !M.arm;
+  sound('clink', j.x);
+}
+function stepShipCranes(dt) {
+  for (const j of jetboats) {
+    const K = boatCrane(j); if (!K) continue;
+    const M = j.mag || (j.mag = { len: 0, obj: null, arm: false }), g = craneGun(j);
+    if (j.state !== 'run') { if (M.obj) { magLetGo(M.obj, craneTag(j)); M.obj = null; } j.mag = null; continue; }   // (sinking: the load let go)
+    const G = boatCraneGeo(j), want = (1 + (1 - g.power) * (K.rope - 1)) * UPM;
+    M.len = M.len < want ? Math.min(want, M.len + CRANE_WINCH * UPM * dt) : Math.max(want, M.len - CRANE_WINCH * UPM * dt);
+    const own = (ex, ey, d0) => {                                      // (a box of a ship's hold under the magnet's face, nearer than any other load)
+      let best = null, bd = d0;
+      for (const q of jetboats) if (q.state === 'run') for (const hb of holdBoxes(q)) { const d = Math.hypot(ex - hb.x, ey + MAG_H - (hb.y - CONT_H / 2)); if (d < bd) { bd = d; best = [q, hb]; } }
+      return best ? holdTake(best[0], best[1]) : null;
+    };
+    magRopeStep(M, G.head[0], G.head[1], dt, craneTag(j), { grab: M.arm, reach: MAG_GRAB + 12, floor: (x, y) => { let f = Infinity; for (const q of jetboats) if (q.state === 'run') f = Math.min(f, holdFloor(q, x)); return Math.min(f, harbourTop(x, y)); }, pick: own });
+    if (M.obj) M.arm = false;
+  }
+}
+// ---- the crane drawn over her (drawPicBoat, after her picture): its post, its jib (a box boom, its sheave at the head), the rope and the magnet
+// (the user will paint over it - Nov 20 17:34: "I'll give you some art to replace the parts")
+const CRANE_C = { post: [214, 176, 52], postDk: [150, 118, 30], jib: [236, 196, 60], jibDk: [166, 128, 34], sheave: [60, 60, 66] };
+function drawBoatCrane(j) {
+  const G = boatCraneGeo(j), own = thingsOwn(), s = SV;
+  const bar = (A, B, w, col, colDk) => {                               // (a member from A to B, w metres thick, lit on its top half)
+    const dx = PX(B[0]) - PX(A[0]), dy = PY(B[1]) - PY(A[1]), L = Math.hypot(dx, dy), m = thgRotate(thgTranslate(thgMat(), PX(A[0]), PY(A[1])), Math.atan2(dy, dx)), t = Math.max(2, Math.round(w * UPM * s));
+    thingsBlock(m, 0, -Math.round(t / 2), Math.round(L), t, colDk); thingsBlock(m, 0, -Math.round(t / 2), Math.round(L), Math.max(1, Math.round(t / 2)), col);
+  };
+  bar(G.foot, G.heel, 1.1, CRANE_C.post, CRANE_C.postDk);
+  bar(G.heel, G.head, 0.7, CRANE_C.jib, CRANE_C.jibDk);
+  { const r = Math.max(2, Math.round(0.6 * UPM * s)); thingsBlock(thgMat(), Math.round(PX(G.head[0]) - r / 2), Math.round(PY(G.head[1]) - r / 2), r, r, CRANE_C.sheave); thingsBlock(thgMat(), Math.round(PX(G.heel[0]) - r / 2), Math.round(PY(G.heel[1]) - r / 2), r, r, CRANE_C.sheave); }
+  const M = j.mag;
+  if (M && M.ex != null && M.n) { drawRopeLine(M.n); drawMagnet(M.ex, M.ey, M.ang || 0, !!M.obj || !!M.arm); }
+  if (own) thingsEnd();
+}
 
 //@src 50-zzzzz-story-bench.js:1
 /* ================================================================
