@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1219;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 15:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1220;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 15:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69166,6 +69166,10 @@ for (const art in CAR_WHEELS) { CAR_LAMPS[art] = CAR_LAMP_DEF.map(q => q.slice()
 // (user Nov 20 13:02, marked by eye on his pictures - ref-police-tow-side-nov20.png: the headlamp, the tail lamp, the light bar's blue and red, the
 // tow truck's amber beacons on the cab and at the back of its bed)
 CAR_LAMPS.police_car = [[0.381, 0.372, 'beam'], [-0.463, 0.435, 'red'], [0.015, 0.956, 'eblue'], [-0.102, 0.956, 'ered']];
+// (user Nov 20 14:12: "the ambulance and the fire engine should definitely have lights and sirens too") - their light bars, marked by eye on the sheet's
+// pictures: the ambulance's blue, red, red over the cab and the box's blue and red; the fire engine's blue, red, blue over the cab
+CAR_LAMPS.ambulance = [...CAR_LAMP_DEF.map(q => q.slice()), [0.211, 0.91, 'eblue'], [0.14, 0.91, 'ered'], [0.069, 0.915, 'ered'], [-0.027, 0.91, 'eblue'], [-0.407, 0.9, 'ered']];
+CAR_LAMPS.fire_engine = [...CAR_LAMP_DEF.map(q => q.slice()), [0.336, 0.922, 'eblue'], [0.25, 0.922, 'ered'], [0.166, 0.922, 'eblue']];
 CAR_LAMPS.tow_truck = [[0.406, 0.299, 'beam'], [-0.419, 0.237, 'red'], [0.169, 0.869, 'eamber'], [0.102, 0.869, 'eamber'], [-0.322, 0.462, 'eamber']];
 const carLampsOf = art => CAR_LAMPS[art] || CAR_LAMP_DEF;
 // a small lamp's glow by its type (airLamps' kinds: 0 white, 1 red, 3 green - 50-land-airport.js): dir the way its vehicle goes
@@ -74180,8 +74184,8 @@ const STR_VEHS = {
   // (the land vehicles - gen/land_vehicles_src, at their real lengths in the tropical sheet; driven in STORY - 50-story-cars.js)
   taxi: { lab: 'TAXI', fam: 'car', art: 'taxi' }, suv: { lab: 'SUV', fam: 'car', art: 'suv' },
   van: { lab: 'VAN', fam: 'car', art: 'van' }, motorcycle: { lab: 'MOTORCYCLE', fam: 'car', art: 'motorcycle' },
-  tractor: { lab: 'TRACTOR', fam: 'car', art: 'tractor' }, ambulance: { lab: 'AMBULANCE', fam: 'car', art: 'ambulance' },
-  fireEngine: { lab: 'FIRE ENGINE', fam: 'car', art: 'fire_engine' }, boxTruck: { lab: 'BOX TRUCK', fam: 'car', art: 'box_truck' },
+  tractor: { lab: 'TRACTOR', fam: 'car', art: 'tractor' }, ambulance: { lab: 'AMBULANCE', fam: 'car', art: 'ambulance', siren: true },
+  fireEngine: { lab: 'FIRE ENGINE', fam: 'car', art: 'fire_engine', siren: true }, boxTruck: { lab: 'BOX TRUCK', fam: 'car', art: 'box_truck' },
   dumpTruck: { lab: 'DUMP TRUCK', fam: 'car', art: 'dump_truck' }, cityBus: { lab: 'CITY BUS', fam: 'car', art: 'city_bus' },
   schoolBus: { lab: 'SCHOOL BUS', fam: 'car', art: 'school_bus' },
   policeCar: { lab: 'POLICE CAR', fam: 'car', art: 'police_car', siren: true }, towTruck: { lab: 'TOW TRUCK', fam: 'car', art: 'tow_truck' },   // (user Nov 20 13:02; siren: a SIREN button - civWeapons)
