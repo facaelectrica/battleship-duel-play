@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1150;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 23:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1151;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 01:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -68302,8 +68302,8 @@ fn texel(I: u32, B: bool, t: vec2i) -> vec4f {
    locked of course). CARGO: List of existing Cargo and ability to CREATE or DELETE existing CARGO").
    - STORY_CFG (game key bd_story_cfg): startH, the clock's minutes (rise, day, set, night - Story's day, CLOCK_S, 36-sea-storm-weather.js),
      coins and inv (what a new story starts with: story.coins, story.inv - 50-story.js storyReset).
-   - OWNERS (world key bd_owners): the world's own owners [{ id, name }], ids from 2 (0 and 1 are the two Battle sides). STR_OWNERS is
-     NOBODY, TEAM 1, TEAM 2, these, PLAYER (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
+   - OWNERS (world key bd_owners): the world's own characters [{ id, name, ... }], ids from 2 (0 and 1 are the two Battle sides). STR_OWNERS is
+     NOBODY, PLAYER, these - and TEAM 1, TEAM 2 outside the Story world (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
    - The CARGO list itself: 50-zz-cargo.js (CARGO). The tabs: STORY > CHARACTERS, CARGO, STORY SETTINGS (50-zzz-story-tab.js).
    ================================================================ */
 const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, rentStep: 100, fishM: 10, farM: 400, keepD: 10, urgD: 3, pri: ['danger', 'call', 'family', 'work'] };   // (keepD / urgD / pri: STORY > PRIORITIES - KEEP FOR, URGENT AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
@@ -73893,7 +73893,7 @@ pfVehRegister();                                              // (the NEW vehicl
 // the vehicle types a structure accepts (its RESTRICT switch on: only its kind's own - fire engines at a fire station...)
 // (user Nov 1: one OWNER for every structure - NOBODY, TEAM 1, TEAM 2 - the battle's two sides and STORY's factions (were CIV 1 / CIV 2, o.fac))
 // (Nov 7: the owners a world has - NOBODY, TEAM 1, TEAM 2, the world's own (OWNERS, WORLD PROPERTIES > STORY > OWNERS), PLAYER - ownersBuild)
-let STR_OWNERS = [[-1, 'NOBODY'], [0, 'TEAM 1'], [1, 'TEAM 2'], ['player', 'PLAYER']];
+let STR_OWNERS = [[-1, 'NOBODY'], ['player', 'PLAYER'], [0, 'TEAM 1'], [1, 'TEAM 2']];
 // ---- the world's owners
 let OWNERS = [];
 /* (user Nov 19 20:54-20:57: "you and the grandfather live in the lighthouse ... he is a relative of yours, so that should be a property that you
@@ -73905,7 +73905,9 @@ let PLAYER_C = { id: 'player', name: 'PLAYER' };
 const charOf = id => id === 'player' ? PLAYER_C : OWNERS.find(o => o.id === id) || null;
 const charsAll = () => [PLAYER_C, ...OWNERS];
 const famOf = (a, b) => { if (a === b) return false; const A = charOf(a), B = charOf(b); return !!A && !!B && ((A.fam || []).includes(b) || (B.fam || []).includes(a)); };
-function ownersBuild() { STR_OWNERS = [[-1, 'NOBODY'], [0, 'TEAM 1'], [1, 'TEAM 2'], ...OWNERS.map(o => [o.id, o.name]), ['player', 'PLAYER']]; }
+// (user Nov 20 00:06: "Shouldn't owner choices be the same as characters? ... We should remove them completely") an OWNER is one of the
+// characters - PLAYER and the world's own - or NOBODY (no owner); TEAM 1 / TEAM 2 only where there are sides: Battle's world, never the Story's
+function ownersBuild() { STR_OWNERS = [[-1, 'NOBODY'], ['player', 'PLAYER'], ...OWNERS.map(o => [o.id, o.name]), ...(STORY_WORLD ? [] : [[0, 'TEAM 1'], [1, 'TEAM 2']])]; }
 worldLoad(() => {
   let L = null; try { L = JSON.parse(localStorage.getItem('bd_owners') || 'null'); } catch (e) { }
   OWNERS = Array.isArray(L) ? L.filter(o => o && o.id >= 2 && typeof o.name === 'string') : [];
@@ -75944,8 +75946,8 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    (the world's owners: their HOME, NEEDS and ROUTINE), LINES (what they say, when, and the objective it gives), CARGO (the goods, their
    prices, what each is MADE FROM) and STORY SETTINGS (the day's clock, what a new story starts with). (Before: WORLD PROPERTIES > STORY.)
    (user Nov 7, the TODO list): WORLD - day 1's start hour and how long each part of Story's day is;
-   PLAYER - what a new story starts with (coins, and each PLAYER INVENTORY cargo: medicine...); OWNERS - the world's owners, added and
-   removed (NOBODY, TEAM 1, TEAM 2 and PLAYER are the game's own: locked); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
+   PLAYER - what a new story starts with (coins, and each PLAYER INVENTORY cargo: medicine...); CHARACTERS - you and the world's own, added and
+   removed (every OWNER choice is one of them, or NOBODY); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
    created and deleted. The settings: 50-story-0-cfg.js (STORY_CFG, OWNERS); the cargo list: 50-zz-cargo.js (CARGO). ---- */
 const STY = { panes: {}, el: null, open: null, line: null };   // (open / line: the character / the line whose rows show - CHARACTERS, LINES)
 const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', LINES: 'LINES', SIMULATE: 'SIMULATE' };
@@ -76015,9 +76017,8 @@ function styFill(el) {
       const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'HOME'); help(l, 'Where you live - a new story starts there'); r.append(l, pick([['', 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home ?? '', v => { if (v !== '') o.home = +v; else delete o.home; }, 130, 'Where you live')); c.appendChild(r);
       famRow(o);
     };
-    for (const [id, name] of [...STR_OWNERS.filter(q => q[0] === 'player'), ...STR_OWNERS.filter(q => q[0] !== 'player')]) {   // (you first)
-      const r = el('div', 'row'), o = id === 'player' ? PLAYER_C : OWNERS.find(q => q.id === id);
-      if (!o) { const l = el('label', '', name), t = el('span', '', 'LOCKED'); help(l, 'The game\'s own owner'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); continue; }
+    for (const o of charsAll()) {   // (you first, then the world's own - nothing else: NOBODY / the Battle sides aren't characters, user Nov 20 00:06)
+      const id = o.id, r = el('div', 'row');
       // (user Nov 19 22:27: "I cannot close after adding a character to be just the name like the other characters ... creating a character and
       // then exiting that to create another character") one character open at a time (STY.open): the others are just their names - pressed, open
       if (STY.open !== id) { const b = el('button', '', o === PLAYER_C ? 'PLAYER (YOU)' : o.name); b.title = 'Open to edit'; b.style.cssText = 'text-align:left;min-width:160px'; b.onclick = () => { STY.open = id; storyTabSync(); }; r.append(b); c.appendChild(r); continue; }
@@ -76025,7 +76026,7 @@ function styFill(el) {
       if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t, shut); c.appendChild(r); famRows(o, true); continue; }
       const i = el('input'); i.type = 'text'; i.value = o.name; i.style.cssText = css + ';width:140px'; i.title = 'Their name'; if (STY.added === o.id) { STY.added = null; STY.focus = i; }
       i.onchange = () => { o.name = (i.value.trim() || o.name).toUpperCase(); i.value = o.name; ownersSave(); };
-      const del = el('button', '', 'DELETE'); del.title = 'Remove this owner (its things become NOBODY\'s)';
+      const del = el('button', '', 'DELETE'); del.title = 'Remove this character (what they own: nobody\'s)';
       del.onclick = () => { STY.open = null; for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
       r.append(i, shut, del); c.appendChild(r);
       // (user Nov 19: "we can set any entity as sick") where they live, and what they need a day from its stock (50-zzzzz-story-stock.js)
@@ -78814,6 +78815,13 @@ worldLoad(() => {
   if (PLAYER_C.home != null) return;
   const L = STRS.filter(o => o.home === true), H = L.length ? L : STRS.filter(o => o.k === 'home' && o.home !== false);
   const o = H[0] || STRS.find(q => /^house/.test(q.k)); if (o) PLAYER_C.home = o.id;
+});
+// (user Nov 20 00:06) the Story world has no sides: a structure, placed vehicle or spot of TEAM 1 / TEAM 2 there (an older world - its CIV 1 /
+// CIV 2) is nobody's
+worldLoad(() => {
+  if (!STORY_WORLD) return; const team = v => v === 0 || v === 1;
+  for (const o of STRS) { if (team(o.own)) delete o.own; if (Array.isArray(o.veh)) for (const e of o.veh) if (e && team(e.fac)) delete e.fac; }
+  for (const r of PLACED) if (team(r.own)) delete r.own;
 });
 // a character's family, both ways (the editor's FAMILY row)
 const famList = c => charsAll().filter(q => q !== c && famOf(c.id, q.id));
