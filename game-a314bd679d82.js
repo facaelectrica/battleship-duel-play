@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1142;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 21:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1143;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 21:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74468,6 +74468,23 @@ function strEdDraw() {
     // (user Nov 3 12:03: what it spawns shown above it - each spot's vehicle, SPOT n by it, not its names in text - 50-zzzz-spots.js)
     spotsEdDraw(o, X0, X1, Y0, q);
   }
+  if (STORY_WORLD) strJoinsDraw(q, x0, x1);
+}
+// (user Nov 19 20:44: "we should see the joins visually ... in the editor") in the Story world, every two structures that touch - you walk
+// from one to the other, one hop (storyLinks, 50-story.js) - a green dashed line between their middles with a chain link on it
+function strJoinsDraw(q, x0, x1) {
+  const L = strsUsed(), r = STORY_LINK_M * UPM, col = '#6fd08a', t = Math.max(2, 2 * q), dash = 6 * q;
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+    const a = L[i], b = L[j]; if (storyGap(a, b) >= r) continue;
+    const A = strBox(a), B = strBox(b); if (Math.max(A.x1, B.x1) < x0 || Math.min(A.x0, B.x0) > x1) continue;
+    const ax = PX((A.x0 + A.x1) / 2), ay = PY((A.top + A.foot) / 2), bx = PX((B.x0 + B.x1) / 2), by = PY((B.top + B.foot) / 2), d = Math.hypot(bx - ax, by - ay); if (d < 1) continue;
+    C.fillStyle = col;
+    for (let s = 0; s < d; s += dash * 2) { const u = s / d, n = Math.min(dash, d - s) / d; for (let k = 0; k <= 4; k++) { const v = u + n * k / 4; C.fillRect(Math.round(ax + (bx - ax) * v - t / 2), Math.round(ay + (by - ay) * v - t / 2), t, t); } }
+    const mx = Math.round((ax + bx) / 2), my = Math.round((ay + by) / 2), w = 7 * q, h = 4 * q, f = Math.max(1, q);   // (the chain link: two rings overlapping)
+    C.fillStyle = '#04070f'; C.fillRect(mx - w - f, my - h / 2 - f, 2 * w + 2 * f, h + 2 * f);
+    C.fillStyle = col;
+    for (const X of [Math.round(mx - w + 2 * q), Math.round(mx - 2 * q)]) { C.fillRect(X, my - h / 2, w, f); C.fillRect(X, my + h / 2 - f, w, f); C.fillRect(X, my - h / 2, f, h); C.fillRect(X + w - f, my - h / 2, f, h); }
+  }
 }
 /* ---- THE ARMIES' HANGARS (user Nov 1 13:10: "For a plane to exist, it must have an hangar"; structures-everywhere-plan-nov1.md
    step 3): a team's warplane, army helicopter and tank start at an AIRCRAFT HANGAR it owns with a spot for that family (its
@@ -78714,7 +78731,14 @@ function folkTarget(c, J) {
   const o = slStr(J.at); return o ? { x: o.x, o } : null;
 }
 // on foot from one place to another: the same, joined, or joined through one between (the lighthouse between its dock and its parking)
-const folkWalk = (A, B) => !!A && !!B && (A === B || storyLinks(A).includes(B) || storyLinks(A).some(q => storyLinks(q).includes(B)));
+// (user Nov 19 20:44: "you jump from one to the other. You go from A to the parking to B. You cannot go from A to B") on foot as the player
+// goes: one hop at a time from a structure to one touching it (storyLinks) - a character makes the hops out of sight, as many as it takes
+function folkWalk(A, B) {
+  if (!A || !B) return false; if (A === B) return true;
+  const seen = new Set([A]), Q = [A];
+  while (Q.length) for (const q of storyLinks(Q.shift())) { if (q === B) return true; if (!seen.has(q)) { seen.add(q); Q.push(q); } }
+  return false;
+}
 const folkAtPlace = (P, T) => !!T.o && folkWalk(P, T.o);
 // stopped by a place: within STORY_PARK_M of it (a market's sellers' rule)
 const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
