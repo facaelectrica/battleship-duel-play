@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1149;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 23:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1150;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 23:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -75947,7 +75947,7 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    PLAYER - what a new story starts with (coins, and each PLAYER INVENTORY cargo: medicine...); OWNERS - the world's owners, added and
    removed (NOBODY, TEAM 1, TEAM 2 and PLAYER are the game's own: locked); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
    created and deleted. The settings: 50-story-0-cfg.js (STORY_CFG, OWNERS); the cargo list: 50-zz-cargo.js (CARGO). ---- */
-const STY = { panes: {}, el: null, open: null };   // (open: the character whose rows show - CHARACTERS)
+const STY = { panes: {}, el: null, open: null, line: null };   // (open / line: the character / the line whose rows show - CHARACTERS, LINES)
 const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', LINES: 'LINES', SIMULATE: 'SIMULATE' };
 const STY_SIM = { days: 3, log: null };   // (the last fast-forward's report - storySim, 50-zzzzz-story-folk.js)
 // (user Nov 19 21:54: "I cant even close the menu anymore. Only add more and more and cant select any others") every change draws the
@@ -75966,7 +75966,7 @@ function styFill(el) {
   // a tab's one-paragraph guide at its top (what it's for, how to start)
   const guide = (tab, txt) => { const P = STY.panes[tab]; if (!P) return; const d = el('div', 'help'); d.textContent = txt; d.style.cssText = 'color:#9aa3b8;padding:6px 8px 10px;line-height:1.4;font-size:11px'; P.appendChild(d); };
   guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Press a name to open it, CLOSE when done. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER, in OBJECTS) are theirs.');
-  guide('LINES', 'What characters say. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
+  guide('LINES', 'What characters say. Press a line to open it, CLOSE when done. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
   guide('PRIORITIES', 'What every character does next, the player included: the first of these that holds, top to bottom. Getting a good is worked out from where things are: buy it where it is sold, and short of coins earn first (fish with a boat they can use, sell the catch). Your objective is the first of the same steps. NOW shows what each would do at the start of a new story, and why.');
   guide('SIMULATE', 'Runs a new story fast - only its clock, stock and characters, every vehicle unseen - for so many days, and lists what happened: each trip and how long it took, each job done or skipped, who waited, and every place\'s stock at the end of each day. Nothing in the world is changed.');
   guide('CARGO', 'Every good in the world: its price at a market, whether the player carries it himself (INVENTORY), and what one is MADE FROM. Places make goods in OBJECTS (MAKES).');
@@ -76015,7 +76015,7 @@ function styFill(el) {
       const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'HOME'); help(l, 'Where you live - a new story starts there'); r.append(l, pick([['', 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home ?? '', v => { if (v !== '') o.home = +v; else delete o.home; }, 130, 'Where you live')); c.appendChild(r);
       famRow(o);
     };
-    for (const [id, name] of STR_OWNERS) {
+    for (const [id, name] of [...STR_OWNERS.filter(q => q[0] === 'player'), ...STR_OWNERS.filter(q => q[0] !== 'player')]) {   // (you first)
       const r = el('div', 'row'), o = id === 'player' ? PLAYER_C : OWNERS.find(q => q.id === id);
       if (!o) { const l = el('label', '', name), t = el('span', '', 'LOCKED'); help(l, 'The game\'s own owner'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); continue; }
       // (user Nov 19 22:27: "I cannot close after adding a character to be just the name like the other characters ... creating a character and
@@ -76108,14 +76108,19 @@ function styFill(el) {
     const row = (...kids) => { const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; r.append(...kids); c.appendChild(r); return r; };
     const lab = (t, tip) => { const l = el('label', '', t); help(l, tip); return l; };
     SLINES.forEach((l, i) => {
+      // (user Nov 19 22:46, the characters' list: "check if you didn't do similar errors") one line open at a time (STY.line): the others are
+      // a row each - who says it and how it starts; pressed, open; CLOSE back
+      const who = (whos.find(w => String(w[0]) === String(l.who)) || [0, 'NOBODY'])[1], txt = (l.text || '').trim();
+      if (STY.line !== l.id) { const b = el('button', '', 'LINE ' + (i + 1) + ' · ' + who + (txt ? ' · ' + (txt.length > 34 ? txt.slice(0, 34) + '…' : txt) : '')); b.title = 'Open to edit'; b.style.cssText = 'text-align:left;display:block;width:100%;margin:2px 0'; b.onclick = () => { STY.line = l.id; storyTabSync(); }; c.appendChild(b); return; }
       const hd = el('h4', '', 'LINE ' + (i + 1)); hd.style.marginTop = '10px'; c.appendChild(hd);
       const up = el('button', '', '↑'), dn = el('button', '', '↓'), del = el('button', '', 'DELETE');
       up.title = 'Checked earlier'; dn.title = 'Checked later'; del.title = 'Remove this line';
       up.onclick = () => { if (i) { [SLINES[i - 1], SLINES[i]] = [SLINES[i], SLINES[i - 1]]; slinesSave(); storyTabSync(); } };
       dn.onclick = () => { if (i < SLINES.length - 1) { [SLINES[i + 1], SLINES[i]] = [SLINES[i], SLINES[i + 1]]; slinesSave(); storyTabSync(); } };
-      del.onclick = () => { SLINES.splice(i, 1); slinesSave(); storyTabSync(); };
+      del.onclick = () => { STY.line = null; SLINES.splice(i, 1); slinesSave(); storyTabSync(); };
+      const shut = el('button', '', 'CLOSE'); shut.title = 'Done with this line: back to the list'; shut.onclick = () => { STY.line = null; storyTabSync(); };
       row(lab('SAID BY', 'The character who says it'), sel(whos, l.who, v => { l.who = /^-?\d+$/.test(v) ? +v : v; }, 120, 'Who says it'),
-        lab('WHERE', 'Where it is said'), sel([[0, 'WHERE THEY ARE'], ...places], l.at, v => { l.at = +v; }, 140, 'Where it is said: where they are, or one place'), up, dn, del);
+        lab('WHERE', 'Where it is said'), sel([[0, 'WHERE THEY ARE'], ...places], l.at, v => { l.at = +v; }, 140, 'Where it is said: where they are, or one place'), up, dn, shut, del);
       // WHEN: each condition on a row
       l.when.forEach((q, j) => {
         const kids = [lab(j ? 'AND' : 'ONLY WHEN', 'Said only while this holds'), sel(SL_CONDS, q.t, v => { q.t = v; q.k = v === 'goal' ? 'none' : v === 'said' ? (SLINES[0] || {}).id || '' : v === 'alive' || v === 'lasts' ? (whos[1] || [''])[0] : (goods[0] || [''])[0]; q.op = v === 'said' || v === 'alive' ? 'yes' : v === 'lasts' ? '<' : '>'; q.n = 0; }, 110, 'What is checked')];
@@ -76144,7 +76149,7 @@ function styFill(el) {
       row(...kids);
     });
     const add = el('button', '', 'ADD LINE'); add.title = 'A new line';
-    add.onclick = () => { SLINES.push({ id: slNewId(), who: -1, at: 0, when: [], text: '', to: '', do: 'go', k: '' }); slinesSave(); storyTabSync(); };
+    add.onclick = () => { const id = slNewId(); SLINES.push({ id, who: -1, at: 0, when: [], text: '', to: '', do: 'go', k: '' }); STY.line = id; slinesSave(); storyTabSync(); };
     c.appendChild(add); }
   // PRIORITIES (user Nov 19 21:14: "can you make a way that this logic is visible to me and editable?"): the order, its numbers, and what
   // each character would do at a new story's start (famPreview, 50-zzzzz-story-family.js)
@@ -76152,18 +76157,18 @@ function styFill(el) {
     const L = priOrder();
     L.forEach((k, i) => {
       const P = PRI_KINDS.find(q => q[0] === k), r = el('div', 'row'); r.style.cssText = 'display:flex;gap:6px;align-items:center';
-      const n = el('label', '', (i + 1) + '. ' + P[1]); help(n, P[2]); n.style.flex = '1';
+      const n = el('label', '', (i + 1) + '. ' + P[1]); n.title = P[3]; n.dataset.help = P[2]; n.style.flex = '1';
       const up = el('button', '', '↑'), dn = el('button', '', '↓'); up.title = 'Before the one above'; dn.title = 'After the one below';
       const mv = d => { const j = i + d; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; STORY_CFG.pri = L.slice(); storyCfgSave(); storyTabSync(); };
       up.onclick = () => mv(-1); dn.onclick = () => mv(1);
       r.append(n, up, dn); c.appendChild(r);
-      const d = el('div', 'help'); d.textContent = P[2]; d.style.cssText = 'color:#9aa3b8;padding:0 8px 6px 18px;font-size:11px'; c.appendChild(d);
     });
     slider(c, 'KEEP FOR', 'keepD', 1, 30, 1, 'DAYS', 'A family member\'s home is kept stocked for this many days');
     slider(c, 'URGENT AT', 'urgD', 0, 10, 0.5, 'DAYS', 'Fewer days than this left: everything else is dropped');
     const r = el('div', 'row'), go = el('button', '', 'NOW'); go.title = 'What each would do at the start of a new story, and why';
-    go.onclick = () => { try { STY.pre = famPreview(); } catch (e) { STY.pre = [{ who: 'ERROR', why: String(e && e.message || e), steps: [] }]; } storyTabSync(); };
+    go.onclick = () => { try { STY.pre = famPreview(); } catch (e) { STY.pre = [{ who: 'ERROR', why: String(e && e.message || e), steps: [] }]; } STY.preSig = famSig(); storyTabSync(); };
     r.append(go); c.appendChild(r);
+    if (STY.pre && STY.preSig !== famSig()) { STY.pre = null; const s = el('div', ''); s.textContent = 'CHANGED SINCE - PRESS NOW AGAIN'; s.style.cssText = 'font-size:11px;color:#ffd23a;padding-top:4px'; c.appendChild(s); }   // (an answer from before a change: not shown)
     for (const p of STY.pre || []) {
       const h = el('div', ''); h.textContent = p.who + ': ' + p.why; h.style.cssText = 'font-size:11px;line-height:1.5;color:' + (p.steps.length ? '#7fe08a' : '#9aa3b8') + ';padding-top:4px'; c.appendChild(h);
       p.steps.forEach((t, i) => { const s = el('div', ''); s.textContent = '   ' + (i + 1) + '. ' + t; s.style.cssText = 'font-size:11px;line-height:1.4;white-space:pre'; c.appendChild(s); });
@@ -78828,7 +78833,10 @@ function famDrop(a, b) { const A = charOf(a), B = charOf(b); for (const [X, y] o
    Getting what's needed is worked out from where things are, never written (famSteps): BUY it where it's sold and in stock and DELIVER it
    home; short of coins, earn first - the quickest way they have, today FISH with a fishing boat they can use (their own or their family's)
    and SELL the catch at a market. The player's objective is the first of the same steps (slWantOf). ---- */
-const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'A family member has less than URGENT AT days of what they need: drop everything'], ['call', 'EMERGENCIES', 'Something happened that their work answers: an impounded vehicle to tow back (TOW in their ROUTINE)'], ['family', 'FAMILY NEEDS', 'A family member has less than KEEP FOR days of what they need: get it when home'], ['work', 'WORK', 'Once a day: their ROUTINE, else what their WORK place is short of, else earning']];
+// [key, name, what it is (the editor's help line), its tooltip (one short line)]
+const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'A family member has less than URGENT AT days of what they need: drop everything', 'Family under URGENT AT days: drop everything'], ['call', 'EMERGENCIES', 'Something happened that their work answers: an impounded vehicle to tow back (TOW in their ROUTINE)', 'What their work answers: an impounded vehicle (TOW)'], ['family', 'FAMILY NEEDS', 'A family member has less than KEEP FOR days of what they need: get it when home', 'Family under KEEP FOR days: get it when home'], ['work', 'WORK', 'Once a day: their ROUTINE, else what their WORK place is short of, else earning', 'Once a day: ROUTINE, else WORK place, else earn']];
+// what NOW's answer depends on, written out: a change to any of it makes the answer old (STORY > PRIORITIES)
+const famSig = () => JSON.stringify([STORY_CFG, OWNERS, PLAYER_C, CARGO, STRS.length]);
 const priOrder = () => { const L = Array.isArray(STORY_CFG.pri) ? STORY_CFG.pri.filter(k => PRI_KINDS.some(q => q[0] === k)) : []; PRI_KINDS.forEach(([k], i) => { if (!L.includes(k)) L.splice(Math.min(i, L.length), 0, k); }); return L; };   // (a kind missing from a saved order: at its own place)
 // what member m needs and how short their home is of KEEP FOR days of it: { m, k, n (to buy), sd (days of stock), H (their home) }
 function famShort(m) {
