@@ -12967,8 +12967,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1230;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 18:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1231;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 18:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70536,7 +70536,9 @@ const PIC_BOATS = {
   // (user Nov 20 17:06: "a Cargo Ship, much smaller than the container ship ... to transport cargo between smaller islands. can fit 3 containers max") a
   // coaster, 36 m, her hold three 20-ft containers long (cut01.py); one view so far - side on (turn: none). Her masthead and foremast lamps, the
   // sidelight on her bridge front, her stern light; her funnel; her screw under her stern. beam: her width across, metres (no bow-on view to read it from)
-  coaster: { art: ['cargo-ship'], draft: 0.095, turn: [], beam: 7.5,
+  // hold: her open deck (shares of her side picture from the bow - x its ends, y the deck's top - measured on cargo-ship.png: x 68-260, y 89 of
+  // 361 x 126) and its container slots (n, one high), each box m metres long (a 20-ft box) - what she carries is shown there (picBoatHold)
+  coaster: { art: ['cargo-ship'], draft: 0.095, turn: [], beam: 7.5, hold: { x: [0.188, 0.72], y: 0.706, n: 3, m: 6.06 },
     lamps: [[0.817, 0.05, 1], [0.105, 0.175, 1], [0.731, 0.635, 0.9, 'side'], [0.992, 0.77, 0.8]], dp: { lamp2: 'n' },
     funnel: [0.925, 0.508], screw: [0.956, 0.96], wl: [0.075, 0.99], creak: true, fb: [36, 12.6] },
 };
@@ -70580,7 +70582,7 @@ function drawPicBoat(j) {
   const [cov, Bd] = dmgLook(F, dmgOf(j)), Pd = Bd || F, e = artPut(Pd), mk = dmgMask(j, F, F._m), cell = dmgCell(F), sd = dmgSeed(F), L = thingsLit(PX(j.x), civNightK()), fx = E.fx || [1, 1, 1];
   const own = thingsOwn(), quad = (M, cut) => thingsQuad(M, -W / 2, -H, W, H, e, THG_BODY, fx, cov, mk, cell, sd, L, null, 1, 0, null, cut);
   if (j.brk != null) fishHalves(j, quad, W, H);
-  else quad(thgCur(), null);
+  else { quad(thgCur(), null); if (B.hold && F === P) picBoatHold(j, B.hold, W, H, F); }
   if (own) thingsEnd();
   C.restore();
   // her windows and portholes lit as the lamps come on (STR_WINDOWS, marked by eye - gen/tropical/windows.py), seen side on; her
@@ -70604,6 +70606,21 @@ function drawPicBoat(j) {
     vehRopesDraw(j, B.ropes, (ax, ay) => { const lx = -j.dir * (ax - 0.5) * w, ly = -h + ay * h; return [j.x + lx * ca - ly * sa, y0 + lx * sa + ly * ca]; }, q => Math.hypot((q[2] - q[0]) * w, (q[3] - q[1]) * h) * (q[4] || 1.05));
   }
   drawStoryNet(j, h);   // (a boat with a net out - 50-story-net.js)
+}
+// (user Nov 20 17:21) her load as containers on her hold's deck (vehRoom, 50-zz-cargo.js): each good ceil(n / PER CONTAINER) boxes in its colour, from
+// her bow aft, never more than her slots; a box BOX20_M (its length the hold's m), drawn as the big ships' (drawContainerPx) in her things' batch
+const BOX20_M = 2.59, HOLD_RGB = [0, 0, 0];
+function picBoatHold(j, Hd, W, H, F) {
+  if (!j.goods) return;
+  const L = []; for (const [k] of CARGO_KINDS) if (!cargoLiq(k)) for (let i = Math.ceil(cargoN(j, k) / cargoPer(k)); i > 0 && L.length < Hd.n; i--) L.push(cargoBoxCol(k));
+  if (!L.length) return;
+  const M = thgCur(), sx = W / F.width, sy = H / F.height, bw = Hd.m / F._m, bh = BOX20_M / F._m;
+  const x0 = Hd.x[0] * F.width, span = (Hd.x[1] - Hd.x[0]) * F.width, gap = Math.max(0, (span - Hd.n * bw) / (Hd.n + 1)), yd = Hd.y * F.height;
+  const put = (K, X, Y, w, h, a = 1) => { HOLD_RGB[0] = K[0] / 255; HOLD_RGB[1] = K[1] / 255; HOLD_RGB[2] = K[2] / 255; thingsQuad(M, X, Y, w, h, null, THG_SOLID, HOLD_RGB, 0, null, 0, 0, null, null, a, 0, null, null); };
+  L.forEach((ci, i) => {
+    const px = x0 + gap + i * (bw + gap), X0 = Math.round(-W / 2 + px * sx), X1 = Math.round(-W / 2 + (px + bw) * sx), Y1 = Math.round(-H + yd * sy), Y0 = Math.round(-H + (yd - bh) * sy);
+    drawContainerPx(X0, Y0, Math.max(1, X1 - X0), Math.max(1, Y1 - Y0), CONT_COLS[ci], false, put);
+  });
 }
 // fishing: the net, all physics (user Nov 2) - 50-story-net.js
 /* ---- power and repairs. (Nov 7, user: "FUEL - Disable it for now. No fuel or trading fuel anymore"; Nov 20 12:41: "Refuel? We don't have
@@ -71316,6 +71333,31 @@ const cargoPrice = k => Math.max(0, (cargoKind(k) || {}).price || 0);
 const cargoMine = v => !!v && (v.own || v.driven === 0);
 function cargoGive(v, k, n) { if (STORY && cargoInv(k) && cargoMine(v)) storyInvAdd(k, n); else cargoAdd(v, k, n); }
 const cargoCoins = (k, n) => Math.floor(n * cargoPrice(k) + 1e-9);
+/* ---- CONTAINERS AND TANKS (user Nov 20 17:21: "let's say 50? But let's expose our in story cargo for sure"; "Yes for the liquid property"). Every good
+   has PER CONTAINER (C.box - how many fill one container; unset: CARGO_BOX) and LIQUID (C.liq - carried in a tank, never in containers), set in
+   STORY > CARGO. What a vehicle can take of a good (vehRoom), one rule for every vehicle, the player's and the characters':
+   - a vehicle with a HOLD (a picture boat's `hold` - its container slots marked on its side picture, PIC_BOATS: the CARGO SHIP's 3) carries its load
+     as containers, shown on its deck: each good fills ceil(n / PER CONTAINER) of them, no two goods sharing one, never more than its slots;
+   - a vehicle with a TANK carries liquids up to it (vehTank - none yet: the tanker isn't a Story vehicle);
+   - any other (cars, the fishing boat) carries any good but a liquid, without limit (as before);
+   - a liquid only in a tank. ---- */
+const CARGO_BOX = 50;
+const cargoPer = k => Math.max(1, Math.floor((cargoKind(k) || {}).box || CARGO_BOX));
+const cargoLiq = k => !!(cargoKind(k) || {}).liq;
+const vehHoldOf = v => { const B = v && typeof picBoat === 'function' && !v.car ? picBoat(v) : null; return B && B.hold ? B.hold : null; };
+const vehTank = v => 0;
+// how many containers v's goods fill (skip: leave that good out)
+function vehBoxes(v, skip) { let n = 0; for (const [k] of CARGO_KINDS) if (k !== skip && !cargoLiq(k)) n += Math.ceil(cargoN(v, k) / cargoPer(k)); return n; }
+function vehRoom(v, k) {
+  if (!v) return 0;
+  if (cargoLiq(k)) { let L = 0; for (const [q] of CARGO_KINDS) if (cargoLiq(q)) L += cargoN(v, q); return Math.max(0, vehTank(v) - L); }
+  const H = vehHoldOf(v); if (!H) return Infinity;
+  return Math.max(0, (H.n - vehBoxes(v, k)) * cargoPer(k) - cargoN(v, k));
+}
+// n of good k put into v as far as it has room - how many went in
+function cargoLoad(v, k, n) { const m = Math.max(0, Math.min(Math.floor(n || 0), vehRoom(v, k))); if (m > 0) cargoAdd(v, k, m); return m; }
+// a good's containers' colour (CONT_COLS, 50-land-crane.js): its own, from its key
+const cargoBoxCol = k => { let h = 0; for (const ch of String(k)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h % 8; };
 // ---- the editor: a CARGO box, one row per kind (the structures', the vehicles', the wrecks' panels)
 function cargoBox(el, css, get, set, head = 'CARGO', only = null) {   // (only: the goods shown - a workplace's: what its type STORES)
   const c = el('div', 'cat'); c.appendChild(el('h4', '', head));
@@ -71402,7 +71444,7 @@ function marketSell(p, arg) {
   if (!placeOpen(o)) { MKT.deny = time; sound('empty', o.x); return; }   // (closed - its hours, 50-zzzz-struct-act.js)
   if (mode === 'buy') {                                                  // (one bought: your coins, to you or your vehicle)
     const pr = cargoBuyPrice(k), to = marketBuyer(o, k);
-    if (!marketSells(o).includes(k) || stN(o, k) < 1 || story.coins < pr || !to) { MKT.deny = time; sound('empty', o.x); return; }
+    if (!marketSells(o).includes(k) || stN(o, k) < 1 || story.coins < pr || !to || (to !== 'inv' && vehRoom(to, k) < 1)) {   /* (no room for it in your vehicle: a liquid, a full hold - vehRoom) */ MKT.deny = time; sound('empty', o.x); return; }
     story.coins -= pr; stAdd(o, k, -1); if (to === 'inv') storyInvAdd(k, 1); else cargoAdd(to, k, 1);
     sound('clink', o.x, 1); slObjEv('collect', o.id, k); return;   // (an objective to collect it here: done - 50-zzzzz-story-lines.js)
   }
@@ -73741,7 +73783,7 @@ function storyArrive(id) {
 // (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car" - the characters' rule, folkCarry) out of a vehicle,
 // what it holds is carried - in your inventory (story.inv); into the next one, loaded - your own INVENTORY goods (medicine) stay with you
 function storyCarryOut(v) { if (!v || !STORY) return; for (const [k] of CARGO_KINDS) { const n = cargoN(v, k); if (n > 0) { cargoPut(v, k, 0); storyInvAdd(k, n); } } }
-function storyCarryIn(v) { if (!v || !STORY) return; for (const [k] of CARGO_KINDS) { const n = storyInvN(k); if (n > 0 && !cargoInv(k)) { cargoAdd(v, k, n); story.inv[k] = 0; } } }
+function storyCarryIn(v) { if (!v || !STORY) return; for (const [k] of CARGO_KINDS) { const n = storyInvN(k); if (n > 0 && !cargoInv(k)) story.inv[k] = n - cargoLoad(v, k, n); } }   // (what doesn't fit - a liquid, a full hold: vehRoom - stays with you)
 function storyLeave(p, v) {
   const o = storyParks(v).sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0];
   if (o) {
@@ -76563,6 +76605,17 @@ function styFill(el) {
       const del = el('button', '', 'DELETE'); del.title = 'Remove this kind of cargo';
       del.onclick = () => { CARGO = CARGO.filter(q => q !== C); cargoSave(); storyTabSync(); };
       r.append(nm, pr, pl, tg, del); c.appendChild(r);
+      // (user Nov 20 17:21) LIQUID: carried in tanks only; PER CONTAINER: how many fill a container (a hold's - vehRoom, 50-zz-cargo.js), REVERT TO DEFAULT beside it
+      { const lr = el('div', 'row'); lr.style.paddingLeft = '14px'; const ll = el('label', '', 'LIQUID'); help(ll, 'Carried in tanks only, never in containers');
+        const lt = NSKY.editor.TUNE.toggle(C.liq ? 1 : 0); lt.addEventListener('input', () => { if (+lt.value) C.liq = true; else delete C.liq; cargoSave(); storyTabSync(); });
+        lr.append(ll, lt); c.appendChild(lr); }
+      { const br = el('div', 'row'); br.style.paddingLeft = '14px'; const bl = el('label', '', 'PER CONTAINER'); help(bl, 'Units that fill one container (default ' + CARGO_BOX + ')');
+        const bn = el('input'); bn.type = 'number'; bn.min = '1'; bn.step = '1'; bn.value = String(cargoPer(C.k)); bn.style.cssText = css + ';width:70px'; bn.title = 'Units a container (greyed: a liquid)';
+        bn.onchange = () => { const v = Math.max(1, Math.floor(+bn.value || CARGO_BOX)); if (v !== CARGO_BOX) C.box = v; else delete C.box; bn.value = String(cargoPer(C.k)); cargoSave(); storyTabSync(); };
+        NSKY.editor.TUNE.need(bn, () => !C.liq);
+        const rv = el('button', '', 'REVERT TO DEFAULT'); rv.title = 'Back to ' + CARGO_BOX + ' (greyed: already it, or a liquid)'; rv.onclick = () => { delete C.box; cargoSave(); storyTabSync(); };
+        NSKY.editor.TUNE.need(rv, () => C.box != null && !C.liq);
+        br.append(bl, bn, rv); c.appendChild(br); }
       // (user Nov 19: "things are made from other things, and you need the ingredients") MADE FROM: so many of each other good for one
       const mf = el('div', 'row'); mf.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
       const ml = el('label', '', 'MADE FROM'); help(ml, 'What one is made of: so many of each'); mf.appendChild(ml);
@@ -80092,7 +80145,7 @@ function folkTie(v, T) {
    stay with them); on foot at a place it's handed over (DELIVER, SELL). */
 const folkHand = S => { const C = S.carry; if (!C) return null; if (C.k != null) { S.carry = { [C.k]: C.n }; } return S.carry; };   // (an older save's one good: as the list)
 function folkCarry(S, v) { for (const [k] of CARGO_KINDS) { const n = cargoN(v, k); if (n > 0) { cargoPut(v, k, 0); const H = folkHand(S) || (S.carry = {}); H[k] = (H[k] || 0) + n; } } }
-function folkLoad(S, v) { const H = folkHand(S); if (!H) return; for (const k in H) if (H[k] > 0) cargoAdd(v, k, H[k]); S.carry = null; }
+function folkLoad(S, v) { const H = folkHand(S); if (!H) return; for (const k in H) if (H[k] > 0) H[k] -= cargoLoad(v, k, H[k]); if (!Object.values(H).some(q => q > 0)) S.carry = null; }   // (what doesn't fit - a liquid, a full hold: vehRoom - stays in hand)
 /* ---- STEALING (user Nov 19 18:15: "The way other vehicles will work is that you can steal them. So it says steal. It's only available to
    steal if no one else is driving it. The owner of the vehicle will be stuck in this other vehicle waiting for the arrival. Above their
    head ... a skull and a thunder and an exclamation point, showing that they're pissed"). A character's vehicle is never for sale: its
@@ -80244,7 +80297,7 @@ function folkPlan(c, S) {
     // COLLECT / DELIVER from the vehicle stopped beside the place (as a market's sellers - it needn't be put away there)
     if (J && T.o && !foot) {
       if (folkBeside(v, T.o)) {
-        if (J.do === 'collect') { let n = folkN(J, stN(T.o, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
+        if (J.do === 'collect') { let n = Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
         else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { const pay = J.pay > 0 ? folkSellPay(T.o, J.k, n) : stPays(T.o, J.k, n, c.id); cargoAdd(v, J.k, -n); stHand(T.o, J.k, n); S.k = (S.k || 0) + pay; }   /* (paid as the player is: a SELL at its price, a delivery of what the place takes - stPays) */ folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
         S.j++; return;
       }
@@ -80272,7 +80325,7 @@ function folkPlan(c, S) {
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
   const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkHops(B, slStr(u.berth)); })()));
-  if (go && S.wk && workShort(c, S, J, jobs)) return;                       // (at work: nothing leaves without its MIN CARGO - they wait on duty - 50-zzzzz-story-work.js)
+  if (go && S.wk && workShort(c, S, J, jobs, go)) return;                       // (at work: nothing leaves without its MIN CARGO - they wait on duty - 50-zzzzz-story-work.js)
   if (go) { if (FOLK.st[go.sid]) { const st = Object.assign({}, FOLK.st); delete st[go.sid]; FOLK.st = st; } S.in = go.sid; S.at = 0; folkLoad(S, go); if (S.wk) workLoad(S, go, jobs); return; }   // (what they carried, loaded; at work, what it delivers from its workplace)
   if (folkWait(c, S, V)) return;                                            // (their vehicle taken: they wait for it)
   if (!J) { folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.j = -1; return; }   // (no way home: they stay)
@@ -80912,9 +80965,10 @@ function rtWaiting(W0, J, hand) {
   const T = J.at != null ? slStr(J.at) : null; return T ? stN(T, J.k) : 0;
 }
 // (folkPlan, about to take a vehicle out at work for job J) too few for its MIN CARGO: on duty, a look again in 5 s (true: waiting)
-function workShort(c, S, J, jobs) {
+// (v: the vehicle it would take - what it can carry counts: a liquid only in a tank, a hold's containers - vehRoom; a MIN over what it can take: full is enough)
+function workShort(c, S, J, jobs, v) {
   if (!J || !RT_GOODS.includes(J.do) || !J.k) { S.cw = 0; return false; }
-  const W0 = slStr(S.wk), n = rtWaiting(W0, J, folkHand(S)), min = rtMin(J);
+  const W0 = slStr(S.wk), fit = v ? cargoN(v, J.k) + vehRoom(v, J.k) : Infinity, n = Math.min(rtWaiting(W0, J, folkHand(S)), fit), min = Math.max(1, Math.min(rtMin(J), fit));
   if (n >= min) { S.cw = 0; return false; }
   if (!S.cw) folkLog({ t: 'job', who: c.id, verb: 'WAITS FOR ' + min + ', HAS', k: J.k, n, at: J.do === 'deliver' && W0 ? slPlaceName(W0) : slPlaceName(slStr(J.at)) });
   S.cw = 1; S.duty = 1; S.nx = time + 5; return true;
@@ -80924,7 +80978,7 @@ function workLoad(S, v, jobs) {
   const W0 = slStr(S.wk); if (!W0) return;
   const want = {};   // (good -> how many in all - Infinity: all there is)
   for (let i = Math.max(0, S.j); i < jobs.length && jobs[i].do === 'deliver'; i++) { const J = jobs[i]; if (J.k) want[J.k] = (want[J.k] || 0) + (J.n > 0 ? J.n : Infinity); }
-  for (const k in want) { const n = Math.min(stN(W0, k), want[k] - cargoN(v, k)); if (n > 0) { stAdd(W0, k, -n); cargoAdd(v, k, n); folkLog({ t: 'job', who: folkWho(v), verb: 'LOAD', k, n, at: slPlaceName(W0) }); } }
+  for (const k in want) { const n = Math.min(stN(W0, k), want[k] - cargoN(v, k), vehRoom(v, k)); if (n > 0) { stAdd(W0, k, -n); cargoAdd(v, k, n); folkLog({ t: 'job', who: folkWho(v), verb: 'LOAD', k, n, at: slPlaceName(W0) }); } }
 }
 // ---- the player's own (STORY): a day at his workplace in its hours pays its WAGE at its end (his work vehicle is always there - keptVehStep)
 function workPlayerStep() {
