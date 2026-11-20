@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1148;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 23:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1149;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 23:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -75947,7 +75947,7 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    PLAYER - what a new story starts with (coins, and each PLAYER INVENTORY cargo: medicine...); OWNERS - the world's owners, added and
    removed (NOBODY, TEAM 1, TEAM 2 and PLAYER are the game's own: locked); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
    created and deleted. The settings: 50-story-0-cfg.js (STORY_CFG, OWNERS); the cargo list: 50-zz-cargo.js (CARGO). ---- */
-const STY = { panes: {}, el: null };
+const STY = { panes: {}, el: null, open: null };   // (open: the character whose rows show - CHARACTERS)
 const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', LINES: 'LINES', SIMULATE: 'SIMULATE' };
 const STY_SIM = { days: 3, log: null };   // (the last fast-forward's report - storySim, 50-zzzzz-story-folk.js)
 // (user Nov 19 21:54: "I cant even close the menu anymore. Only add more and more and cant select any others") every change draws the
@@ -75965,7 +75965,7 @@ function styFill(el) {
   const cat = name => { const c = el('div', 'cat'); c.appendChild(el('h4', '', name)); const P = STY.panes[STY_TABS[name]]; if (P) P.appendChild(c); return c; };
   // a tab's one-paragraph guide at its top (what it's for, how to start)
   const guide = (tab, txt) => { const P = STY.panes[tab]; if (!P) return; const d = el('div', 'help'); d.textContent = txt; d.style.cssText = 'color:#9aa3b8;padding:6px 8px 10px;line-height:1.4;font-size:11px'; P.appendChild(d); };
-  guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER, in OBJECTS) are theirs.');
+  guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Press a name to open it, CLOSE when done. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), and have a ROUTINE: the hour they leave and the jobs they do. What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER, in OBJECTS) are theirs.');
   guide('LINES', 'What characters say. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
   guide('PRIORITIES', 'What every character does next, the player included: the first of these that holds, top to bottom. Getting a good is worked out from where things are: buy it where it is sold, and short of coins earn first (fish with a boat they can use, sell the catch). Your objective is the first of the same steps. NOW shows what each would do at the start of a new story, and why.');
   guide('SIMULATE', 'Runs a new story fast - only its clock, stock and characters, every vehicle unseen - for so many days, and lists what happened: each trip and how long it took, each job done or skipped, who waited, and every place\'s stock at the end of each day. Nothing in the world is changed.');
@@ -76018,12 +76018,16 @@ function styFill(el) {
     for (const [id, name] of STR_OWNERS) {
       const r = el('div', 'row'), o = id === 'player' ? PLAYER_C : OWNERS.find(q => q.id === id);
       if (!o) { const l = el('label', '', name), t = el('span', '', 'LOCKED'); help(l, 'The game\'s own owner'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); continue; }
-      if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t); c.appendChild(r); famRows(o, true); continue; }
+      // (user Nov 19 22:27: "I cannot close after adding a character to be just the name like the other characters ... creating a character and
+      // then exiting that to create another character") one character open at a time (STY.open): the others are just their names - pressed, open
+      if (STY.open !== id) { const b = el('button', '', o === PLAYER_C ? 'PLAYER (YOU)' : o.name); b.title = 'Open to edit'; b.style.cssText = 'text-align:left;min-width:160px'; b.onclick = () => { STY.open = id; storyTabSync(); }; r.append(b); c.appendChild(r); continue; }
+      const shut = el('button', '', 'CLOSE'); shut.title = 'Done with this character: back to just the names'; shut.onclick = () => { STY.open = null; storyTabSync(); };
+      if (o === PLAYER_C) { const l = el('label', '', 'PLAYER'), t = el('span', '', 'YOU'); help(l, 'You: where you live and your family'); t.style.color = '#7a8294'; r.append(l, t, shut); c.appendChild(r); famRows(o, true); continue; }
       const i = el('input'); i.type = 'text'; i.value = o.name; i.style.cssText = css + ';width:140px'; i.title = 'Their name'; if (STY.added === o.id) { STY.added = null; STY.focus = i; }
       i.onchange = () => { o.name = (i.value.trim() || o.name).toUpperCase(); i.value = o.name; ownersSave(); };
       const del = el('button', '', 'DELETE'); del.title = 'Remove this owner (its things become NOBODY\'s)';
-      del.onclick = () => { for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
-      r.append(i, del); c.appendChild(r);
+      del.onclick = () => { STY.open = null; for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
+      r.append(i, shut, del); c.appendChild(r);
       // (user Nov 19: "we can set any entity as sick") where they live, and what they need a day from its stock (50-zzzzz-story-stock.js)
       const r2 = el('div', 'row'); r2.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
       const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
@@ -76060,7 +76064,7 @@ function styFill(el) {
       c.appendChild(aj);
     }
     const add = el('button', '', 'ADD CHARACTER'); add.title = 'A new character: an owner of places and vehicles';
-    add.onclick = () => { const id = Math.max(1, ...OWNERS.map(q => q.id)) + 1; OWNERS.push({ id, name: 'CHARACTER ' + id }); STY.added = id; ownersSave(); storyTabSync(); };
+    add.onclick = () => { const id = Math.max(1, ...OWNERS.map(q => q.id)) + 1; OWNERS.push({ id, name: 'CHARACTER ' + id }); STY.added = id; STY.open = id; ownersSave(); storyTabSync(); };
     c.appendChild(add); }
   // CARGO
   { const c = cat('CARGO');
