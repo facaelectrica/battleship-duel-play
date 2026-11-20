@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1205;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1206;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73208,7 +73208,7 @@ const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;  
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
-function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, wt: PREFABS.wt, theft: PREFABS.theft, rt0: PREFABS.rt0 })); } catch (e) { } }
+function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next, heat: PREFABS.heat, gone: PREFABS.gone, wt: PREFABS.wt, theft: PREFABS.theft, rt0: PREFABS.rt0, fishPay: PREFABS.fishPay })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v && typeof v === 'object' ? Object.assign({}, v) : v;   // (a record - its MAKES: its own too)   // (a list of records - its PLANTS: each its own)
 const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && !PF_USE.includes(q)).map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
@@ -74071,7 +74071,7 @@ const STR_KINDS = {
   hangarAir: { lab: 'AIRCRAFT HANGAR', art: 'hangar-cessna-small', enclosed: true, takes: ['plane', 'warplane', 'warheli', 'tank'] },
   hangarSea: { lab: 'MARINE HANGAR', art: 'hangar-cessna-small', enclosed: true, takes: ['boat', 'warship', 'warsub'] },   // (the Cessna hangar's picture until its own comes)
   fire: { lab: 'FIRE STATION', work: true, art: 'fire-station', enclosed: true, takes: ['car'], one: true },   // (which vehicles it keeps: its design's WORK VEHICLE - a type of work has no list of its own, user Nov 20 11:58)
-  police: { lab: 'POLICE STATION', work: true, art: 'police-station', enclosed: true, takes: ['car'], one: true, rt: [{ do: 'theft' }] },   // (one: a service - one of its kind a land, named by it: 50-zzzzz-story-cities.js; rt: its own design's routine - ANSWER THEFTS, 50-zzzzz-story-work.js)
+  police: { lab: 'POLICE STATION', work: true, art: 'police-station', enclosed: true, takes: ['car'], one: true, rt: [{ id: 'j1', do: 'theft' }] },   // (one: a service - one of its kind a land, named by it: 50-zzzzz-story-cities.js; rt: its own design's routine - ANSWER THEFTS, 50-zzzzz-story-work.js)
   taxi: { lab: 'TAXI SHELTER', art: 'taxi-shelter-back', front: 'taxi-shelter-front', takes: ['car'] },
   // (user Nov 19 13:30, his picture gen/tropical_src/ref-parking-nov19.png: "a new car parking" - in Story every vehicle is put away at a
   // structure, a car at a parking or a shelter) its two bollards 6.6 m apart: maxL, the longest car it takes (a taxi, an SUV, a van)
@@ -74098,12 +74098,12 @@ const STR_KINDS = {
   town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true, pl: [PL('pf-13', 22, 0, 0.45)] },
   town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-7', 28, 0, 0.45)] },
   // (a garage that mends cars - REPAIR on; the Story's tow trucks live here: a character's routine TOW - 50-zzzzz-story-folk.js)
-  mechanic: { lab: 'MECHANIC & TOW', work: true, art: 'mechanic', enclosed: true, takes: ['car'], rep: true, one: true, rt: [{ do: 'tow' }] },   // (rt: its type's starting ROUTINE - TOW, 50-zzzzz-story-folk.js)
+  mechanic: { lab: 'MECHANIC & TOW', work: true, art: 'mechanic', enclosed: true, takes: ['car'], rep: true, one: true, rt: [{ id: 'j1', do: 'tow' }] },   // (rt: its type's starting ROUTINE - TOW, 50-zzzzz-story-folk.js)
   market: { lab: 'MARKET', work: true, art: 'market', market: true, one: true },
   // (user Nov 20 09:38: "FISHERY ... sits on a dock. Its workers drop their catch there ... the marketplace person goes to the fishery to get their fish
   // to sell") a market that BUYS fish and sells nothing - the fishermen's workplace (50-zzzzz-story-work.js). Its picture: the user's (Nov 20 12:56,
   // ref-fishery-cargo-nov20.png - 6.5 x 4.5 m by its freezer door, cut01.py)
-  fishery: { lab: 'FISHERY', work: true, art: 'fishery', market: true, buys: ['fish'], one: true, keeps: ['fish'], rt: [{ do: 'fish', to: 'near' }, { do: 'deliver', k: 'fish', to: 'self' }] },   // (keeps: what its type STORES; rt: its starting ROUTINE - its workers fish and bring the catch here, user Nov 20 13:29)   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
+  fishery: { lab: 'FISHERY', work: true, art: 'fishery', market: true, buys: ['fish'], one: true, keeps: ['fish'], rt: [{ id: 'j1', do: 'fish', to: 'near' }, { id: 'j2', do: 'sell', k: 'fish', to: 'self' }] },   // (keeps: what its type STORES; rt: its starting ROUTINE - its workers fish and sell the catch here: paid per fish, user Nov 20 13:43)   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
   tower: { lab: 'CONTROL TOWER', plain: true, art: 'control-tower' },
   // (user Nov 19 13:30: "lighthouses are the only place where you can save your progress, so we will have a library of them") arts: its
   // other pictures - each its own prefab, LIGHTHOUSE 2... (pfBases), and a PICTURE any of its prefabs can take; a new lighthouse is one more
@@ -74862,6 +74862,7 @@ function strPlaceBad(o) {
   if (strFree(o)) return 'OFF THE GROUND';
   { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }
   { const n = typeof lotBad === 'function' ? lotBad(o) : ''; if (n) return n; }   // (NEEDS PARKING / NEEDS DOCK - 50-zzzzz-story-work.js)
+  { const n = typeof rtBad === 'function' ? rtBad(o) : ''; if (n) return n; }   // (NEEDS A PLACE TO ... - a routine's step set on each placed one, 50-zzzzz-story-work.js)
   { const n = typeof assignShort === 'function' ? assignShort(o) : ''; if (n) return n; }   // (a parking too short for the vehicles it would hold - 50-zzzzz-story-work.js)   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
@@ -77573,7 +77574,7 @@ function liveShapes(B, rs, N) {
 // (a structure's fields the land reads nothing of - what starts at its spots, how many and how long, what it's for and sells, its hours, its cargo,
 // its colour in the editor, its RESTRICT, REPAIR, HOSPITAL, MARKET, its gun's weapon: one of them changed lays none of the ground again -
 // what they feed reads them as it's asked: STR_GEN)
-const LIVE_STR_OWN = new Set(['veh', 'n', 'maxL', 'use', 'sells', 'openH', 'closeH', 'cargo', 'home', 'hue', 'restrict', 'allow', 'rep', 'market', 'takes', 'name', 'wt', 'pl']);   // (pl: its prefab's plants - laid again by their own edit, hplRelay)
+const LIVE_STR_OWN = new Set(['veh', 'n', 'maxL', 'use', 'sells', 'openH', 'closeH', 'cargo', 'home', 'hue', 'restrict', 'allow', 'rep', 'market', 'takes', 'name', 'wt', 'pl', 'rtAt']);   // (pl: its prefab's plants - laid again by their own edit, hplRelay)
 const lvStrGround = o => JSON.stringify(o, function (k, v) { return this === o && LIVE_STR_OWN.has(k) ? undefined : v; });   // (its own fields only)
 // -> the structures as read (liveNowStrs)
 function liveStructs(B, rs) {
@@ -79158,8 +79159,25 @@ function wtJobsFill() {
     if (!PREFABS.rt0 && STR_KINDS[k].rt && !(J.rt || []).length) J.rt = JSON.parse(JSON.stringify(STR_KINDS[k].rt));
   }
   PREFABS.rt0 = 1;
+  // every step its id (a placed one's places are kept by it - rtAt); a step by type of place from before 13:43 ('k:<kind>') is SET IN THE WORLD EDITOR now,
+  // each placed one given the nearest of that type that can, once
+  const was = [];
+  for (const k of Object.keys(STR_KINDS).filter(q => STR_KINDS[q].work)) { const J = wtJobOf(k); if (!J || !Array.isArray(J.rt)) continue;
+    for (const q of J.rt) { if (!q) continue; if (!q.id) q.id = rtNewId(J.rt); if (typeof q.to === 'string' && q.to.startsWith('k:')) { was.push([k, q.id, q.to.slice(2)]); q.to = 'pick'; } } }
+  // (user Nov 20 13:43: the FISHERY "should pay per fish") its workers SELL their catch here (a DELIVER here becomes SELL; none: added after its FISH),
+  // its market buying fish - once (PREFABS.fishPay)
+  if (!PREFABS.fishPay) { const J = wtJobOf('fishery'), R = J && Array.isArray(J.rt) ? J.rt : null;
+    if (R && R.some(q => q && q.do === 'fish')) {   // (its workers fish: the catch sold here - DELIVERed here before - its market buying fish)
+      const D = R.find(q => q && (q.do === 'deliver' || q.do === 'sell') && q.k === 'fish' && q.to === 'self');
+      if (D) D.do = 'sell'; else R.push({ id: rtNewId(R), do: 'sell', k: 'fish', to: 'self' });
+      J.market = true; J.buys = [...new Set([...(Array.isArray(J.buys) ? J.buys : []), 'fish'])]; if (!Array.isArray(J.sells)) J.sells = []; } }
+  PREFABS.fishPay = 1;
   for (const p of pfAllS()) if (pfUse(p) === 'work' && !p.base) for (const q of [...JOB_KEYS, 'goods', 'stores', 'takes', 'restrict', 'allow']) delete p[q];   // (the building only - its job, goods and vehicles are its type's)
   for (const o of STRS) { const p = pfGet(o.pf); if (p) pfApply(o, p); }
+  for (const [k, id, k0] of was) for (const W of STRS.filter(o => o.k === k && strWork(o) && !(o.rtAt || {})[id])) {
+    const J = (W.rt || []).find(q => q.id === id), T = J && STRS.filter(o => o.k === k0 && o !== W && copyCan(o, J)).sort((a, b) => Math.abs(a.x - W.x) - Math.abs(b.x - W.x))[0];
+    if (T) W.rtAt = Object.assign({}, W.rtAt, { [id]: T.id });
+  }
 }
 // a type's job changed: every workplace of it takes it (built as it changes, as a design's edit)
 function wtJobEdited(k) { pfSave(); for (const o of STRS) { const p = o.k === k && pfGet(o.pf); if (p) pfApply(o, p); } strSave(); strSync(); }
@@ -80781,7 +80799,7 @@ const WORK_DUTY = ['tow', 'theft'];   // (a routine's standing duties: done when
 const strWork = o => !!(STR_KINDS[o.k] || {}).work && strProp(o, 'work', K => !!K.work);   // (a workplace: its prefab's USE - of a kind that's a TYPE OF WORK)
 // where routine job J of workplace W is: a structure id, a fish area id - null: none in the world
 /* ---- WHAT A PLACE CAN BE IN A ROUTINE (user Nov 20 13:26: "the at location should show me the only locations that actually are allowed to store fish and
-   to sell goods ... The drop-downs must take into account the systems themselves") - one rule for the editor's AT list and the game's pick (workAt):
+   to sell goods ... The drop-downs must take into account the systems themselves") - one rule for the editor's lists (the type's AT, a placed one's places) and the game (workAt):
    BUY a good where its market SELLS it; SELL where its market BUYS it; COLLECT where it stores that good (a workplace: its type's STORES) and can hold it (it MAKES it, starts with it,
     its market trades it, a routine DELIVERs or SELLs it there - kindGets); DELIVER where it stores it; DELIVER where it stores goods; GO TO anywhere. X: a placed copy (its design's and its type's job on it) or a design with its
    type's job over it; goods: what it starts with ---- */
@@ -80789,9 +80807,11 @@ const strWork = o => !!(STR_KINDS[o.k] || {}).work && strProp(o, 'work', K => !!
 function kindGets(k, g) {
   if (!g || !PREFABS.wt) return false;
   for (const T in PREFABS.wt) { const J = wtJobOf(T); if (!J || !Array.isArray(J.rt) || (STR_KINDS[T] || {}).gone) continue;
-    if (J.rt.some(q => q && (q.do === 'deliver' || q.do === 'sell') && q.k === g && (q.to === 'k:' + k || (q.to === 'self' && T === k)))) return true; }
+    if (J.rt.some(q => q && (q.do === 'deliver' || q.do === 'sell') && q.k === g && (q.to === 'pick' || (q.to === 'self' && T === k)))) return true; }
   return false;
 }
+// the same for one placed copy: a workplace's step brings g to it - its own (THIS PLACE), or one whose place set in the WORLD EDITOR is it (rtAt)
+const copyGets = (o, g) => !!g && STRS.some(W => Array.isArray(W.rt) && strWork(W) && W.rt.some(q => q && (q.do === 'deliver' || q.do === 'sell') && q.k === g && ((q.to === 'self' && W === o) || (q.to === 'pick' && (W.rtAt || {})[q.id] === o.id))));
 // WHAT A WORKPLACE STORES (user Nov 20 13:29-13:34: "the fishery stores fish that the market goes and pick up to sell, but I have no option for the
 // fishery to store stuff"): its type's STORES (keeps), and whatever its job handles anyway - its market's SELLS and BUYS (none listed: every good), what
 // it MAKES and what that's made from. X: a copy, or a design with its type's job over it
@@ -80824,17 +80844,15 @@ function kindCan(k, verb, g) {
 }
 // the types of place a routine names (by type: each workplace finds its own) - the types of work and the lots; not homes (whose?), roads or props
 const routineKinds = () => Object.keys(STR_KINDS).filter(k => !STR_KINDS[k].gone && pfAllS().some(p => p.k === k && (() => { const g = pfGroup(p); return g && g !== 'RESIDENCES' && g !== 'ROADS' && g !== 'PROPS'; })()));
-const copyCan = (o, J) => placeCan(o, STR_KINDS[o.k] || {}, J.do, J.k, typeof strGoods0 === 'function' ? strGoods0(o) : o.goods, J.do === 'collect' && kindGets(o.k, J.k), strWork(o));
+const copyCan = (o, J) => placeCan(o, STR_KINDS[o.k] || {}, J.do, J.k, typeof strGoods0 === 'function' ? strGoods0(o) : o.goods, J.do === 'collect' && copyGets(o, J.k), strWork(o));
 function workAt(W, J) {
   if (WORK_DUTY.includes(J.do)) return null;
   if (J.do === 'fish') { if (J.to !== 'near' && J.at != null && NATURE.some(a => a.id === J.at)) return J.at; const A = NATURE.filter(a => a.k === 'fish').sort((a, b) => Math.abs((a.x0 + a.x1) / 2 - W.x) - Math.abs((b.x0 + b.x1) / 2 - W.x))[0]; return A ? A.id : null; }
   if (J.to === 'self') return copyCan(W, J) ? W.id : null;
-  if (typeof J.to === 'string' && J.to.startsWith('k:')) {
-    const k = J.to.slice(2), L = strsUsed().filter(o => o.k === k && o !== W && copyCan(o, J)); if (!L.length) return null;   // (only a copy that can - placeCan)
-    const land = typeof strLand === 'function' ? strLand(W) : null, near = (a, b) => Math.abs(a.x - W.x) - Math.abs(b.x - W.x);
-    const mine = land ? L.filter(o => strLand(o) === land) : []; return (mine.length ? mine : L).sort(near)[0].id;
-  }
-  return J.at != null && slStr(J.at) && copyCan(slStr(J.at), J) ? J.at : null;   // (an older routine: one building)
+  // (user Nov 20 13:43: "the work routine ... defined in the types of work, and the actual location that it can do it, which would depend on the actual
+  // placed asset") the place set on this placed one in the WORLD EDITOR (rtAt, by the step's id) - only while it can
+  if (J.to === 'pick') { const id = (W.rtAt || {})[J.id], T = id != null ? slStr(id) : null; return T && T !== W && copyCan(T, J) ? T.id : null; }
+  return null;
 }
 // a workplace's routine with each job's place found for it
 function workJobs(W) { return (Array.isArray(W && W.rt) ? W.rt : []).map(J => J && Object.assign({}, J, { at: workAt(W, J) })).filter(J => J && (WORK_DUTY.includes(J.do) || J.at != null)); }
@@ -80859,8 +80877,6 @@ worldLoad(() => {
   for (const o of STRS) { delete o.startH; delete o.endH; const p = pfGet(o.pf); if (p && !p.base) pfApply(o, p); }
   wtJobsFill();   // (each TYPE OF WORK's job - from its first design the first time: 50-zzzz-work-types.js)
 });
-// a routine's place, named for the editor: THIS PLACE, THE MARKET, THE NEAREST FISH AREA
-const workToName = J => J.do === 'fish' ? 'THE NEAREST FISH AREA' : J.to === 'self' ? 'THIS PLACE' : typeof J.to === 'string' && J.to.startsWith('k:') && STR_KINDS[J.to.slice(2)] ? 'THE ' + STR_KINDS[J.to.slice(2)].lab : J.at != null && slStr(J.at) ? strName(slStr(J.at)) : '?';
 // ---- PREFABS > WORK (a workplace's prefab): WAGE, WORK VEHICLE, ROUTINE (its HOURS are the place's - FUNCTIONS, 50-zz-prefabs.js)
 function workPrefabBox(p, el, css, ed, self) {   // (self: its type's kind - THIS PLACE)
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'WORK'));
@@ -80874,7 +80890,7 @@ function workPrefabBox(p, el, css, ed, self) {   // (self: its type's kind - THI
   row().append(L('WORK VEHICLE', 'Made for each worker as they start, put away as they finish'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], p.wv || '', v => { if (v) p.wv = v; else delete p.wv; }, 130, 'Each worker\'s vehicle'));
   // ROUTINE: its jobs in order, done again and again through the day (none: on duty) - places by type
   // AT: only the places that can do it with that good (placeCan); a step's place that can't (an older one, a good changed) kept, red, "(CAN'T)"
-  const atOpts = J => [...(self && kindCan(self, J.do, J.k) ? [['self', 'THIS PLACE']] : []), ...routineKinds().filter(k => kindCan(k, J.do, J.k)).map(k => ['k:' + k, 'THE ' + STR_KINDS[k].lab])];
+  const atOpts = J => [...(self && kindCan(self, J.do, J.k) ? [['self', 'THIS PLACE']] : []), ...(routineKinds().some(k => kindCan(k, J.do, J.k)) ? [['pick', 'SET IN THE WORLD EDITOR']] : [])];   // (which one: each placed one's - rtAt)
   const atFix = J => { const L = atOpts(J); if (!L.some(q => q[0] === J.to)) { if (L.length) J.to = L[0][0]; delete J.at; } };   // (the step or its good just changed: the first that can)
   { const r = row(); r.append(L('ROUTINE', 'Its jobs in order, again through the day')); if (!(p.rt || []).length) r.appendChild(W_('NONE: ON DUTY HERE', 'Workers stay here till the day ends')); }
   (p.rt || []).forEach((J, i) => {
@@ -80883,12 +80899,12 @@ function workPrefabBox(p, el, css, ed, self) {   // (self: its type's kind - THI
     if (J.do === 'tow') r.append(W_('IMPOUNDED VEHICLES, BACK TO THEIR OWNERS', 'When a vehicle is impounded: towed back where its owner keeps it'));
     else if (J.do === 'theft') r.append(W_('ITS WORK VEHICLES CHASE A THIEF', 'When a vehicle is stolen: an idle work vehicle of it goes after the thief'));
     else if (J.do === 'fish') r.append(W_('AT THE NEAREST FISH AREA', 'The fish area nearest each workplace'));
-    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; atFix(J); }, 90, 'Which good')); { const L = atOpts(J), cur = J.to || 'self', ok = L.some(q => q[0] === cur), lab = cur === 'self' ? 'THIS PLACE' : cur.startsWith('k:') && STR_KINDS[cur.slice(2)] ? 'THE ' + STR_KINDS[cur.slice(2)].lab : cur; const s2 = S(ok ? L : [[cur, lab + ' (CAN\'T)'], ...L], cur, v => { J.to = v; delete J.at; }, 150, ok ? 'Where: by type - each workplace finds its own, on its own land first' : 'No place of this type can do this with this good'); if (!ok) s2.style.color = '#ff6a5a'; r.append(W_('AT', 'Where: by type - each workplace finds its own, on its own land first'), s2); }; }
+    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; atFix(J); }, 90, 'Which good')); { const L = atOpts(J), cur = J.to || 'self', ok = L.some(q => q[0] === cur), lab = cur === 'self' ? 'THIS PLACE' : cur === 'pick' ? 'SET IN THE WORLD EDITOR' : cur; const s2 = S(ok ? L : [[cur, lab + ' (CAN\'T)'], ...L], cur, v => { J.to = v; delete J.at; }, 150, ok ? 'Where: here, or a place set on each placed one (WORLD EDITOR)' : 'Nowhere can do this with this good'); if (!ok) s2.style.color = '#ff6a5a'; r.append(W_('AT', 'Where: here, or a place set on each placed one (WORLD EDITOR)'), s2); }; }
     if (J.do !== 'go' && !WORK_DUTY.includes(J.do)) { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; ed(); }; r.append(n); }
     const x = el('button', '', 'X'); x.title = 'Remove this job'; x.onclick = () => { p.rt.splice(i, 1); if (!p.rt.length) delete p.rt; ed(); }; r.append(x);
   });
   const aj = el('button', '', '+ JOB'); aj.title = 'Another job in its routine'; aj.style.marginLeft = '14px';
-  aj.onclick = () => { (p.rt || (p.rt = [])).push({ do: 'collect', k: (CARGO[0] || {}).k || '', to: 'self' }); ed(); };
+  aj.onclick = () => { const L = p.rt || (p.rt = []); L.push({ id: rtNewId(L), do: 'collect', k: (CARGO[0] || {}).k || '', to: 'self' }); atFix(L[L.length - 1]); ed(); };
   c.appendChild(aj);
   return c;
 }
@@ -80904,7 +80920,15 @@ function workBox(o, el, css, sync) {
       s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q.work = o.id; ownersSave(); } sync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); } }
   const [a, b] = placeH(o), J = workJobs(o);
   row().append(L('ITS DAY', wtSrc(o)), el('output', '', (a === b ? 'ALL DAY' : hourName(a) + '-' + hourName(b)) + ' · ' + ((o.wage | 0) ? (o.wage | 0) + ' A DAY' : 'PAID BY WHAT THEY SELL') + (workVehD(o) ? ' · ' + STR_VEHS[o.wv].lab : '')));
-  row().append(L('ROUTINE', wtSrc(o) + ' - each place found for this one'), el('output', '', J.length ? J.map((q, i) => (i + 1) + '. ' + famStepTxt(q)).join(' · ') : 'ON DUTY HERE'));
+  // ROUTINE: its type's steps (wtSrc); a step whose place is set here - a list of the placed ones that can do it (copyCan), red till set
+  { const R = Array.isArray(o.rt) ? o.rt : []; if (!R.length) row().append(L('ROUTINE', wtSrc(o)), el('output', '', 'ON DUTY HERE'));
+    R.forEach((q, i) => { const r = row(), lab = (i + 1) + '. ' + famStepTxt(Object.assign({}, q, { n: 0 }));
+      if (q.to !== 'pick' || WORK_DUTY.includes(q.do) || q.do === 'fish') { r.append(L(i ? '' : 'ROUTINE', wtSrc(o)), el('output', '', lab + (q.to === 'self' ? ' HERE' : ''))); return; }
+      const cur = (o.rtAt || {})[q.id], ok = T => T !== o && copyCan(T, q), s = el('select'); s.style.cssText = css + ';width:170px'; s.title = 'Where this step is done, for this one';
+      for (const [v, t] of placeOpts(ok, cur, ['', '- SET A PLACE -'], 'POSSIBLE')) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
+      s.value = cur != null ? String(cur) : ''; if (workAt(o, q) == null) s.style.color = '#ff6a5a';
+      s.onchange = () => { const A = Object.assign({}, o.rtAt); if (s.value === '') delete A[q.id]; else A[q.id] = +s.value; o.rtAt = A; strSave(); sync(); };
+      r.append(L(i ? '' : 'ROUTINE', wtSrc(o)), el('span', '', lab + ' AT'), s); }); }
   if (o.wv && !workSpotsAt(o).length) { const t = el('div', 'tabnote', 'NOWHERE FOR ITS ' + STR_VEHS[o.wv].lab + 'S: JOIN A ' + (STR_VEHS[o.wv].fam === 'boat' ? 'DOCK' : 'PARKING')); t.style.color = '#ff6a5a'; c.appendChild(t); }
   return c;
 }
@@ -81105,6 +81129,12 @@ function lotBox(o, el, css) {
   return c;
 }
 // (strPlaceBad) a place missing a lot: NEEDS PARKING / NEEDS DOCK
+// a placed workplace with a step whose place isn't set (or can't any more): red - NEEDS A PLACE TO COLLECT FISH (user Nov 20 13:43: "it should be read
+// invalid until it has a place to go pick the fish from that I need to assign")
+// a new step's id in routine L (a placed one's places are kept by it - rtAt)
+function rtNewId(L) { let n = 0; for (const q of L || []) { const m = q && /^j(\d+)$/.exec(q.id || ''); if (m) n = Math.max(n, +m[1]); } return 'j' + (n + 1); }
+const rtPicks = o => (Array.isArray(o.rt) ? o.rt : []).filter(J => J && J.to === 'pick' && !WORK_DUTY.includes(J.do) && J.do !== 'fish');
+const rtBad = o => { if (!STORY_WORLD || !strWork(o)) return ''; const J = rtPicks(o).find(q => workAt(o, q) == null); return J ? 'NEEDS A PLACE TO ' + famStepTxt(Object.assign({}, J, { n: 0 })) : ''; };
 const lotBad = o => { if (!STORY_WORLD) return ''; for (const [fam] of lotNeeds(o)) if (!lotOf(o, fam)) return 'NEEDS ' + LOT_FAMS[fam]; return ''; };
 // ---- the handles: on the one picked structure, a knob for each lot it needs (P / D) over its top right - dragged onto a lot, that's its lot;
 // its lots joined to it by an orange line (strStretchDraw pushes them into SE.hnd with lk: the family)
