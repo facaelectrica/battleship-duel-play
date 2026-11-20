@@ -12950,8 +12950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1137;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 20:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1139;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 21:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23407,7 +23407,7 @@ function stepWeather(dt) {
     fog = envelope(t, F.t0, F.dur, 30, 30) * F.peak * (0.75 + 0.25 * wNoise((t - F.t0) / 12, F.k));
     if (t > F.t0 + F.dur) W.fog = null;
   }
-  // (Story's WEATHER AREAS where you are - 50-zz-weather-areas.js: the area's settings are the aim, reached over its FADE DURATION)
+  // (Story's WEATHER AREAS where you are - 50-zz-a-weather-areas.js: the area's settings are the aim, reached over its FADE DURATION)
   const A = weatherAreasMix(), fr = A ? 3 / Math.max(1, A.fade) : 0;
   if (A) { clouds = A.sky; fog = A.fog; rain = A.rain; sea = A.sea; wind = A.wind; }
   // (Nov 8, the user, crossing into Story's storm: "I start seeing the rain without seeing the clouds ... This transition should feel
@@ -37054,7 +37054,7 @@ const SKYV = [null, null];                                // (each view's record
    case we are defining weather areas)") while the GAME EDITOR is open the sky keeps the zoom it's drawn at and where it is across
    (its camera) from when the editor opened or a weather area last changed: a zoom only magnifies its picture (M), a pan doesn't
    scroll it - no cloud is drawn again for either. Its own settings (SUN, CLOUDS...) still change it at once. SKYED.h: that held
-   zoom and camera; null outside the editor; a weather area's edit (skyEdRefresh, wxaChanged - 50-zz-weather-areas.js; Nov 11: built as it's
+   zoom and camera; null outside the editor; a weather area's edit (skyEdRefresh, wxaChanged - 50-zz-a-weather-areas.js; Nov 11: built as it's
    made, no REFRESH; Nov 12: on each move of a line, a fade mark or a slider - the sky drawn again only if the view's zoom or place moved since,
    as a camera's cut in play) takes them again from the view */
 const SKYED = { h: null };
@@ -70671,6 +70671,253 @@ function sfxSiren() {
   }
 }
 
+//@src 50-zz-a-weather-areas.js:1
+/* ---- WEATHER AREAS - STORY only (user Nov 7: "The weather zones properties should be the same as the ones we have in the 'world' menu
+   button (sky, fog, rain, sea, wind) ... the longer the player is in that zone, the weather will slowly turn into that value. So there's
+   an area that you're always going to have a big storm that you're going to have to pass through"; "Just Story. The others we dont touch").
+   (user Nov 19 19:39: "the weather areas, can we have them designed like the world planner? Its much prettier and smoother to select. But
+   we still define the exact weather per area. Also with presets we can save like the world planner.")
+   WXA = { base: { sky, fog, rain, sea, wind, fade } (EVERYWHERE ELSE - what no area covers), areas: [{ id, x0, x1 (world x), name, col (its
+   colour), fw (EDGE BLEND: metres each side of its edges where it blends into what's next to it), sky, fog, rain, sea, wind, fade, pre (the
+   preset it was set from, null once edited) }], pre: [{ id, name, col, sky, fog, rain, sea, wind, fade }] (the PRESETS - the World Plan's
+   weather list, kept with the world) } - a world key (bd_weather_areas). As the World Plan's: a band of the world, one weather at each x -
+   an area never covers another. Where you are (your vehicle, or what you're looking at) its settings are the weather's aim, blended across
+   its edges, and the weather eases to that aim over its FADE (seconds). Outside Story, or with no areas and EVERYWHERE ELSE a fair day, the
+   world's own weather. The editor: WORLD EDITOR > WEATHER AREAS - each area a band in its colour, its name in a strip at the top (pick it
+   there, drag it to move it), picked: a handle at each edge to stretch it; ADD AREA; a preset applied or saved from an area. (This file's
+   name puts it before the other editor files: its strips and handles are pressed before a thing standing under them - window listeners run
+   in the order they were added.) ---- */
+const WXA_FW = 150;                                               // (a new area's EDGE BLEND, metres each side of an edge)
+const WXA_AREA0 = { sky: 0.2, fog: 0, rain: 0, sea: 0.18, wind: 0.15, fade: 30 };   // (a fair day, as a new game starts - freshWeather)
+const WXA_KEYS = [['sky', 'SKY', 0, 1, 0.01, 'Cloud cover'], ['fog', 'FOG', 0, 1, 0.01, 'Fog thickness'], ['rain', 'RAIN', 0, RAIN_MAX, 0.01, 'Rain - past 1 a thunderstorm'],
+  ['sea', 'SEA', 0, 1, 0.01, 'Wave height'], ['wind', 'WIND', -1, 1, 0.01, 'Wind - left (-) or right (+)'], ['fade', 'FADE DURATION', 1, 300, 1, 'Seconds to turn into this weather']];
+// (the World Plan's colours and its starting weathers - tools/world-plan/plan.html WX_COLS, DEFAULT_WEATHERS)
+const WXA_COLS = ['#6fd3ff', '#ffd36b', '#b197fc', '#c9ced3', '#ff8a65', '#7fd99a', '#4dabf7', '#f783ac', '#e8e8e8', '#ffa94d', '#63e6be', '#a9e34b'];
+const WXA_PRE0 = [{ id: 'calm-seas', name: 'CALM SEAS', col: '#6fd3ff', sky: 0.1, fog: 0, rain: 0, sea: 0.05, wind: 0.05, fade: 30 }, Object.assign({ id: 'fair-day', name: 'FAIR DAY', col: '#ffd36b' }, WXA_AREA0),
+  { id: 'storm', name: 'STORM', col: '#b197fc', sky: 0.8, fog: 0, rain: 1.04, sea: 0.53, wind: 0.6, fade: 30 }, { id: 'fog-bank', name: 'FOG BANK', col: '#c9ced3', sky: 0.5, fog: 0.75, rain: 0, sea: 0.12, wind: 0.05, fade: 60 }];
+const WXA_MIN = 20;                                               // (the shortest area, metres)
+const wxaVals = a => { const o = {}; for (const [k, , lo, hi] of WXA_KEYS) o[k] = clamp(Number.isFinite(+a[k]) ? +a[k] : WXA_AREA0[k], lo, hi); return o; };
+const wxaFresh = () => ({ base: Object.assign({}, WXA_AREA0), areas: [], pre: WXA_PRE0.map(p => Object.assign({}, p)), next: 1 });
+let WXA = wxaFresh();
+// settings as kept (Nov 7: the old daily chances - storm / cloud / fog % - read once into settings)
+function wxaArea(a) {
+  if (!a || typeof a !== 'object') return Object.assign({}, WXA_AREA0);
+  if ('sky' in a) return wxaVals(a);
+  return Object.assign({}, WXA_AREA0, { sky: Math.max(WXA_AREA0.sky, (a.cloud || 0) / 100 * 0.75, (a.storm || 0) / 100 * 0.85), rain: (a.storm || 0) / 100 * 0.85, fog: (a.fog || 0) / 100 * 0.75 });
+}
+function wxaFrom(o) {
+  const W = wxaFresh(); if (!o || typeof o !== 'object') return W;
+  if (Array.isArray(o.lines) && Array.isArray(o.areas) && o.areas.length === o.lines.length + 1) {   // (before Nov 19: lines splitting the world, an area between each two - each became an area of its own, the last one past
+    const L = o.lines.slice().sort((a, b) => a - b), fw = i => +(o.fw && o.fw[i]) || WXA_FW;                // the last line EVERYWHERE ELSE)
+    W.base = wxaArea(o.areas[L.length]);
+    for (let i = 0; i < L.length; i++) W.areas.push(Object.assign(wxaArea(o.areas[i]), { id: W.next++, x0: i ? L[i - 1] : 0, x1: L[i], name: 'AREA ' + (i + 1), col: WXA_COLS[i % WXA_COLS.length], fw: i ? (fw(i - 1) + fw(i)) / 2 : fw(0), pre: null }));
+    W.areas = W.areas.filter(a => a.x1 > a.x0);
+    return W;
+  }
+  if (!Array.isArray(o.areas)) return W;
+  W.base = wxaArea(o.base);
+  W.areas = o.areas.filter(a => a && Number.isFinite(+a.x0) && Number.isFinite(+a.x1) && +a.x1 > +a.x0).map(a => Object.assign(wxaArea(a), { id: +a.id || 0, x0: +a.x0, x1: +a.x1, name: String(a.name || '').toUpperCase(), col: /^#[0-9a-f]{6}$/i.test(a.col) ? a.col : WXA_COLS[0], fw: clamp(+a.fw || WXA_FW, 5, 5000), pre: a.pre || null }));
+  W.next = Math.max(1, +o.next || 1, ...W.areas.map(a => a.id + 1));
+  for (const a of W.areas) if (!a.id) a.id = W.next++;
+  if (Array.isArray(o.pre)) W.pre = o.pre.filter(p => p && p.id).map(p => Object.assign(wxaArea(p), { id: String(p.id), name: String(p.name || 'PRESET').toUpperCase(), col: /^#[0-9a-f]{6}$/i.test(p.col) ? p.col : WXA_COLS[0] }));
+  W.areas.sort((a, b) => a.x0 - b.x0);
+  return W;
+}
+worldLoad(() => { let o = null; try { o = JSON.parse(localStorage.getItem('bd_weather_areas') || 'null'); } catch (e) { } WXA = wxaFrom(o); });
+const wxaPlain = () => !WXA.areas.length && JSON.stringify(wxaVals(WXA.base)) === JSON.stringify(wxaVals(WXA_AREA0));
+function wxaSave() { try { if (wxaPlain() && JSON.stringify(WXA.pre) === JSON.stringify(WXA_PRE0)) localStorage.removeItem('bd_weather_areas'); else localStorage.setItem('bd_weather_areas', JSON.stringify(WXA)); } catch (e) { } }
+// where the weather is felt: your vehicle, else what you're looking at
+function wxaFocusX() { const c = crew[0]; if (!c) return null; if (c.mode === 'civ' && c.civ) return c.civ.x; if (c.look) return c.look.x; const F = typeof camFocus === 'function' ? camFocus(0) : null; return F ? F[0] : null; }
+const wxaIn = x => WXA.areas.find(a => x >= a.x0 && x < a.x1) || null;
+const wxaOf = x => wxaIn(x) || WXA.base;
+// the settings at world x: the area there (or EVERYWHERE ELSE), half way into what's on the other side at an edge, blending over the
+// area's EDGE BLEND each side of it (in a gap: the nearer neighbouring area's)
+function wxaAt(x) {
+  const A = wxaIn(x), m = wxaVals(A || WXA.base);
+  const mix = (n, f) => { if (f <= 0) return; for (const k in m) m[k] = m[k] * (1 - f) + n[k] * f; };
+  if (A) {
+    const F = A.fw * UPM, d0 = x - A.x0, d1 = A.x1 - x;
+    if (d0 <= d1 && d0 < F) mix(wxaVals(wxaOf(A.x0 - 1)), 0.5 - 0.5 * d0 / F);
+    else if (d1 < F) mix(wxaVals(wxaOf(A.x1 + 1)), 0.5 - 0.5 * d1 / F);
+  } else {
+    let L = null, R = null; for (const a of WXA.areas) { if (a.x1 <= x && (!L || a.x1 > L.x1)) L = a; if (a.x0 > x && (!R || a.x0 < R.x0)) R = a; }
+    const dL = L ? x - L.x1 : Infinity, dR = R ? R.x0 - x : Infinity;
+    if (dL <= dR && L && dL < L.fw * UPM) mix(wxaVals(L), 0.5 - 0.5 * dL / (L.fw * UPM));
+    else if (R && dR < R.fw * UPM) mix(wxaVals(R), 0.5 - 0.5 * dR / (R.fw * UPM));
+  }
+  return m;
+}
+// (stepWeather) Story's weather where you are - the aim the weather eases to, and how fast - or null (the world's own weather)
+function weatherAreasMix() {
+  if (!STORY || wxaPlain()) return null;
+  const x = wxaFocusX(); if (x == null) return null;
+  return wxaAt(x);
+}
+// ---- one weather at each x (the World Plan's wxFit / wxLimit): an area let go over another goes into the free space nearest it, shrunk to fit
+const wxaSpans = A => WXA.areas.filter(a => a !== A).map(a => [a.x0, a.x1]).sort((p, q) => p[0] - q[0]);
+function wxaFit(A) {
+  const gaps = []; let a = -Infinity;
+  for (const [s, t] of wxaSpans(A)) { if (s > a) gaps.push([a, s]); a = Math.max(a, t); }
+  gaps.push([a, Infinity]);
+  const w0 = A.x1 - A.x0, mid = (A.x0 + A.x1) / 2, mn = WXA_MIN * UPM; let best = null, bd = Infinity;
+  for (const [g0, g1] of gaps) { const lo = Math.max(g0, 0), hi = Math.min(g1, WORLD_W); if (hi - lo < mn) continue; const d = mid < lo ? lo - mid : mid > hi ? mid - hi : 0; if (d < bd) { bd = d; best = [lo, hi]; } }
+  if (!best) return false;
+  const w = Math.max(mn, Math.min(w0, best[1] - best[0])), c = clamp(mid, best[0] + w / 2, best[1] - w / 2);
+  A.x0 = Math.round(c - w / 2); A.x1 = Math.round(c + w / 2); WXA.areas.sort((p, q) => p.x0 - q.x0);
+  return true;
+}
+const wxaLimit = (A, side) => { let l = side > 0 ? WORLD_W : 0; for (const [s, t] of wxaSpans(A)) { if (side > 0 && s >= A.x1 - 1) l = Math.min(l, s); else if (side < 0 && t <= A.x0 + 1) l = Math.max(l, t); } return l; };   // (how far a stretched edge goes: to its neighbour)
+// ---- the editor (WORLD EDITOR > WEATHER AREAS)
+const WXE = { sel: null, drag: null, ui: {} };   // (sel: the picked area's id, 'base' for EVERYWHERE ELSE, null none)
+const wxaOpen = () => NSKY.editor.TUNE.world() && NSKY.editor.TUNE.page === 'WEATHER AREAS';
+const wxaSel = () => WXE.sel === 'base' ? WXA.base : WXA.areas.find(a => a.id === WXE.sel) || null;
+function wxaChanged() { wxaSave(); wxaSync(); skyEdRefresh(); }   // (the sky held in the editor taken again from the view: the weather there now - 41-sky-new.js)
+// (the editor's view shows the picked area's weather as you set it: its world is held, so the sky takes the values at once)
+function wxaPreview() { const a = wxaSel(); if (!a || !NSKY.editor.TUNE.open) return; env.weather = a.sky; env.fog = a.fog; env.rain = a.rain; env.sea = a.sea; env.wind = a.wind; computeEnv(); if (NSKY.snap) NSKY.snap(); }
+function wxaAdd() {   // (in the middle of the view, the view's width - or the free space nearest it)
+  const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), x = v.l + vw / 2, w = Math.max(WXA_MIN * UPM, vw * 0.6);
+  const A = Object.assign({}, WXA_AREA0, { id: WXA.next++, x0: Math.round(x - w / 2), x1: Math.round(x + w / 2), name: 'AREA ' + (WXA.areas.length + 1), col: WXA_COLS[WXA.areas.length % WXA_COLS.length], fw: WXA_FW, pre: 'fair-day' });
+  WXA.areas.push(A); if (!wxaFit(A)) { WXA.areas.pop(); return; }
+  WXE.sel = A.id; wxaChanged(); wxaPreview(); setTimeout(undoCommit, 0);
+}
+function wxaDelete() { const A = WXE.sel === 'base' ? null : wxaSel(); if (!A) return; WXA.areas = WXA.areas.filter(a => a !== A); WXE.sel = null; wxaChanged(); }
+// a preset onto the picked area (or EVERYWHERE ELSE): its settings and colour; an area named as it was keeps its name, else the preset's
+function wxaApply(id) {
+  const a = wxaSel(), p = WXA.pre.find(q => q.id === id); if (!a || !p) return;
+  Object.assign(a, wxaVals(p)); if (a !== WXA.base) { const q0 = WXA.pre.find(q => q.id === a.pre); if (!a.name || /^AREA \d+$/.test(a.name) || (q0 && a.name === q0.name)) a.name = p.name; a.col = p.col; a.pre = p.id; }
+  wxaChanged(); wxaPreview(); setTimeout(undoCommit, 0);
+}
+// the picked one's settings as a preset (its name: the area's - one of that name already there is written over)
+function wxaSavePreset() {
+  const a = wxaSel(); if (!a) return; const name = (a === WXA.base ? 'EVERYWHERE ELSE' : a.name || 'PRESET').toUpperCase();
+  let p = WXA.pre.find(q => q.name === name); if (!p) { p = { id: 'p' + Date.now().toString(36) }; WXA.pre.push(p); }
+  Object.assign(p, wxaVals(a), { name, col: a === WXA.base ? '#e8e8e8' : a.col }); if (a !== WXA.base) a.pre = p.id;
+  wxaChanged(); setTimeout(undoCommit, 0);
+}
+// ---- on the view: bands, edges, the strip at the top, the picked one's edge handles (the World Plan's look - its render)
+// (the strip just under the top row of buttons - the editor's WORLD gear sits top centre: topLayout, in the controls' layer)
+const WXA_STRIP = () => { const q = Math.max(1, Math.round(2 * dpr / PIXW)), L = topLayout(), t = Math.round((L.gear[1] + 52) * (innerHeight / ubh) * dpr / PIXW), h = 11 * q; return { q, t, h, hy: t + h + 12 * q, hr: Math.max(edHandle(6), 7 * q) }; };
+// the pointer on the view: world x, the view's pixel y, the reach of a finger in world units
+const wxaPtr = ev => { const [X, , r] = vehWorld(ev); return [X, ev.clientY * dpr / PIXW, r]; };
+function wxaHit(ev) {
+  const [X, Y, r] = wxaPtr(ev), G = WXA_STRIP(), A = wxaSel(), reach = r * 1.6;
+  if (A && A !== WXA.base && Math.abs(Y - G.hy) < G.hr * 2.2) for (const s of [-1, 1]) { const ex = s < 0 ? A.x0 : A.x1; if (Math.abs(X - ex) < Math.max(reach, G.hr * 1.6 / (S * cam.view[0].z))) return { k: 'edge', a: A, s }; }
+  if (Y >= G.t - 4 * G.q && Y <= G.t + G.h + 4 * G.q) { const a = wxaIn(X); if (a) return { k: 'strip', a }; }
+  return { k: 'band', a: wxaIn(X) };
+}
+window.addEventListener('pointerdown', ev => {
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaOpen() || onEdUI(ev)) return;
+  const H = wxaHit(ev), [X] = wxaPtr(ev);
+  WXE.sel = H.a ? H.a.id : 'base'; wxaSync(); wxaPreview();
+  if (H.k === 'edge') WXE.drag = { id: ev.pointerId, a: H.a, s: H.s, lim: wxaLimit(H.a, H.s) };
+  else if (H.k === 'strip') WXE.drag = { id: ev.pointerId, a: H.a, off: X - H.a.x0, x0: H.a.x0, x1: H.a.x1 };
+  else { edClaim('wxarea'); return; }                         // (a press in a band picks it - a thing standing there, pressed after, takes the press: things over weather, as the World Plan's)
+  ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('wxarea');
+}, { capture: true, passive: false });
+window.addEventListener('pointermove', ev => {
+  const d = WXE.drag; if (!d || d.id !== ev.pointerId) return;
+  const [X] = wxaPtr(ev), A = d.a, mn = WXA_MIN * UPM;
+  if (d.s < 0) A.x0 = Math.round(clamp(X, d.lim, A.x1 - mn));
+  else if (d.s > 0) A.x1 = Math.round(clamp(X, A.x0 + mn, d.lim));
+  else { const w = A.x1 - A.x0; A.x0 = Math.round(clamp(X - d.off, 0, WORLD_W - w)); A.x1 = A.x0 + w; }
+  skyEdRefresh();                                              // (user Nov 11 23:41, every edit real time: the editor's held sky taken again as it moves)
+  ev.stopImmediatePropagation();
+}, { capture: true, passive: true });
+const wxaUp = ev => { const d = WXE.drag; if (!d || d.id !== ev.pointerId) return; WXE.drag = null; if (!d.s && !wxaFit(d.a)) { d.a.x0 = d.x0; d.a.x1 = d.x1; } wxaChanged(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); };
+window.addEventListener('pointerup', wxaUp, { capture: true });
+window.addEventListener('pointercancel', wxaUp, { capture: true });
+const wxaRGB = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+// drawn over the world while the WEATHER AREAS page is open (from vehEdDraw): each area a band the full height in its colour, its edges
+// dashed, its name in a strip at the top over everything; the picked one brighter, white edges, an orange handle with a white ring and
+// a white <-> at each edge, under its strip (the World Plan's handles - its dotAt)
+function wxaEdDraw() {
+  if (!wxaOpen()) return;
+  const G = WXA_STRIP(), q = G.q, dash = 10 * q, H = bh;
+  const vdash = (X, col, w) => { C.fillStyle = col; for (let y = 0; y < H; y += dash * 2) C.fillRect(X - (w >> 1), y, w, dash); };
+  for (const a of WXA.areas) {
+    const X0 = Math.round(PX(a.x0)), X1 = Math.round(PX(a.x1)); if (X1 < -20 || X0 > VWP + 20) continue;
+    const pk = a.id === WXE.sel;
+    C.fillStyle = a.col; C.globalAlpha = pk ? 0.15 : 0.08; C.fillRect(X0, 0, X1 - X0, H); C.globalAlpha = 1;
+    for (const X of [X0, X1]) vdash(X, pk ? '#ffffff' : a.col, pk ? 2 * q : q);
+    const F = a.fw * UPM;                                       // (its EDGE BLEND, faint: how far in and out each edge blends)
+    C.globalAlpha = 0.35; for (const x of [a.x0 - F, a.x0 + F, a.x1 - F, a.x1 + F]) { const X = Math.round(PX(x)); if (X > -5 && X < VWP + 5) C.fillRect(X, 0, Math.max(1, q >> 1), H); } C.globalAlpha = 1;
+  }
+  for (const a of WXA.areas) {                                  // the strips, over everything
+    const X0 = Math.max(0, Math.round(PX(a.x0))), X1 = Math.min(VWP, Math.round(PX(a.x1))); if (X1 - X0 < 2) continue;
+    const pk = a.id === WXE.sel, [r, g, b] = wxaRGB(a.col);
+    C.fillStyle = 'rgba(30,30,30,0.9)'; C.fillRect(X0, G.t, X1 - X0, G.h);
+    C.fillStyle = `rgba(${r},${g},${b},0.25)`; C.fillRect(X0, G.t, X1 - X0, G.h);
+    C.fillStyle = pk ? '#ffffff' : a.col; const w = pk ? 2 * q : q; C.fillRect(X0, G.t, X1 - X0, w); C.fillRect(X0, G.t + G.h - w, X1 - X0, w); C.fillRect(X0, G.t, w, G.h); C.fillRect(X1 - w, G.t, w, G.h);
+    const s = a.name || 'AREA'; if (textWidth(s) * q + 16 * q <= X1 - X0) drawText(C, s, (X0 + X1) / 2, G.t + Math.round((G.h - 5 * q) / 2), pk ? '#ffffff' : a.col, q, 'center');
+  }
+  const A = wxaSel(); if (!A || A === WXA.base) return;
+  for (const s of [-1, 1]) {                                    // the picked area's handles: orange, a white ring, a white <->
+    const X = Math.round(PX(s < 0 ? A.x0 : A.x1)), Y = G.hy, R = G.hr; if (X < -R || X > VWP + R) continue;
+    C.fillStyle = '#ff9a2e'; C.fillRect(X - q, G.t + G.h, 2 * q, Y - R - G.t - G.h);   // (a short line up to its edge's strip)
+    C.fillStyle = '#ffffff'; pxDisc(C, X, Y, R + q); C.fillStyle = '#ff9a2e'; pxDisc(C, X, Y, R - q);   // (pixel discs - pxDisc, 50-story.js)
+    const L = Math.round(R * 0.6), t = Math.max(1, q); C.fillStyle = '#ffffff'; C.fillRect(X - L, Y - (t >> 1), 2 * L, t);
+    for (let i = 1; i <= Math.round(R * 0.3); i++) { C.fillRect(X - L + i - 1, Y - i, t, 2 * i); C.fillRect(X + L - i, Y - i, t, 2 * i); }
+  }
+}
+// the panel: the picked area (or EVERYWHERE ELSE) - its name, colour, preset, settings, EDGE BLEND; then the presets
+function wxaSync() {
+  const U = WXE.ui; if (!U.box) return;
+  U.box.textContent = '';
+  const el = (t, h, cls) => { const e = document.createElement(t); if (h != null) e.textContent = h; if (cls) e.className = cls; return e; };
+  const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px';
+  const row = (lab, tip, ...xs) => { const r = el('div', null, 'row'), l = el('label', lab); if (tip) l.title = tip; r.append(l, ...xs); U.box.appendChild(r); return r; };
+  const btn = (t, tip, f) => { const b = el('button', t); b.style.cssText = css + ';cursor:pointer;margin:2px 4px 2px 0'; b.title = tip; b.onclick = f; return b; };
+  const a = wxaSel();
+  if (!a) { U.box.appendChild(el('div', 'Pick an area on the view (its strip at the top, or anywhere in it), or the space between them: EVERYWHERE ELSE.', 'tabnote')); }
+  else {
+    const base = a === WXA.base;
+    U.box.appendChild(el('div', base ? 'EVERYWHERE ELSE' : 'AREA', 'row'));
+    if (!base) {
+      const nm = el('input'); nm.style.cssText = css + ';width:150px'; nm.value = a.name; nm.onchange = () => { a.name = nm.value.trim().toUpperCase(); wxaChanged(); setTimeout(undoCommit, 0); };
+      row('NAME', 'Its name, in its strip at the top', nm);
+      const sw = el('div'); sw.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px';
+      for (const c of WXA_COLS) { const b = el('button'); b.style.cssText = `width:18px;height:18px;border-radius:3px;cursor:pointer;background:${c};border:2px solid ${c === a.col ? '#fff' : '#2c3850'}`; b.title = c; b.onclick = () => { a.col = c; wxaChanged(); setTimeout(undoCommit, 0); }; sw.appendChild(b); }
+      row('COLOUR', 'Its colour on the view', sw);
+    }
+    const ps = el('select'); ps.style.cssText = css;
+    { const z = el('option', base || !a.pre ? '- CUSTOM -' : '- CUSTOM -'); z.value = ''; ps.appendChild(z); }
+    for (const p of WXA.pre) { const z = el('option', p.name); z.value = p.id; ps.appendChild(z); }
+    ps.value = !base && a.pre && WXA.pre.some(p => p.id === a.pre) ? a.pre : ''; ps.onchange = () => { if (ps.value) wxaApply(ps.value); };
+    row('PRESET', 'Set its weather from a preset (changing a setting makes it CUSTOM)', ps);
+    for (const [k, lab, lo, hi, st, tip] of WXA_KEYS) {
+      const i = el('input'), show = v => k === 'fade' ? Math.round(v) + ' S' : Math.round(v * 100) + '', out = el('output', show(a[k]));
+      i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = a[k];
+      i.oninput = () => { a[k] = +i.value; if (!base) a.pre = null; ps.value = ''; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); skyEdRefresh(); }; i.onchange = () => { wxaChanged(); setTimeout(undoCommit, 0); };   // (the held sky as it moves - skyEdRefresh)
+      row(lab, tip, i, out);
+    }
+    if (!base) {
+      const i = el('input'), out = el('output', Math.round(a.fw) + ' M'); i.type = 'range'; i.min = 5; i.max = 2000; i.step = 5; i.value = a.fw;
+      i.oninput = () => { a.fw = +i.value; out.textContent = i.value + ' M'; skyEdRefresh(); }; i.onchange = () => { wxaChanged(); setTimeout(undoCommit, 0); };
+      row('EDGE BLEND', 'Metres each side of its edges where it blends into what is next to it', i, out);
+      const w = el('output', Math.round((a.x1 - a.x0) / UPM) + ' M'); row('LENGTH', 'Drag its edge handles to stretch it', w);
+    }
+    { const r = el('div', null, 'row'); r.append(btn('SAVE AS PRESET', 'Keep these settings as a preset, named as it is (one of that name is written over)', wxaSavePreset)); if (!base) r.append(btn('DELETE AREA', 'Remove this area (what was under it: EVERYWHERE ELSE)', wxaDelete)); U.box.appendChild(r); }
+  }
+  // the presets (the World Plan's weather list): each its name, colour, what it is; DELETE (one is always kept)
+  U.box.appendChild(el('h4', 'PRESETS'));
+  for (const p of WXA.pre) {
+    const sw = el('span'); sw.style.cssText = `display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:${p.col}`;
+    const nm = el('input'); nm.style.cssText = css + ';width:120px'; nm.value = p.name; nm.onchange = () => { p.name = nm.value.trim().toUpperCase() || p.name; wxaChanged(); setTimeout(undoCommit, 0); };
+    const d = btn('X', 'Delete this preset (areas set from it keep their settings)', () => { if (WXA.pre.length < 2) return; WXA.pre = WXA.pre.filter(q => q !== p); for (const a2 of WXA.areas) if (a2.pre === p.id) a2.pre = null; wxaChanged(); setTimeout(undoCommit, 0); });
+    const r = el('div', null, 'row'), l = el('label'); l.append(sw, el('span', `SKY ${Math.round(p.sky * 100)} RAIN ${Math.round(p.rain * 100)} SEA ${Math.round(p.sea * 100)}`)); l.style.cssText = 'font-size:85%;opacity:0.8';
+    r.append(nm, l, d); U.box.appendChild(r);
+  }
+  if (!STORY_WORLD) U.box.appendChild(el('div', 'Weather areas work in Story only.', 'tabnote'));
+}
+{ const addBtn = () => wxaAdd();
+  addBtn.init = btn => setTimeout(() => {
+    const cat = btn.parentElement; if (!cat) return;
+    WXE.ui.cat = cat;
+    WXE.ui.box = document.createElement('div'); btn.after(WXE.ui.box); wxaSync();   // (DELETE: the editor's one too - 50-zzz-world-ed.js)
+  }, 0);
+  NSKY.editor.TUNE.buttons('WEATHER AREAS', 'WEATHER AREAS', [['ADD AREA', 'Add a weather area in the middle of the view (in the free space nearest it)', addBtn]]);
+}
+
 //@src 50-zz-atmo-marks.js:1
 /* ---- the air's layers as lines in the GAME EDITOR (user Oct 31, 09:14: "horizontal markers that we can drag in the editor,
    so I can visually see where we mark the different atmospheres, like the stratosphere, and we can drag them to adjust
@@ -71850,7 +72097,7 @@ function vehManned(v) {
 // gen/tropical/windows.py; and its lamps [x, y] - a porch lantern) as a picture of warm light: the panes' darker pixels lit (the
 // frames and bars between them stay as painted), and where each glows (picture pixels) - made once per picture
 const NIGHT_COL = [255, 196, 112];
-const STR_WINDOWS = {"home-hut":{"win":[[117,62,18,9],[156,62,19,9]],"lamp":[[45,57]]},"house-orange-roof":{"win":[[64,45,6,5],[72,45,6,5],[64,51,7,6],[72,51,7,6],[125,46,4,3],[125,51,4,3]]},"house-blue-roof":{"win":[[140,43,5,5],[147,43,5,5],[140,49,5,7],[147,49,5,7]]},"house-tin-roof":{"win":[[46,32,7,11]]},"school":{"win":[[52,56,6,6],[59,56,6,6],[52,64,6,6],[59,64,6,6],[132,56,6,6],[139,56,7,6],[132,64,6,6],[139,64,7,6]]},"hospital":{"win":[[53,97,13,14],[121,97,15,14]]},"fire-station":{"win":[[105,48,7,9],[105,70,7,10],[13,101,6,9],[124,104,3,7]],"lamp":[[30,102],[91,102]]},"police-station":{"win":[[11,50,7,5],[27,50,7,5],[96,50,8,5],[113,50,7,5],[9,63,11,13],[26,63,11,13],[93,63,11,13],[110,63,11,13]],"lamp":[[45,66],[85,66]]},"market":{"lamp":[[16,29],[53,30]]},"control-tower":{"win":[[12,47,8,18],[23,47,16,18],[44,47,14,18],[26,93,3,6]]},"church":{"win":[[49,55,4,7],[35,77,5,6],[10,96,3,7],[62,96,3,7]]},"lighthouse":{"win":[[9,17,6,7],[16,16,6,8],[23,17,6,7],[18,42,2,5],[18,58,2,5]],"lamp":[[19,20]]},"building-1":{"win":[[47,19,2,3],[17,37,11,9],[52,37,11,9],[17,64,11,10],[52,64,11,10],[17,92,11,9],[52,92,11,9],[16,125,14,12],[52,125,11,12]],"lamp":[[40,38],[40,65],[40,92]]},"building-2":{"win":[[14,54,7,9],[38,54,10,9],[64,54,7,9],[14,79,7,9],[38,79,10,9],[64,79,7,9],[14,105,7,9],[38,105,10,9],[64,105,7,9],[14,131,7,9],[38,131,10,9],[64,131,7,9],[12,156,19,12],[52,156,19,12]],"lamp":[[28,57],[57,57],[28,82],[57,82],[28,108],[57,108],[28,133],[57,133],[24,157],[41,158],[61,157]]},"fishing-boat-0":{"win":[[352,186,6,14],[364,186,9,14],[382,186,13,14],[403,186,12,14],[432,186,13,14],[368,233,5,10],[402,233,13,12],[465,238,9,9],[491,238,9,9],[230,275,8,8],[260,275,8,8],[290,275,8,8],[320,275,8,8],[350,275,8,8],[380,275,8,8],[410,275,8,8],[440,275,8,8],[471,275,8,8],[501,275,8,8]]},"motorboat-0":{"win":[[48,13,12,13],[60,10,40,17]]},"lighthouse-2":{"win":[[21,31,34,20],[48,132,5,18],[39,189,5,14],[54,189,5,14]],"lamp":[[38,39],[100,192]]}};   // (gen/tropical/windows.py's output, marked by eye: { art: { win: [[x, y, w, h]...], lamp: [[x, y]...] } })
+const STR_WINDOWS = {"home-hut":{"win":[[117,62,18,9],[156,62,19,9]],"lamp":[[45,57]]},"house-orange-roof":{"win":[[11,16,6,9],[26,16,6,9]]},"house-blue-roof":{"win":[[59,19,8,10],[43,20,6,7],[43,4,3,3]],"lamp":[[54,26]]},"house-tin-roof":{"win":[[9,16,6,9],[30,16,6,9],[20,16,5,6]]},"school":{"win":[[8,22,7,9],[35,22,7,9],[21,23,8,7],[24,7,3,4]]},"hospital":{"win":[[53,97,13,14],[121,97,15,14]]},"fire-station":{"win":[[7,46,6,8],[32,10,12,6]],"lamp":[[11,38]]},"police-station":{"win":[[38,30,6,8]]},"market":{"win":[[37,40,22,9]]},"control-tower":{"win":[[12,47,8,18],[23,47,16,18],[44,47,14,18],[26,93,3,6]]},"church":{"win":[[49,55,4,7],[35,77,5,6],[10,96,3,7],[62,96,3,7]]},"lighthouse":{"win":[[9,17,6,7],[16,16,6,8],[23,17,6,7],[18,42,2,5],[18,58,2,5]],"lamp":[[19,20]]},"building-1":{"win":[[12,22,6,7],[34,22,6,6],[52,22,6,7],[12,42,6,7],[33,42,6,7],[52,42,6,7],[11,70,8,10],[29,70,16,10],[50,70,9,10]]},"building-2":{"win":[[20,18,12,10],[22,41,10,8],[8,68,42,12]]},"fishing-boat-0":{"win":[[352,186,6,14],[364,186,9,14],[382,186,13,14],[403,186,12,14],[432,186,13,14],[368,233,5,10],[402,233,13,12],[465,238,9,9],[491,238,9,9],[230,275,8,8],[260,275,8,8],[290,275,8,8],[320,275,8,8],[350,275,8,8],[380,275,8,8],[410,275,8,8],[440,275,8,8],[471,275,8,8],[501,275,8,8]]},"motorboat-0":{"win":[[48,13,12,13],[60,10,40,17]]},"lighthouse-2":{"win":[[21,31,34,20],[48,132,5,18],[39,189,5,14],[54,189,5,14]],"lamp":[[38,39],[100,192]]},"mechanic":{"win":[[7,26,5,6]],"lamp":[[62,23]]},"house-porch":{"win":[[10,18,8,10],[42,18,8,10],[26,18,6,7]]},"house-green":{"win":[[8,19,6,9],[33,19,6,9],[20,20,6,7]]},"town-1":{"win":[[17,31,15,14],[42,30,52,12],[18,57,14,13],[76,57,16,13],[51,59,8,6]]},"town-2":{"win":[[14,25,9,13],[14,49,9,12],[14,74,9,13],[35,24,29,12],[35,48,29,12],[49,75,10,13],[37,76,6,5]]},"town-3":{"win":[[69,12,8,10],[16,26,4,6],[54,52,9,12],[69,52,9,12],[84,52,9,12]]},"town-4":{"win":[[14,24,12,13],[27,24,10,13],[57,24,12,13],[72,24,10,13],[10,56,10,13],[78,56,10,13],[28,10,4,4],[67,10,4,4]]},"town-6":{"win":[[16,23,10,13],[46,23,10,13],[19,57,9,11],[48,57,9,11],[67,56,26,14],[32,59,8,5],[34,10,4,4]]},"town-7":{"win":[[16,27,9,11],[39,27,9,11],[62,27,9,11],[16,55,9,12],[39,55,9,12],[16,87,9,12],[62,87,9,12],[41,89,6,5]]},"town-8":{"win":[[15,24,13,11],[36,17,59,15],[20,57,12,13],[70,57,12,13],[49,58,5,6]]}};   // (gen/tropical/windows.py's output, marked by eye: { art: { win: [[x, y, w, h]...], lamp: [[x, y]...] } })
 // a picture's window panes as the light pass's boxes and where each glows (worked out once per art from STR_WINDOWS - data, no picture): { boxes:
 // [[x0, y0, x1, y1]...], flat: the same boxes in one list (lightWin's), spots: [[x, y, n]...] }
 const NIGHT_OF = new Map();
@@ -72744,6 +72991,8 @@ function pfBases() {
     if (k === 'dock') p.spr = 'dock-wood'; else if (K.takes) p.n = 1;
     if (K.market) p.market = true;
     if (K.res) p.res = true;
+    if (K.rep) p.rep = true;                                   // (a kind that mends: REPAIR on - MECHANIC & TOW)
+    if (K.pl) p.pl = pfClone(K.pl);                            // (its own plants - the houses' gardens)
     L.push(p);
     if (k === 'hangarAir' || k === 'hangarSea') L.push(Object.assign({}, p, { id: 'k:' + k + ':L', name: K.lab + ' (LARGE)', big: true }));
     if (k === 'dock') L.push(Object.assign({}, p, { id: 'k:dock:pier', name: 'PIER', spr: 'pier' }));
@@ -73387,7 +73636,7 @@ const storyKeyName = () => { const d = (SLOTS[0] || {}).dev || 'kb'; return d ==
    none yet. The art: one sheet (img.tropical), cut on first use - a piece of it each (with clear rows over it where the user's chimney stands up
    past its top); what's composed on it is the things' pass's as it draws (strQuad): its chimney behind it (_under), its flag's cloth and its
    painted gate taken out (_cuts) and drawn on their own from its own texels, the dark inside behind its gate. ---- */
-const TROP = {"control-tower":{"w":67,"h":154,"m":0.0974,"x":684,"y":1462},"windsock":{"w":87,"h":236,"m":0.02542,"x":378,"y":812},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":1016,"y":1054},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":1659,"y":1462},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":0,"y":1620},"dock-wood":{"w":160,"h":80,"m":0.025,"x":682,"y":1620},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1635,"y":1715},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":471,"y":416},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":1124,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":462,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"motorboat-0":{"w":170,"h":68,"m":0.04967,"x":1377,"y":1620},"motorboat-1":{"w":110,"h":61,"m":0.04967,"x":85,"y":1715},"motorboat-2":{"w":83,"h":62,"m":0.04967,"x":1924,"y":1620},"motorboat-3":{"w":61,"h":61,"m":0.04967,"x":197,"y":1715},"motorboat-4":{"w":50,"h":60,"m":0.04967,"x":435,"y":1715},"market":{"w":74,"h":52,"m":0.08772,"x":651,"y":1715},"parking":{"w":88,"h":26,"m":0.1,"x":1545,"y":1715},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":1145,"y":1054},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":821,"y":1715},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":97,"y":1779},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":467,"y":812},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":1169,"y":1462},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":1368,"y":1462},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":1236,"y":1620},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":545,"y":1620},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1453,"y":1715},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":727,"y":1715},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":1303,"y":1715},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":1372,"y":1715},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":1223,"y":1715},"taxi":{"w":360,"h":156,"m":0.01389,"x":1361,"y":1264},"suv":{"w":328,"h":156,"m":0.01402,"x":0,"y":1462},"van":{"w":352,"h":156,"m":0.01591,"x":330,"y":1462},"ambulance":{"w":408,"h":200,"m":0.01642,"x":606,"y":1054},"box_truck":{"w":412,"h":212,"m":0.0182,"x":1290,"y":812},"dump_truck":{"w":452,"h":220,"m":0.01991,"x":697,"y":812},"fire_engine":{"w":488,"h":192,"m":0.02049,"x":506,"y":1264},"city_bus":{"w":504,"h":196,"m":0.02421,"x":0,"y":1264},"school_bus":{"w":604,"h":208,"m":0.01821,"x":0,"y":1054},"motorcycle":{"w":276,"h":188,"m":0.00797,"x":996,"y":1264},"tractor":{"w":376,"h":240,"m":0.01144,"x":0,"y":812},"fishing-boat-0-dmg":{"w":615,"h":381,"m":0.01945,"x":1088,"y":416},"fishing-boat-1-dmg":{"w":469,"h":394,"m":0.01945,"x":0,"y":416},"fishing-boat-2-dmg":{"w":329,"h":411,"m":0.01945,"x":793,"y":0},"fishing-boat-3-dmg":{"w":229,"h":414,"m":0.01945,"x":231,"y":0},"motorboat-0-dmg":{"w":170,"h":68,"m":0.04967,"x":1549,"y":1620},"motorboat-1-dmg":{"w":110,"h":61,"m":0.04967,"x":260,"y":1715},"motorboat-2-dmg":{"w":83,"h":62,"m":0.04967,"x":0,"y":1715},"motorboat-3-dmg":{"w":61,"h":61,"m":0.04967,"x":372,"y":1715},"motorboat-4-dmg":{"w":50,"h":60,"m":0.04967,"x":487,"y":1715},"home-hut":{"w":203,"h":98,"m":0.06364,"door":[55,52,67,85],"x":1454,"y":1462},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"door":[164,25,190,65],"x":1721,"y":1620},"hospital":{"w":192,"h":134,"m":0.06176,"door":[83,91,106,125],"x":833,"y":1462},"school":{"w":200,"h":90,"m":0.07778,"door":[88,55,110,82],"x":211,"y":1620},"house-orange-roof":{"w":184,"h":77,"m":0.07241,"door":[94,40,109,69],"x":1050,"y":1620},"house-blue-roof":{"w":204,"h":79,"m":0.07241,"door":[100,41,118,70],"x":844,"y":1620},"house-tin-roof":{"w":110,"h":58,"m":0.105,"door":[66,32,79,52],"x":539,"y":1715},"fire-station":{"w":140,"h":125,"m":0.14114,"door":[37,95,86,125],"gate":1,"x":1027,"y":1462},"police-station":{"w":130,"h":90,"m":0.09273,"door":[48,55,81,85],"gate":1,"x":413,"y":1620},"church":{"w":75,"h":115,"m":0.09545,"door":[31,90,44,112],"x":1291,"y":1462},"lighthouse":{"w":37,"h":85,"m":0.21,"door":[15,74,21,84],"x":643,"y":1620},"building-1":{"w":78,"h":145,"m":0.11667,"door":[35,124,47,142],"x":753,"y":1462},"building-2":{"w":85,"h":175,"m":0.12353,"door":[36,154,49,171],"x":1274,"y":1264},"lighthouse-2":{"w":137,"h":215,"m":0.1,"door":[97,189,105,210],"x":1151,"y":812},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":507,"y":1779},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":655,"y":1779},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":762,"y":1779},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":0,"y":1779},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":1912,"y":1715}};
+const TROP = {"control-tower":{"w":67,"h":154,"m":0.0974,"x":354,"y":1462},"windsock":{"w":87,"h":236,"m":0.02542,"x":378,"y":812},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":1016,"y":1054},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":1331,"y":1462},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":1542,"y":1462},"dock-wood":{"w":160,"h":80,"m":0.025,"x":569,"y":1620},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1553,"y":1709},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":471,"y":416},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":1124,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":462,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"motorboat-0":{"w":170,"h":68,"m":0.04967,"x":951,"y":1620},"motorboat-1":{"w":110,"h":61,"m":0.04967,"x":1754,"y":1620},"motorboat-2":{"w":83,"h":62,"m":0.04967,"x":1584,"y":1620},"motorboat-3":{"w":61,"h":61,"m":0.04967,"x":1866,"y":1620},"motorboat-4":{"w":50,"h":60,"m":0.04967,"x":63,"y":1709},"house-blue-roof":{"w":78,"h":47,"m":0.1,"x":352,"y":1709},"house-tin-roof":{"w":44,"h":42,"m":0.1,"x":1198,"y":1709},"house-orange-roof":{"w":44,"h":42,"m":0.1,"x":1244,"y":1709},"building-1":{"w":72,"h":93,"m":0.1,"x":1753,"y":1462},"building-2":{"w":58,"h":96,"m":0.1,"x":1271,"y":1462},"market":{"w":84,"h":66,"m":0.1,"x":1295,"y":1620},"school":{"w":53,"h":48,"m":0.1,"x":297,"y":1709},"house-porch":{"w":60,"h":46,"m":0.1,"x":526,"y":1709},"house-green":{"w":57,"h":44,"m":0.1,"x":1139,"y":1709},"town-1":{"w":113,"h":87,"m":0.1,"x":0,"y":1620},"town-2":{"w":72,"h":106,"m":0.1,"x":906,"y":1462},"town-3":{"w":109,"h":82,"m":0.1,"x":458,"y":1620},"town-4":{"w":100,"h":86,"m":0.1,"x":317,"y":1620},"town-5":{"w":97,"h":91,"m":0.1,"x":1827,"y":1462},"town-6":{"w":102,"h":88,"m":0.1,"x":1926,"y":1462},"town-7":{"w":88,"h":119,"m":0.1,"x":739,"y":1462},"town-8":{"w":102,"h":87,"m":0.1,"x":115,"y":1620},"parking":{"w":88,"h":26,"m":0.1,"x":1463,"y":1709},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":1145,"y":1054},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":588,"y":1709},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":0,"y":1772},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":467,"y":812},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":617,"y":1462},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":980,"y":1462},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":810,"y":1620},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":219,"y":1620},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1371,"y":1709},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":432,"y":1709},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":1070,"y":1709},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":1290,"y":1709},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":990,"y":1709},"taxi":{"w":360,"h":156,"m":0.01122,"x":1274,"y":1264},"suv":{"w":328,"h":156,"m":0.01154,"x":1636,"y":1264},"van":{"w":352,"h":156,"m":0.01282,"x":0,"y":1462},"ambulance":{"w":408,"h":200,"m":0.014,"x":606,"y":1054},"box_truck":{"w":412,"h":212,"m":0.01604,"x":1290,"y":812},"dump_truck":{"w":452,"h":220,"m":0.01455,"x":697,"y":812},"fire_engine":{"w":488,"h":192,"m":0.01719,"x":506,"y":1264},"city_bus":{"w":504,"h":196,"m":0.01633,"x":0,"y":1264},"school_bus":{"w":604,"h":208,"m":0.01538,"x":0,"y":1054},"motorcycle":{"w":276,"h":188,"m":0.00638,"x":996,"y":1264},"tractor":{"w":376,"h":240,"m":0.01167,"x":0,"y":812},"fishing-boat-0-dmg":{"w":615,"h":381,"m":0.01945,"x":1088,"y":416},"fishing-boat-1-dmg":{"w":469,"h":394,"m":0.01945,"x":0,"y":416},"fishing-boat-2-dmg":{"w":329,"h":411,"m":0.01945,"x":793,"y":0},"fishing-boat-3-dmg":{"w":229,"h":414,"m":0.01945,"x":231,"y":0},"motorboat-0-dmg":{"w":170,"h":68,"m":0.04967,"x":1123,"y":1620},"motorboat-1-dmg":{"w":110,"h":61,"m":0.04967,"x":1929,"y":1620},"motorboat-2-dmg":{"w":83,"h":62,"m":0.04967,"x":1669,"y":1620},"motorboat-3-dmg":{"w":61,"h":61,"m":0.04967,"x":0,"y":1709},"motorboat-4-dmg":{"w":50,"h":60,"m":0.04967,"x":115,"y":1709},"home-hut":{"w":203,"h":98,"m":0.06364,"door":[55,52,67,85],"x":1066,"y":1462},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"door":[164,25,190,65],"x":1381,"y":1620},"hospital":{"w":192,"h":134,"m":0.06176,"door":[83,91,106,125],"x":423,"y":1462},"church":{"w":75,"h":115,"m":0.09545,"door":[31,90,44,112],"x":829,"y":1462},"lighthouse":{"w":37,"h":85,"m":0.21,"door":[15,74,21,84],"x":419,"y":1620},"police-station":{"w":54,"h":53,"m":0.1,"door":[7,28,31,51],"gate":1,"x":167,"y":1709},"fire-station":{"w":77,"h":73,"m":0.1,"door":[19,33,70,69],"gate":1,"x":731,"y":1620},"mechanic":{"w":72,"h":49,"m":0.1,"door":[19,23,58,46],"gate":1,"x":223,"y":1709},"lighthouse-2":{"w":137,"h":215,"m":0.1,"door":[97,189,105,210],"x":1151,"y":812},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":410,"y":1772},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":558,"y":1772},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":665,"y":1772},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":1919,"y":1709},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":1830,"y":1709}};
 const tropArt = {};
 function tropPic(n) {
   const c0 = tropArt[n]; if (c0) return c0;
@@ -73453,8 +73702,7 @@ function strHides(x, y) {
    drooping a little in a calm; flown downwind (mirrored about its hoist when the wind blows the other way). One rule for every
    flag on every structure's picture. ---- */
 const TROP_FLAGS = {
-  school: { box: [183, 29, 200, 47], hoist: -1 },
-  'fire-station': { box: [92, 14, 102, 25], hoist: 1 },
+  school: { box: [43, 1, 53, 15], hoist: -1 },               // (Nov 19: the town sheet's school - its flag on the pole at its right corner)
 };
 // (its cloth's box in the picture's texels - taken out of the building as it's drawn, its columns drawn waving from the same texels)
 function flagCut(c, n, up) {
@@ -73470,12 +73718,16 @@ function flagCut(c, n, up) {
    (tropPic). Every residential structure (STR_KINDS res) with a chimney puffs a near-white wisp from it - strChimneys. ---- */
 const TROP_CHIMNEY = {
   'home-hut': { add: [138, 8] },                              // (the hut: no chimney in its art - the user's on its thatch)
-  'house-orange-roof': { top: [102, 0] }, 'house-blue-roof': { top: [102.5, 0] },
-  'house-tin-roof': { top: [52.5, 0] },                       // (its stove pipe on the ridge)
+  // (Nov 19: the town sheet's houses have none painted - the user's chimney on each roof's far side)
+  'house-orange-roof': { add: [31, 7] }, 'house-tin-roof': { add: [32, 7] }, 'house-blue-roof': { add: [64, 3] },
+  'house-porch': { add: [46, 3] }, 'house-green': { add: [36, 8] },
+  'town-1': { add: [86, 13] }, 'town-2': { add: [52, 10] }, 'town-3': { add: [30, 8] }, 'town-4': { add: [80, 9] },
+  'town-5': { add: [82, 20] }, 'town-6': { add: [50, 12] }, 'town-7': { add: [62, 12] }, 'town-8': { add: [80, 6] },
 };
 // each kind: its label, its picture (a dock's: its tiles - DOCK_SPRITES), what it takes in (the vehicle families that may
 // dock, park or go in: what decides REPAIR and REFUEL are offered), enclosed (a gate), on the water (a dock)
 const DOCK_SPRITES = ['dock-wood', 'pier'];   // (pier: the harbour's long pier - 50-zz-structh.js)
+const PL = (p, dx, d, s, flip) => ({ p, dx, d, flip: !!flip, s, leaf: 1 });   // (a plant of a kind's own prefab - STR_KINDS pl)
 const STR_KINDS = {
   dock: { lab: 'DOCK', art: 'dock-wood', water: true, takes: ['boat'] },
   // (user Nov 1: "Everything must have a spawn location" - the armies' families start at the hangars: structures-everywhere-plan-nov1.md)
@@ -73489,14 +73741,33 @@ const STR_KINDS = {
   parking: { lab: 'PARKING', art: 'parking', takes: ['car'], maxL: 6.6 },
   home: { lab: 'HOME', art: 'home-hut', res: true },          // (res: residential - someone cooks there: its chimney smokes)
   hospital: { lab: 'HOSPITAL', art: 'hospital' },
-  school: { lab: 'SCHOOL', art: 'school' },
-  houseA: { lab: 'HOUSE 1', art: 'house-orange-roof', res: true }, houseB: { lab: 'HOUSE 2', art: 'house-blue-roof', res: true }, houseC: { lab: 'HOUSE 3', art: 'house-tin-roof', res: true },
+  school: { lab: 'SCHOOL', art: 'school', pl: [PL('palm', -20, 1, 0.6)] },
+  // (user Nov 19 19:44, ref-town-nov19.png: "a set of buildings ... It would replace the current ones" - the houses, school, market, stations and
+  // the two town buildings are his new pictures under their old names; MECHANIC & TOW, the porch house and the green house are new)
+  // pl: the plants its own prefab starts with (user 19:44: "Please add plants when it makes sense" - the hand-placed plants' records along it from its
+  // middle, world units: 50-zzzz-hand-plants.js; DECK 0 in front of it, DECK 1 behind) - a garden for the houses, the school's palm; none in town
+  houseA: { lab: 'ORANGE COTTAGE', art: 'house-orange-roof', res: true, pl: [PL('pf-6', -17, 0, 0.5), PL('pf-19', 12, 1, 0.6)] },
+  houseB: { lab: 'FISHERMAN\'S HOUSE', art: 'house-blue-roof', res: true, pl: [PL('palm', 30, 1, 0.7)] },
+  houseC: { lab: 'TIN COTTAGE', art: 'house-tin-roof', res: true, pl: [PL('pf-7', 17, 0, 0.5), PL('pf-19', -12, 1, 0.6, true)] },
+  houseD: { lab: 'PORCH HOUSE', art: 'house-porch', res: true, pl: [PL('pf-7', -14, 0, 0.45), PL('pf-8', 14, 0, 0.45, true)] },
+  houseE: { lab: 'GREEN HOUSE', art: 'house-green', res: true, pl: [PL('pf-9', -16, 0, 0.5), PL('pf-19', -6, 1, 0.6)] },
+  // (user Nov 19 19:54: "a couple more generic buildings just so we have variety" - ref-town2-nov19.png, eight houses)
+  town1: { lab: 'VERANDA HOUSE', art: 'town-1', res: true, pl: [PL('pf-10', -40, 0, 0.5), PL('palm', 40, 1, 0.7)] },
+  town2: { lab: 'TALL RED HOUSE', art: 'town-2', res: true, pl: [PL('pf-19', -26, 1, 0.6)] },
+  town3: { lab: 'STAIR HOUSE', art: 'town-3', res: true, pl: [PL('pf-8', 38, 0, 0.5)] },
+  town4: { lab: 'TWIN HOUSES', art: 'town-4', res: true, pl: [PL('pf-6', -36, 0, 0.45), PL('pf-7', 36, 0, 0.45, true)] },
+  town5: { lab: 'SHUTTER HOUSE', art: 'town-5', res: true, pl: [PL('palm', -34, 1, 0.7)] },
+  town6: { lab: 'RED HOUSE', art: 'town-6', res: true, pl: [PL('pf-9', -36, 0, 0.5)] },
+  town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true },
+  town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-19', 36, 1, 0.6)] },
+  // (a garage that mends cars - REPAIR on; the Story's tow trucks live here: a character's routine TOW - 50-zzzzz-story-folk.js)
+  mechanic: { lab: 'MECHANIC & TOW', art: 'mechanic', enclosed: true, takes: ['car'], only: ['taxi', 'suv', 'van'], rep: true },
   market: { lab: 'MARKET', art: 'market', market: true },   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
   tower: { lab: 'CONTROL TOWER', art: 'control-tower' },
   // (user Nov 19 13:30: "lighthouses are the only place where you can save your progress, so we will have a library of them") arts: its
   // other pictures - each its own prefab, LIGHTHOUSE 2... (pfBases), and a PICTURE any of its prefabs can take; a new lighthouse is one more
   lighthouse: { lab: 'LIGHTHOUSE', art: 'lighthouse', arts: ['lighthouse-2'] },
-  bldg1: { lab: 'BUILDING 1', art: 'building-1' }, bldg2: { lab: 'BUILDING 2', art: 'building-2' },
+  bldg1: { lab: 'ART CAFE', art: 'building-1' }, bldg2: { lab: 'HARDWARE STORE', art: 'building-2' },
   windsock: { lab: 'WINDSOCK', noGoods: true, art: 'windsock' },
   // (user Nov 3 16:53: "a buoy should be an object I place manually ... Lets add a PROPS category that contains small objects ... Lets also
   // make 'street lamps' another object (the ones that piers place) that we can add manually") PROPS: small things placed by hand -
@@ -74756,7 +75027,7 @@ const lsJ = (k, d) => { try { const o = JSON.parse(localStorage.getItem(k) || 'n
 const UNDO_KEPT = {
   bd_placed: () => { PLACED = lsJ('bd_placed', []); edVehRebuild(); },
   bd_structs: () => edVehRebuild(),                       // (the structures' spots: what starts at each - made again too; the structures themselves are the COPY's)
-  bd_weather_areas: () => { WXA = wxaFrom(lsJ('bd_weather_areas', null)); WXE.sel = clamp(WXE.sel || 0, 0, WXA.areas.length - 1); wxaSync(); },
+  bd_weather_areas: () => { WXA = wxaFrom(lsJ('bd_weather_areas', null)); if (!wxaSel()) WXE.sel = null; wxaSync(); },
   bd_plants: () => { HPL = lsJ('bd_plants', []); HPE.sel = []; if (land.props) rigReplant(); },
   bd_markers: () => { MARKS = lsJ('bd_markers', []); MKE.sel = []; mkListSync(); },   // (the editor's markers - 50-zzzz-markers.js)
   bd_prefabs: () => { PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, lsJ('bd_prefabs', {})); PF_S = null; pfVehRegister(); pfSync(); if (land.props) rigReplant(); },   // (a building's plants - its prefab's: laid again, 50-zzzz-hand-plants.js)
@@ -74921,133 +75192,6 @@ NSKY.editor.TUNE.pane('CHANGE HISTORY', (pane, el) => {
   HIST.box = box; HIST.sig = ''; pane.appendChild(box); histDraw();
 });
 setInterval(histDraw, 500);                               // (the editor just opened, the first state taken by undoMark's own timer)
-
-//@src 50-zz-weather-areas.js:1
-/* ---- WEATHER AREAS - STORY only (user Nov 7: "The weather zones properties should be the same as the ones we have in the 'world' menu
-   button (sky, fog, rain, sea, wind) ... the longer the player is in that zone, the weather will slowly turn into that value. So there's
-   an area that you're always going to have a big storm that you're going to have to pass through"; "Just Story. The others we dont touch";
-   the fade between areas "a bit like you do the tunnels, you expand one side, it expands the other").
-   WXA = { lines: [x...] (world x, sorted), fw: [m...] (each line's fade region, half its width, metres), areas: [{ sky, fog, rain, sea,
-   wind, fade }...] (one more than the lines) } - a world key (bd_weather_areas). Where you are (your vehicle, or what you're looking at)
-   the area's settings are the weather's aim - across a line's fade region they blend from one area's to the next - and the weather eases
-   to that aim over the area's FADE (seconds). Outside Story, or with no lines and an area at its defaults, the world's own weather.
-   The editor: WORLD EDITOR > WEATHER - ADD LINE, drag a line, drag one of its fade marks to widen or narrow its fade (both sides at once),
-   press between lines to pick an area, its settings. ---- */
-const WXA_FW = 150;                                               // (a new line's fade region, metres each side)
-const WXA_AREA0 = { sky: 0.2, fog: 0, rain: 0, sea: 0.18, wind: 0.15, fade: 30 };   // (a fair day, as a new game starts - freshWeather)
-const WXA_KEYS = [['sky', 'SKY', 0, 1, 0.01, 'Cloud cover'], ['fog', 'FOG', 0, 1, 0.01, 'Fog thickness'], ['rain', 'RAIN', 0, RAIN_MAX, 0.01, 'Rain - past 1 a thunderstorm'],
-  ['sea', 'SEA', 0, 1, 0.01, 'Wave height'], ['wind', 'WIND', -1, 1, 0.01, 'Wind - left (-) or right (+)'], ['fade', 'FADE DURATION', 1, 300, 1, 'Seconds to turn into this weather']];
-let WXA = { lines: [], fw: [], areas: [Object.assign({}, WXA_AREA0)] };
-// an area as kept (Nov 7: the old daily chances - storm / cloud / fog % - read once into settings)
-function wxaArea(a) {
-  if (!a || typeof a !== 'object') return Object.assign({}, WXA_AREA0);
-  if ('sky' in a) return Object.assign({}, WXA_AREA0, a);
-  return Object.assign({}, WXA_AREA0, { sky: Math.max(WXA_AREA0.sky, (a.cloud || 0) / 100 * 0.75, (a.storm || 0) / 100 * 0.85), rain: (a.storm || 0) / 100 * 0.85, fog: (a.fog || 0) / 100 * 0.75 });
-}
-function wxaFrom(o) {
-  if (!o || !Array.isArray(o.lines) || !Array.isArray(o.areas) || o.areas.length !== o.lines.length + 1) return { lines: [], fw: [], areas: [Object.assign({}, WXA_AREA0)] };
-  return { lines: o.lines.slice(), fw: o.lines.map((x, i) => +(o.fw && o.fw[i]) || WXA_FW), areas: o.areas.map(wxaArea) };
-}
-worldLoad(() => { let o = null; try { o = JSON.parse(localStorage.getItem('bd_weather_areas') || 'null'); } catch (e) { } WXA = wxaFrom(o); });
-function wxaSave() { try { if (!WXA.lines.length && JSON.stringify(WXA.areas[0]) === JSON.stringify(WXA_AREA0)) localStorage.removeItem('bd_weather_areas'); else localStorage.setItem('bd_weather_areas', JSON.stringify(WXA)); } catch (e) { } }
-// where the weather is felt: your vehicle, else what you're looking at
-function wxaFocusX() { const c = crew[0]; if (!c) return null; if (c.mode === 'civ' && c.civ) return c.civ.x; if (c.look) return c.look.x; const F = typeof camFocus === 'function' ? camFocus(0) : null; return F ? F[0] : null; }
-// the areas' settings at world x: each line's fade region blends its two areas (from one edge of it to the other)
-function wxaAt(x) {
-  const L = WXA.lines; let i = 0; while (i < L.length && x > L[i]) i++;
-  const m = Object.assign({}, WXA.areas[i]);
-  const mix = (j, f) => { const n = WXA.areas[j]; for (const k in m) m[k] = m[k] * (1 - f) + n[k] * f; };
-  if (i > 0 && x - L[i - 1] < WXA.fw[i - 1] * UPM) mix(i - 1, 0.5 - 0.5 * (x - L[i - 1]) / (WXA.fw[i - 1] * UPM));
-  else if (i < L.length && L[i] - x < WXA.fw[i] * UPM) mix(i + 1, 0.5 - 0.5 * (L[i] - x) / (WXA.fw[i] * UPM));
-  return m;
-}
-// (stepWeather) Story's weather where you are - the aim the weather eases to, and how fast - or null (the world's own weather)
-function weatherAreasMix() {
-  if (!STORY || (!WXA.lines.length && JSON.stringify(WXA.areas[0]) === JSON.stringify(WXA_AREA0))) return null;
-  const x = wxaFocusX(); if (x == null) return null;
-  return wxaAt(x);
-}
-// ---- the editor (WORLD EDITOR > WEATHER)
-const WXE = { sel: 0, line: null, drag: null, ui: {} };   // (line: the line picked - the editor's DELETE takes it, user Nov 1)
-const wxaOpen = () => NSKY.editor.TUNE.world() && NSKY.editor.TUNE.page === 'WEATHER AREAS';
-function wxaChanged() { wxaSave(); wxaSync(); skyEdRefresh(); }   // (the sky held in the editor taken again from the view: the weather there now - 41-sky-new.js)
-// (the editor's view shows the picked area's weather as you set it: its world is held, so the sky takes the values at once)
-function wxaPreview() { const a = WXA.areas[WXE.sel]; if (!a || !NSKY.editor.TUNE.open) return; env.weather = a.sky; env.fog = a.fog; env.rain = a.rain; env.sea = a.sea; env.wind = a.wind; computeEnv(); if (NSKY.snap) NSKY.snap(); }
-function wxaAddLine() {
-  const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), x = Math.round(v.l + vw / 2);
-  let i = 0; while (i < WXA.lines.length && x > WXA.lines[i]) i++;
-  WXA.lines.splice(i, 0, x); WXA.fw.splice(i, 0, WXA_FW); WXA.areas.splice(i + 1, 0, Object.assign({}, WXA.areas[i])); WXE.sel = i + 1; wxaChanged();
-}
-function wxaDeleteLine() {          // (the picked line; the two areas either side of it one, the left one's settings)
-  const i = WXE.line; WXE.line = null;
-  if (i == null || !(i >= 0 && i < WXA.lines.length)) return;
-  WXA.lines.splice(i, 1); WXA.fw.splice(i, 1); WXA.areas.splice(i + 1, 1); WXE.sel = clamp(WXE.sel, 0, WXA.areas.length - 1); wxaChanged();
-}
-window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaOpen() || onEdUI(ev)) return;
-  const [X, , r] = vehWorld(ev);
-  // a line's fade mark (either side): its fade region, both sides together; the line itself: moved
-  const fi = WXA.lines.findIndex((x, i) => Math.abs(Math.abs(X - x) - WXA.fw[i] * UPM) < r * 1.5);
-  const li = WXA.lines.findIndex(x => Math.abs(x - X) < r * 1.5);
-  if (li >= 0 || fi >= 0) { WXE.drag = li >= 0 ? { id: ev.pointerId, i: li } : { id: ev.pointerId, i: fi, fade: true }; WXE.line = li >= 0 ? li : fi; ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('wxline'); return; }
-  let i = 0; while (i < WXA.lines.length && X > WXA.lines[i]) i++;
-  WXE.sel = i; wxaSync(); wxaPreview();
-}, { capture: true, passive: false });
-window.addEventListener('pointermove', ev => {
-  const d = WXE.drag; if (!d || d.id !== ev.pointerId) return;
-  const [X] = vehWorld(ev);
-  if (d.fade) WXA.fw[d.i] = Math.round(clamp(Math.abs(X - WXA.lines[d.i]) / UPM, 5, 5000));
-  else { const lo = d.i > 0 ? WXA.lines[d.i - 1] + 50 : -Infinity, hi = d.i < WXA.lines.length - 1 ? WXA.lines[d.i + 1] - 50 : Infinity; WXA.lines[d.i] = Math.round(clamp(X, lo, hi)); }
-  skyEdRefresh();                                              // (user Nov 11 23:41, every edit real time: the editor's held sky taken again as it moves, not on the let go)
-  ev.stopImmediatePropagation();
-}, { capture: true, passive: true });
-const wxaUp = ev => { if (WXE.drag && WXE.drag.id === ev.pointerId) { WXE.drag = null; wxaChanged(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); } };
-window.addEventListener('pointerup', wxaUp, { capture: true });
-window.addEventListener('pointercancel', wxaUp, { capture: true });
-// drawn over the world while the WEATHER tab is open (from vehEdDraw): each line dashed top to bottom, its fade marks either side, each
-// area's settings over it
-function wxaEdDraw() {
-  if (!wxaOpen()) return;
-  const q = Math.max(1, Math.round(2 * dpr / PIXW)), dash = 10 * q;
-  const vline = (X, col, w, gap) => { C.fillStyle = '#04070f'; for (let y = 0; y < bh; y += gap) C.fillRect(X - q, y, w + 2 * q, dash); C.fillStyle = col; for (let y = 0; y < bh; y += gap) C.fillRect(X, y, w, dash); };
-  WXA.lines.forEach((x, i) => {
-    const X = Math.round(PX(x)), F = WXA.fw[i] * UPM, pick = i === WXE.line;
-    for (const s of [-1, 1]) { const Xf = Math.round(PX(x + s * F)); if (Xf > -10 && Xf < VWP + 10) vline(Xf, pick ? '#ffffff' : '#ffd36b', q, dash * 3); }
-    if (X > -10 && X < VWP + 10) vline(X, pick ? '#ffffff' : '#9ad0ff', q, dash * 2);
-  });
-  const xs = [-1e9, ...WXA.lines, 1e9], f = v => Math.round(v * 100);
-  WXA.areas.forEach((a, i) => {
-    const X0 = Math.max(0, PX(xs[i])), X1 = Math.min(VWP, PX(xs[i + 1])); if (X1 < 0 || X0 > VWP) return;
-    // (user Nov 7 21:58: "that text gets yellow tinted so I understand which area I picked ... a vertical layout instead of horizontal so
-    // it's easier to read") one setting a line, names in a column and numbers in another, over the middle of the area; the picked one yellow, the others white
-    const rows = [['SKY', f(a.sky)], ['FOG', f(a.fog)], ['RAIN', f(a.rain)], ['SEA', f(a.sea)], ['WIND', f(a.wind)], ['FADE', Math.round(a.fade) + 'S']];
-    const col = i === WXE.sel ? '#ffd36b' : '#ffffff',   /* (drawText takes '#rrggbb': the colours given as lists had come out black) */ nw = Math.max(...rows.map(r => textWidth(r[0]))), vw = Math.max(...rows.map(r => textWidth(String(r[1])))), gap = 4;
-    const x = Math.round((X0 + X1) / 2 - (nw + gap + vw) * q / 2), lh = 9 * q;
-    rows.forEach(([n, v], r) => { const y = 40 * q + r * lh; drawText(C, n, x, y, col, q); drawText(C, String(v), x + (nw + gap + vw) * q, y, col, q, 'right'); });
-  });
-}
-function wxaSync() {
-  const U = WXE.ui; if (!U.box) return;
-  U.box.textContent = '';
-  const a = WXA.areas[WXE.sel]; if (!a) return;
-  const el = (t, h) => { const e = document.createElement(t); if (h != null) e.textContent = h; return e; };
-  const head = el('div'); head.className = 'row'; head.append(el('label', 'AREA ' + (WXE.sel + 1) + ' OF ' + WXA.areas.length)); U.box.appendChild(head);
-  for (const [k, lab, lo, hi, st, tip] of WXA_KEYS) {
-    const r = el('div'), i = el('input'), show = v => k === 'fade' ? Math.round(v) + ' S' : Math.round(v * 100) + '', out = el('output', show(a[k])); r.className = 'row';
-    i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = a[k];
-    i.oninput = () => { a[k] = +i.value; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); skyEdRefresh(); }; i.onchange = () => wxaChanged();   // (the held sky as it moves - skyEdRefresh)
-    const l = el('label', lab); l.title = tip; r.append(l, i, out); U.box.appendChild(r);
-  }
-  if (!STORY_WORLD) { const n = el('div', 'Weather areas work in Story only.'); n.className = 'tabnote'; U.box.appendChild(n); }
-}
-{ const addBtn = () => wxaAddLine();
-  addBtn.init = btn => setTimeout(() => {
-    const cat = btn.parentElement; if (!cat) return;
-    WXE.ui.cat = cat;
-    WXE.ui.box = document.createElement('div'); btn.after(WXE.ui.box); wxaSync();   // (DELETE: the editor's one - user Nov 1)
-  }, 0);
-  NSKY.editor.TUNE.buttons('WEATHER AREAS', 'WEATHER AREAS', [['ADD LINE', 'Add a border between two weather areas', addBtn]]);
-}
 
 //@src 50-zz-wheels.js:1
 /* ================================================================
@@ -76003,11 +76147,11 @@ const WK = {
       VE.sel = null; VE.more = []; vehSync();
     },
   },
-  wxline: {
+  wxarea: {
     tab: 'WEATHER AREAS',
-    items: () => WXE.line != null && WXE.line < WXA.lines.length ? [{ noun: 'WEATHER LINE', del: true }] : [],
-    clear() { WXE.line = null; },
-    del: () => wxaDeleteLine(),
+    items: () => WXE.sel != null && WXE.sel !== 'base' && wxaSel() ? [{ noun: 'WEATHER AREA', del: true }] : [],
+    clear() { if (WXE.sel != null) { WXE.sel = null; wxaSync(); } },
+    del: () => wxaDelete(),
     el: () => WXE.ui.box,
   },
   nature: {                                               // (the creature areas - fish, sharks, whales: OBJECTS > MISC, 50-zz-nature.js)
@@ -78375,7 +78519,7 @@ function worldShift(dx) {
   natureSave();
   for (const q of LAKE_SET) q.x = mv(q.x);
   lakeSave();
-  WXA.lines = WXA.lines.map(mv); wxaSave();
+  for (const a of WXA.areas) { a.x0 = mv(a.x0); a.x1 = mv(a.x1); } wxaSave();
   for (const r of HPL) r.x = mv(r.x);
   if (HPL.length) hplSave();
   for (const r of BGS) r.x = mv(r.x);
