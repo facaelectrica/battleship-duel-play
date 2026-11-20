@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1147;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 23:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1148;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 23:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49484,7 +49484,49 @@ function islSplitEnd(k, q) {
    out of it); its handles drag anywhere (the ends too); a double-click on its line adds a point; right-click a handle (or
    hold a finger on it) removes it - with fewer than three points left, the island goes. Press its line to pick its pieces
    for the SKIN buttons (50-land-unified). Built as it changes, as the ground. ---- */
-const ISL_ED = { drag: null, ptr: null, hover: null, lastDown: null, hold: 0, jc: null };   // (jc: the join a dragged layer point would make - joinCand)
+const ISL_ED = { drag: null, ptr: null, hover: null, lastDown: null, hold: 0, jc: null, more: [], cyc: null };   // (jc: the join a dragged layer point would make - joinCand)
+/* (user Nov 19 21:49: "shift select for spline points") the points picked - one group, on any shapes: ISL_ED.pt the one pressed last, ISL_ED.more
+   the others Shift (or a Shift box) picked with it, as the vehicles' VE.sel / VE.more. A press on one of them drags them all; CURVE, VEGETATION
+   and DELETE take them all. A plain press on another point picks it alone */
+const islPtsOn = () => ISL_ED.pt ? [ISL_ED.pt, ...ISL_ED.more].filter(q => ISLANDS[q.n] && ISLANDS[q.n].p[q.k]) : [];
+const islPtOn = (n, k) => islPtsOn().some(q => q.n === n && q.k === k);
+// what's picked, as points: the points, else the picked segments' ends (Shift on a point carries on from either)
+function islPtsPicked() {
+  const s = TERRAIN_ED.sel, L = islPtsOn().map(q => ({ n: q.n, k: q.k }));
+  if (s && s.I != null && ISLANDS[s.I]) for (const k of dragGroup({ I: s.I }, selLo(s))) if (!L.some(q => q.n === s.I && q.k === k)) L.push({ n: s.I, k });
+  return L;
+}
+function islPtsSet(L) { TERRAIN_ED.sel = null; TERRAIN_ED.selDrag = false; ISL_ED.pt = L[0] || null; ISL_ED.more = L.slice(1); terrainSyncSkin(); }
+// a press on a picked point: every picked point dragged by the same step, each shape's own (islDragBy)
+function islPtsDrag(e, q) {
+  const by = new Map(); for (const p of islPtsOn()) { const P = ISLANDS[p.n].p; if (!by.has(p.n)) by.set(p.n, []); by.get(p.n).push([p.k, P[p.k][0], WATER_Y + P[p.k][1]]); }
+  ISL_ED.drag = q.h; ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, sts: [...by] };
+}
+// the picked points taken out (DELETE) - each as a right-click takes it out (islRemovePt), found again by itself as the others go
+function islRemovePts(L) {
+  const R = L.map(q => [ISLANDS[q.n], ISLANDS[q.n].p[q.k]]);
+  for (const [I, p] of R) { const n = ISLANDS.indexOf(I), k = n >= 0 ? I.p.indexOf(p) : -1; if (k >= 0) islRemovePt(n, k, true); }
+  ISL_ED.pt = null; ISL_ED.more = []; islChanged(); terrainSyncSkin();
+}
+/* (user Nov 19 21:49: "be able to select different layers of the same terrain") where shapes lie on each other - a layer on its parent, a join's
+   two points, a seam along the line behind - a press keeps what's picked among what's under the pointer (so it drags it), and a click again
+   (no drag) steps to the next one under it: every point there, nearest first, then the front layer first; on a line, each shape's piece there */
+function islCycleAt(e, q) {
+  if (q.h && q.h.kind) return;
+  const L = q.h ? q.hs.filter(h => !h.kind) : q.es, s = TERRAIN_ED.sel; if (L.length < 2) return;
+  const i = L.findIndex(q.h ? h => islPtOn(h.n, h.k) : g => s && s.I === g.n && g.k >= selLo(s) && g.k <= selHi(s));
+  if (i < 0) return;                                            // (none of them picked: the nearest is taken, as always)
+  if (q.h) q.h = L[i]; else { q.edge = L[i]; q.line = L[i].n; }
+  ISL_ED.cyc = { id: e.pointerId, cx: e.clientX, cy: e.clientY, L, i, pts: !!q.h };
+}
+function islCycleUp(e) {
+  const c = ISL_ED.cyc; if (!c || c.id !== e.pointerId) return; ISL_ED.cyc = null;
+  if (e.type !== 'pointerup' || Math.hypot(e.clientX - c.cx, e.clientY - c.cy) > 8) return;
+  const g = c.L[(c.i + 1) % c.L.length];
+  if (c.pts) islPtsSet([{ n: g.n, k: g.k }]); else { ISL_ED.pt = null; ISL_ED.more = []; TERRAIN_ED.sel = { I: g.n, k: g.k, k1: g.k }; TERRAIN_ED.selDrag = false; terrainSyncSkin(); }
+}
+// a shape as the TERRAIN tab names it: its kind and number, and its layer when it is one
+const shpLabel = n => { const I = ISLANDS[n]; return I ? SHP_NAME[shpK(I)].toLowerCase() + ' shape ' + (n + 1) + (shpLay(I) ? ', layer ' + shpLay(I) : '') : ''; };
 // (Nov 11, editing is live) the shapes changed: kept, and built as they are now (50-zzzz-live-edit.js); the Biome Editor builds its own
 function islChanged() { islSave(); if (VEG_MODE) { if (window.__vgTerrChanged) window.__vgTerrChanged(); } else liveEdit(); }
 function islAdd() {
@@ -49640,14 +49682,20 @@ function shpScaleAt(I) { const [cx, cy] = shpMid(I); let b = I.p[0], bv = -1e9; 
 function islPick(e) {
   const [x, y] = screenToWorld(e.clientX, e.clientY), i = ONEVIEW() || e.clientX * dpr / PIXW < Math.floor(bw / 2) ? 0 : 1;
   const r = (e.pointerType === 'touch' ? 22 : 11) * dpr / PIXW / (S * cam.view[i].z);
-  let best = null, bd = r * r;
-  ISLANDS.forEach((I, n) => { if (I.t) for (let j = 0; j < 3; j++) { const q = tunWidthAt(I, j), d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= bd * 1.6) { bd = d / 1.6; best = { n, k: -1, kind: 'Wd', j }; } }
-    for (const [kind, q] of [['C', shpMid(I)], ['Sc', shpScaleAt(I)]]) { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= bd * 1.6) { bd = d / 1.6; best = { n, k: -1, kind }; } } });
-  ISLANDS.forEach((I, n) => I.p.forEach((p, k) => { const dx = p[0] - x, dy = WATER_Y + p[1] - y, d = dx * dx + dy * dy; if (d <= bd) { bd = d; best = { n, k }; } }));
-  const ed = best ? null : shpNearEdge(x, y, r * 1.6);
-  return { x, y, r, h: best, line: ed ? ed.n : null, edge: ed };
+  // every handle within reach (a cross, a square or a width handle reaches 1.6 times as far), nearest first - a point before a cross as near,
+  // the front layer's (the later shape's) first; none: each shape's piece of line within reach, the same way (islCycleAt steps through them)
+  const H = [], r2 = r * r;
+  ISLANDS.forEach((I, n) => { if (I.t) for (let j = 0; j < 3; j++) { const q = tunWidthAt(I, j), d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= r2 * 1.6) H.push([d / 1.6, { n, k: -1, kind: 'Wd', j }]); }
+    for (const [kind, q] of [['C', shpMid(I)], ['Sc', shpScaleAt(I)]]) { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= r2 * 1.6) H.push([d / 1.6, { n, k: -1, kind }]); } });
+  ISLANDS.forEach((I, n) => I.p.forEach((p, k) => { const dx = p[0] - x, dy = WATER_Y + p[1] - y, d = dx * dx + dy * dy; if (d <= r2) H.push([d, { n, k }]); }));
+  H.sort((a, b) => a[0] - b[0] || !!a[1].kind - !!b[1].kind || b[1].n - a[1].n);
+  const E = [];
+  if (!H.length) ISLANDS.forEach((I, n) => { const q = shpNearEdge(x, y, r * 1.6, n); if (q) E.push(q); });
+  E.sort((a, b) => a.d - b.d || b.n - a.n);
+  const ed = E[0] || null;
+  return { x, y, r, h: H.length ? H[0][1] : null, line: ed ? ed.n : null, edge: ed, hs: H.map(a => a[1]), es: E };
 }
-function islRemovePt(n, k) {
+function islRemovePt(n, k, batch) {
   const I = ISLANDS[n]; if (!I) return; const note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
   if (shpLay(I) && k === 0) { note('That point joins the layer to its shape - delete the layer instead.'); return; }
   let c = [0, 0];
@@ -49658,7 +49706,8 @@ function islRemovePt(n, k) {
     if (I.also) { const was = I.also.length; I.also = I.also.filter(J => J.j !== k); c[1] += was - I.also.length; }  // (its own point joined: undone)
     I.p.splice(k, 1); joinsShift(I, k, -1);
   }
-  islChanged(); if (c[0] || c[1]) note(joinsNote(c));
+  ISL_ED.more = [];                                              // (the points after it are numbered again)
+  if (!batch) islChanged(); if (c[0] || c[1]) note(joinsNote(c));   // (batch: DELETE's picked points - built once after them all, islRemovePts)
 }
 // the piece of shape n's loop nearest (x, y)
 const islPieceAt = (I, x, y) => { const n = ISLANDS.indexOf(I), q = n >= 0 ? shpNearEdge(x, y == null ? islTopAt(I, 0, x) : y, 1e9, n) : null; return q ? q.k : 0; };
@@ -49672,11 +49721,19 @@ window.addEventListener('pointerdown', e => {
   // point pressed exactly still wins
   if (!q.h && typeof vehWorld === 'function') { const [X, Y] = vehWorld(e); if (strPick(X, Y, 0) || vehPick(X, Y, 0)) { ISL_ED.lastDown = null; return; } }
   e.stopImmediatePropagation(); e.preventDefault(); edClaim('line');
+  const grp = typeof grpOpen === 'function' && grpOpen();
+  ISL_ED.cyc = null; if (!grp && !e.shiftKey && e.button !== 2) islCycleAt(e, q);   // (shapes on each other: what's picked among them kept, a click again the next - islCycleUp)
   // whole islands (user Oct 31): shift on an island adds it to the pick or takes it out; a press on a picked one - its
   // line or a handle - drags every picked island together
-  const n0 = q.h ? q.h.n : q.line, S0 = TERRAIN_ED.sel, grp = typeof grpOpen === 'function' && grpOpen();
+  const n0 = q.h ? q.h.n : q.line, S0 = TERRAIN_ED.sel;
   // (GROUPING - user Nov 2: an island is one thing there, picked whole and dragged whole with its group - 50-zzz-objects-tab.js)
   if (grp && !e.shiftKey && e.button !== 2 && !(S0 && S0.Is && S0.Is.includes(n0))) TERRAIN_ED.sel = { Is: [n0] };
+  // (user Nov 19 21:49) Shift on a point adds it to the picked points, or takes it out - and drags them all from there; whole shapes picked: shift adds shapes, as before
+  if (e.shiftKey && e.button !== 2 && !grp && q.h && !q.h.kind && !(S0 && S0.Is)) {
+    const L = islPtsPicked(), i = L.findIndex(p => p.n === q.h.n && p.k === q.h.k);
+    if (i >= 0) { L.splice(i, 1); islPtsSet(L); return; }
+    islPtsSet([{ n: q.h.n, k: q.h.k }].concat(L)); islPtsDrag(e, q); return;
+  }
   if (e.shiftKey && e.button !== 2 && !grp && !q.h && S0 && S0.I === n0 && S0.k != null) {   // (user Nov 1: shift on a picked island's line adds that piece, and those between)
     const j = q.edge.k; ISL_ED.pt = null; TERRAIN_ED.sel = { I: n0, k: Math.min(selLo(S0), j), k1: Math.max(selHi(S0), j) }; terrainSyncSkin(); return;
   }
@@ -49694,7 +49751,7 @@ window.addEventListener('pointerdown', e => {
   }
   if (!q.h) {
     const I = ISLANDS[q.line], k0 = q.edge.k;
-    ISL_ED.pt = null; TERRAIN_ED.sel = { I: q.line, k: k0, k1: k0 }; TERRAIN_ED.selDrag = true; terrainSyncSkin();
+    ISL_ED.pt = null; ISL_ED.more = []; TERRAIN_ED.sel = { I: q.line, k: k0, k1: k0 }; TERRAIN_ED.selDrag = true; terrainSyncSkin();
     const ld = ISL_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       // (a second press soon after: a point on the loop's line where it was pressed, in that piece, the piece's marks carried)
@@ -49708,7 +49765,7 @@ window.addEventListener('pointerdown', e => {
         // press picked the segment; the new point is picked alone now - as a press on any point (ISL_ED.pt)
         TERRAIN_ED.sel = null; TERRAIN_ED.selDrag = false; ISL_ED.pt = { n: q.line, k: k0 + 1 }; terrainSyncSkin();
       }
-      ISL_ED.lastDown = null;
+      ISL_ED.lastDown = null; ISL_ED.cyc = null;                 // (a double-click adds a point - it never steps to another shape)
     } else ISL_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
   }
@@ -49731,7 +49788,9 @@ window.addEventListener('pointerdown', e => {
   }
   if (q.h.kind) return;
   if (e.button === 2) { islRemovePt(q.h.n, q.h.k); return; }
-  ISL_ED.pt = { n: q.h.n, k: q.h.k }; if (typeof terrainSyncSkin === 'function') terrainSyncSkin();   // (the point pressed: its CURVE in the TERRAIN tab)
+  if (ISL_ED.more.length && islPtOn(q.h.n, q.h.k)) { islPtsDrag(e, q); return; }   // (one of the picked points: all of them with it)
+  if (dragGroup({ I: q.h.n }, q.h.k).length < 2) { TERRAIN_ED.sel = null; TERRAIN_ED.selDrag = false; }   // (a point not on the picked segments: picked alone - they're let go)
+  ISL_ED.pt = { n: q.h.n, k: q.h.k }; ISL_ED.more = []; if (typeof terrainSyncSkin === 'function') terrainSyncSkin();   // (the point pressed: its CURVE in the TERRAIN tab)
   ISL_ED.drag = q.h; ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, st: dragGroup({ I: q.h.n }, q.h.k).map(k => [k, ISLANDS[q.h.n].p[k][0], WATER_Y + ISLANDS[q.h.n].p[k][1]]) };   // (the picked pieces' handles with it - dragGroup, 50-land-unified)
   clearTimeout(ISL_ED.hold);
   if (e.pointerType === 'touch') ISL_ED.hold = setTimeout(() => { const p = ISL_ED.ptr; if (p && !p.moved && ISL_ED.drag === q.h) { ISL_ED.drag = null; ISL_ED.ptr = null; islRemovePt(q.h.n, q.h.k); } }, 650);
@@ -49750,6 +49809,7 @@ window.addEventListener('pointermove', e => {
   if (q.G) { grpDragMove(q.G, x - q.x, y - q.y, q.r); return; }
   if (q.wd != null) { const I = ISLANDS[ISL_ED.drag.n]; if (!I) return; const c = tunWidthAt(I, q.wd)[2], rs = (I.rs || TUN_RS0).slice(); rs[q.wd] = Math.round(clamp(Math.hypot(x - c[0], y - c[1]), 12, 240)); I.rs = rs; liveEdit(); return; }
   if (q.sc) { const I = ISLANDS[ISL_ED.drag.n]; if (!I) return; if (I.t) { if (!q.sc.rs) q.sc.rs = (I.rs || TUN_RS0).slice(); const [cx, cy] = q.sc.mid, f = clamp(Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(q.x - cx, q.y - cy)), 0.15, 6); I.rs = q.sc.rs.map(v => Math.round(clamp(v * f, 12, 240))); } const [cx, cy] = q.sc.mid, f = clamp(Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(q.x - cx, q.y - cy)), 0.15, 6); q.sc.p0.forEach((p, k) => { I.p[k][0] = Math.round(cx + (p[0] - cx) * f); I.p[k][1] = Math.round(clamp(cy + (WATER_Y + p[1] - cy) * f - WATER_Y, ISL_MIN_D, ISL_MAX_D)); }); liveEdit(); return; }
+  if (q.sts) { for (const [n, st] of q.sts) islDragBy(n, st, x - q.x, y - q.y); ISL_ED.jc = null; liveEdit(); return; }   // (the picked points, on any shapes)
   islDragBy(ISL_ED.drag.n, q.st, x - q.x, y - q.y);
   ISL_ED.jc = q.st && q.st.length === 1 ? joinCand(ISL_ED.drag.n, q.st[0][0], STR_SNAP * q.r) : null;   // (a layer's point near a point behind it: where it would join)
   liveEdit();                                                    // (built as it moves - 50-zzzz-live-edit.js)
@@ -49766,6 +49826,7 @@ function islDragBy(n, st, dx, dy) {
 // (user Oct 31, 09:53: "does the game understand the concept of buildings attached to those islands so we can move them
 // around as a whole?") whatever stands on an island moves with it - the group drag's rule (grpDragStart, 50-zzz-objects-tab.js)
 function islUp(e) {
+  islCycleUp(e);                                                 // (a click again where shapes lie on each other: the next one under it)
   const q = ISL_ED.ptr; if (!q || q.id !== e.pointerId) return;
   e.stopImmediatePropagation(); clearTimeout(ISL_ED.hold);
   const was = ISL_ED.drag; ISL_ED.drag = null; ISL_ED.ptr = null;
@@ -49809,7 +49870,7 @@ function islEdDraw() {
   if (!floorEdOn()) return;
   ED_M = C.getTransform();
   lakeEdDraw();                                         // (the pockets' water lines - 50-land-lake, Nov 2)
-  const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel;
+  const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel, PK = islPtsOn();
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }
   // (the ground's own shapes: their sides and crosses drawn with the ground line - groundShapesDraw, 50-land-zz-ground)   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
@@ -49844,7 +49905,7 @@ function islEdDraw() {
       C.fillStyle = col; edSeg(X - r2 * 0.5, Y + r2 * 0.5, X + r2 * 0.5, Y - r2 * 0.5, Math.max(1, t), false); }
     P.forEach((p, k2) => {
       const X = PX(p[0]), Y = PY(WATER_Y + p[1]); if (X < -hs || X > VWP + hs) return;
-      const h = ISL_ED.drag || ISL_ED.hover, hot = (h && h.n === n && h.k === k2) || (ISL_ED.pt && ISL_ED.pt.n === n && ISL_ED.pt.k === k2), sl = TERRAIN_ED.sel, onSel = sl && sl.I === n && (k2 >= selLo(sl) && k2 <= selHi(sl) + 1 || (selHi(sl) === P.length - 1 && k2 === 0));
+      const h = ISL_ED.drag || ISL_ED.hover, hot = (h && h.n === n && h.k === k2) || PK.some(q => q.n === n && q.k === k2), sl = TERRAIN_ED.sel, onSel = sl && sl.I === n && (k2 >= selLo(sl) && k2 <= selHi(sl) + 1 || (selHi(sl) === P.length - 1 && k2 === 0));
       C.fillStyle = '#04070f'; C.fillRect(X - hs - 1, Y - hs - 1, 2 * hs + 2, 2 * hs + 2);
       C.fillStyle = hot || onSel ? '#ffb347' : lay ? LAY_HANDLE : SHP_HANDLE[k]; C.fillRect(X - hs, Y - hs, 2 * hs, 2 * hs);   // (the one pressed or picked: orange, on every shape - as the ground's handles were)
       if (lay && (k2 === 0 || (I.also || []).some(J => J.j === k2))) { const a = Math.round(hs * 2.2), w = Math.max(2, t);   // (a join: a ring round it - where a vehicle picks its road)
@@ -59331,11 +59392,11 @@ function dragGroup(L, k) {
    want to select") a left-button drag on empty space draws a box: the pieces of line whose middles are in it are picked -
    on the one line (a country's, the ocean floor's or an island's) with the most of them, from its first to its last. A
    click on empty space picks nothing. (A press on a line still picks its piece; drag along the line for more) */
-const MQ = { on: false, id: null, a: null, b: null, cx: 0, cy: 0, moved: false };
+const MQ = { on: false, id: null, a: null, b: null, cx: 0, cy: 0, moved: false, shift: false };
 window.addEventListener('pointerdown', e => {
   if (!landEdOn() || onEdUI(e) || e.pointerType !== 'mouse' || e.button !== 0) return;
   const w = screenToWorld(e.clientX, e.clientY);
-  Object.assign(MQ, { on: true, id: e.pointerId, a: w, b: w, cx: e.clientX, cy: e.clientY, moved: false });
+  Object.assign(MQ, { on: true, id: e.pointerId, a: w, b: w, cx: e.clientX, cy: e.clientY, moved: false, shift: e.shiftKey });
 }, { capture: true });
 window.addEventListener('pointermove', e => {
   if (!MQ.on || e.pointerId !== MQ.id) return;
@@ -59344,8 +59405,8 @@ window.addEventListener('pointermove', e => {
 const mqEnd = e => {
   if (!MQ.on || e.pointerId !== MQ.id) return;
   MQ.on = false;
-  ISL_ED.pt = null;
-  if (MQ.moved) terrainBoxSelect(MQ.a, MQ.b); else if (!e.shiftKey) { TERRAIN_ED.sel = null; terrainSyncSkin(); }   // (shift: a click on nothing keeps what's picked - user Nov 1)
+  if (!MQ.shift) ISL_ED.pt = null;                              // (shift: the picked points kept, the box adds to them)
+  if (MQ.moved) terrainBoxSelect(MQ.a, MQ.b); else if (!e.shiftKey) { TERRAIN_ED.sel = null; ISL_ED.more = []; terrainSyncSkin(); }   // (shift: a click on nothing keeps what's picked - user Nov 1)
 };
 window.addEventListener('pointerup', mqEnd, { capture: true });
 window.addEventListener('pointercancel', e => { if (e.pointerId === MQ.id) MQ.on = false; }, { capture: true });
@@ -59353,6 +59414,8 @@ function terrainBoxSelect(a, b) {
   if (typeof grpOpen === 'function' && grpOpen()) { grpBoxPick(a, b); return; }   // (GROUPING: the box picks everything under it - 50-zzz-objects-tab.js)
   const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
   const inBox = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1, lines = [];
+  // (user Nov 19 21:49) a Shift box: every point in it added to the picked points, on any shapes (islPtsPicked, 50-land-islands)
+  if (MQ.shift) { const L = islPtsPicked(); ISLANDS.forEach((I, n) => I.p.forEach((p, k) => { if (inBox(p[0], WATER_Y + p[1]) && !L.some(q => q.n === n && q.k === k)) L.push({ n, k }); })); islPtsSet(L); return; }
   ISLANDS.forEach((I, n) => { const P = I.p, ks = [];   // (each shape's loop, every piece round it - 50-land-shapes)
     for (let k = 0; k < P.length; k++) { const q = shpEdgePt(I, k, 0.5); if (inBox(q[0], q[1])) ks.push(k); }
     lines.push([{ I: n }, ks]); });
@@ -59425,8 +59488,8 @@ function terrainShapeRows(cat) {
 // (user Nov 7: "select a control point in the terrain shape AND have a slider from sharp to curved for that tangent") CURVE: the point
 // pressed (ISL_ED.pt), else every point of the picked pieces - 0% a sharp corner, 100% fully curved (ptCurve, shpPoly)
 function curvePts() {
-  const s = TERRAIN_ED.sel, q = ISL_ED.pt;
-  if (q && ISLANDS[q.n] && ISLANDS[q.n].p[q.k]) return [ISLANDS[q.n].p[q.k]];
+  const s = TERRAIN_ED.sel, Q = islPtsOn();
+  if (Q.length) return Q.map(q => ISLANDS[q.n].p[q.k]);   // (the picked points - Shift picks more, 50-land-islands)
   const P = s && s.I != null ? selPts(s) : null; if (!P) return [];
   const out = []; for (let k = selLo(s); k <= Math.min(P.length - 1, selHi(s) + 1); k++) out.push(P[k]); if (selHi(s) === P.length - 1) out.push(P[0]);
   return out;
@@ -59439,9 +59502,9 @@ function terrainCurveRow(cat) {
   cat.appendChild(r); TERRAIN_ED.curve = { inp, out: r.querySelector('output') };
 }
 // (the FADE CONCEPT, user Nov 7) VEGETATION: how much of its vegetation each picked piece keeps, 100% all of it to 0% none
-function vegPts() {   // (the picked pieces' first points - a piece's VEGETATION is its first point's; the pressed point's piece)
-  const s = TERRAIN_ED.sel, q = ISL_ED.pt;
-  if (q && ISLANDS[q.n] && ISLANDS[q.n].p[q.k]) return [ISLANDS[q.n].p[q.k]];
+function vegPts() {   // (the picked pieces' first points - a piece's VEGETATION is its first point's; the picked points' pieces)
+  const s = TERRAIN_ED.sel, Q = islPtsOn();
+  if (Q.length) return Q.map(q => ISLANDS[q.n].p[q.k]);
   const P = s && s.I != null ? selPts(s) : null; if (!P) return [];
   const out = []; for (let k = selLo(s); k <= Math.min(P.length - 1, selHi(s)); k++) out.push(P[k]);
   return out;
@@ -59488,9 +59551,9 @@ function terrainSyncSkin() {
   if (TERRAIN_ED.cwLvl) { const R = caveRooms().filter(I => Number.isFinite(I.wl)), C3 = TERRAIN_ED.cwLvl; C3.inp.disabled = !R.length; if (R.length) { const [lo, hi] = caveSpan(R[0]); const v = Math.round((hi - R[0].wl) / Math.max(1, hi - lo) * 100); C3.inp.value = v; C3.out.textContent = v + '%'; } else C3.out.textContent = 'NONE'; }
   if (TERRAIN_ED.veg) { const V2 = TERRAIN_ED.veg, L = vegPts(), set = new Set(L.map(p => Math.round(ptVeg(p) * 100))); V2.inp.disabled = !L.length; if (set.size === 1) V2.inp.value = [...set][0]; V2.out.textContent = !L.length ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED'; }
   if (TERRAIN_ED.curve) { const C2 = TERRAIN_ED.curve, L = curvePts(), set = new Set(L.map(p => ptCurve(p) == null ? 'AUTO' : Math.round(ptCurve(p) * 100))); C2.inp.disabled = !L.length; if (set.size === 1 && [...set][0] !== 'AUTO') C2.inp.value = [...set][0]; C2.out.textContent = !L.length ? '' : set.size === 1 ? ([...set][0] === 'AUTO' ? 'AUTO' : [...set][0] + '%') : 'MIXED'; }
-  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (n > 1 ? n + ' segments' : '1 segment') + ' picked' + (s && s.I != null && ISLANDS[s.I] ? ' on ' + SHP_NAME[shpK(ISLANDS[s.I])].toLowerCase() + ' shape ' + (s.I + 1) : '') + ' (shown in white). Segment type: ';
+  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (n > 1 ? n + ' segments' : '1 segment') + ' picked' + (s && s.I != null && ISLANDS[s.I] ? ' on ' + shpLabel(s.I) : '') + ' (shown in white). Segment type: ';
   if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' shapes' : ' shape') + ' picked. Drag to move, or press a segment type to change all of them.'; return; }
-  { const q = ISL_ED.pt; if (TERRAIN_ED.skinNote && !s && q && ISLANDS[q.n]) { TERRAIN_ED.skinNote.textContent = 'Point ' + (q.k + 1) + ' picked on ' + SHP_NAME[shpK(ISLANDS[q.n])].toLowerCase() + ' shape ' + (q.n + 1) + '. Drag it to move it.'; return; } }
+  { const L = islPtsOn(), q = L[0]; if (TERRAIN_ED.skinNote && !s && q) { TERRAIN_ED.skinNote.textContent = L.length > 1 ? L.length + ' points picked. Drag one to move them all.' : 'Point ' + (q.k + 1) + ' picked on ' + shpLabel(q.n) + '. Drag it to move it.'; return; } }
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Click a piece of a shape\'s line to pick it.' : what + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'T' ? 'BEACH' : sk === 'M' ? 'MOUNTAIN' : sk === 'I' ? 'ICE' : sk === 'W' ? 'SWAMP' : sk === 'V' ? 'VOLCANIC' : sk === 'S' ? 'DEEP SEA' : sk === 'mixed' ? 'MIXED' : 'NONE') + '.';
 }
 // COPY gives the world as text: I the shapes, ST the structures, N the creature areas, LK the lakes' levels, K the krakens, P the
@@ -59522,7 +59585,7 @@ function terrainTabInit(b) {
   setTimeout(() => {
     const cat = b.parentNode; if (!cat || TERRAIN_ED.note) return;
     const n = document.createElement('div'); n.className = 'tabnote';
-    n.textContent = 'Drag a point to move it. Double-click the line to add a point, right-click a point to remove it.';   // (one short line - user Oct 29: "We dont do giant descriptions in the editor ever")
+    n.textContent = 'Drag a point to move it, Shift-click to pick more. Double-click the line to add a point, right-click a point to remove it.';   // (one short line - user Oct 29: "We dont do giant descriptions in the editor ever")
     cat.appendChild(n); TERRAIN_ED.note = n;
   }, 0);
 }
@@ -76197,14 +76260,14 @@ const WK = {
   line: {
     tab: 'TERRAIN',
     items() {
-      const s = TERRAIN_ED.sel; if (!s) return [];
+      const s = TERRAIN_ED.sel; if (!s) return islPtsOn().map(() => ({ noun: 'POINT', del: true }));   // (points picked - Shift picks more, 50-land-islands)
       if (s.Is) return s.Is.filter(n => ISLANDS[n]).map(() => ({ noun: 'SHAPE', del: true }));
       if (!selPts(s)) return [];
       return Array.from({ length: selHi(s) - selLo(s) + 1 }, () => ({ noun: 'SEGMENT', del: true }));
     },
-    clear() { if (TERRAIN_ED.sel) { TERRAIN_ED.sel = null; terrainSyncSkin(); } },
+    clear() { if (TERRAIN_ED.sel || ISL_ED.pt) { TERRAIN_ED.sel = null; ISL_ED.pt = null; ISL_ED.more = []; terrainSyncSkin(); } },
     del() {
-      const s = TERRAIN_ED.sel; if (!s) return;
+      const s = TERRAIN_ED.sel; if (!s) { const L = islPtsOn(); if (L.length) islRemovePts(L); return; }   // (the picked points, as a right-click takes one out)
       const P = selPts(s), n0 = P ? P.length : 0;
       if (s.Is || (s.I != null && P && selLo(s) === 0 && selHi(s) >= P.length - 2)) { islDelete(); return; }   // (whole islands; an island's every piece: the island)
       terrainDelSeg();                                    // (it says why when it can't: a line's ends, too few handles left)
