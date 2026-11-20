@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1151;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 01:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1152;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 01:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73362,7 +73362,7 @@ function storyPlace(cur) {
 // what one for sale costs: its own price; one placed in the editor with no owner, its type's (the GAME EDITOR's VEHICLES - PRICE)
 const storyVehPrice = v => { const r = placedRec(v); return r && Number.isFinite(r.price) ? r.price : v.price || (v.placed != null ? storyTypePrice(v.sv) : 0); };   // (a placed one's own PRICE - its DEAL section, 50-zzzz-veh-deal.js)
 const storyVehName = v => String((STR_VEHS[v.sv] || { lab: 'VEHICLE' }).lab).toUpperCase();
-const storyStrName = o => String((STR_KINDS[o.k] || { lab: 'HOME' }).lab || 'HOME').toUpperCase();
+const storyStrName = o => o.name ? String(o.name).toUpperCase() : String((STR_KINDS[o.k] || { lab: 'HOME' }).lab || 'HOME').toUpperCase();
 // the arrows: what you control (cur) and what you can swap to, each with where its arrow points (wx, wy: the top middle of its
 // own box - strBox, vehBox: one rule for every kind) and where the camera looks when it's picked (mx, my: its box's middle)
 function storyTargets() {
@@ -74443,7 +74443,8 @@ const SE = { pane: null, ui: {}, sel: [], drag: null };
 const STR_SNAP = 2.5;                                         // (a dragged structure drops onto its ground this many press-radii from it: ~35 screen pixels with a mouse)
 const strTabOpen = () => NSKY.editor.TUNE.world();   // (on WORLD EDITOR, user Nov 1 - every editor of the world's things at once)
 const strById = id => STRS.find(o => o.id === id);
-const strName = o => { const p = pfGet(o.pf), lab = p ? p.name : STR_KINDS[o.k].lab, L = STRS.filter(q => p ? q.pf === o.pf : q.k === o.k); return lab + (L.length > 1 ? ' ' + (L.indexOf(o) + 1) : ''); };   // (its prefab's name)
+// (user Nov 20 00:26: "I should be able to rename any structure I placed in the world") its own NAME (o.name), else its prefab's (numbered)
+const strName = o => { if (o.name) return o.name; const p = pfGet(o.pf), lab = p ? p.name : STR_KINDS[o.k].lab, L = STRS.filter(q => p ? q.pf === o.pf : q.k === o.k); return lab + (L.length > 1 ? ' ' + (L.indexOf(o) + 1) : ''); };   // (its prefab's name)
 function strChanged() { strSave(); strSync(); if (LAND && land.cell && typeof landTowersBuild === 'function') landTowersBuild(); }   // (a GUN TOWER spawned, moved or deleted: the towers again)
 // SPAWN: a copy of the prefab picked (or a kind's own prefab), in the middle of the view - its own properties at their starts
 function strSpawn(id) {
@@ -74632,6 +74633,20 @@ function strFill() {
     const lp = el('label', '', 'PREFAB'); lp.title = 'Which prefab this is (edit in PREFABS)'; r.append(lp, q); c.appendChild(r); }
   const sw = (lab, key, f, tip, on = () => o[key]) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(on() ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); if (f) f(); }); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, t); c.appendChild(r); };
   // what it does - its prefab's, read only here (user Nov 19 19:39: the World Plan's properties; edit them in PREFABS - strDoesLine, 50-zz-cargo.js)
+  // (user Nov 20 00:26) this copy's own NAME - shown wherever it's named (the editor's lists, the story's words, its arrow); empty: its prefab's
+  { const r = el('div', 'row'), l = el('label', '', 'NAME'), i = el('input'); i.type = 'text'; i.value = o.name || ''; i.placeholder = strName(Object.assign({}, o, { name: '' })); i.style.cssText = U.selCss; l.title = i.title = 'Its own name (empty: its prefab\'s)';
+    i.onchange = () => { const v = i.value.trim().toUpperCase(); if (v) o.name = v; else delete o.name; i.value = o.name || ''; strSave(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.append(l, i); c.appendChild(r); }
+  // (user Nov 20 00:26: "select a building and select who lives there ... Same with work") the characters whose HOME / WORK this is - the same
+  // fields as STORY > CHARACTERS, from the building's side (the Story world)
+  if (STORY_WORLD) for (const [key, lab, tip, show] of [['home', 'LIVES HERE', 'Characters whose home this is', strRes(o) || strIsLh(o) || charsAll().some(q => q.home === o.id)], ['work', 'WORKS HERE', 'Characters who work here', true]]) {
+    if (!show) continue;
+    const r = el('div', 'row'), l = el('label', '', lab); l.title = tip; r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; r.appendChild(l);
+    for (const q of charsAll().filter(q => q[key] === o.id)) { const t = el('span', '', q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = key === 'home' ? 'Doesn\'t live here' : 'Doesn\'t work here'; x.onclick = () => { delete q[key]; ownersSave(); strSync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.append(t, x); }
+    const can = charsAll().filter(q => q[key] !== o.id && !(key === 'work' && q === PLAYER_C));
+    if (can.length) { const s = el('select'); s.style.cssText = U.selCss; s.title = key === 'home' ? 'Someone who lives here (moves them from where they lived)' : 'Someone who works here'; for (const [v, t] of [['', key === 'home' ? '+ LIVES HERE' : '+ WORKS HERE'], ...can.map(q => [q.id, q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
+      s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q[key] = o.id; ownersSave(); } strSync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); }
+    c.appendChild(r);
+  }
   { const r = el('div', 'row'), l = el('label', '', 'DOES'), t = el('output', '', strDoesLine(o)); l.title = t.title = 'What its prefab does (edit in PREFABS: STORES VEHICLES, STORES GOODS, SELLS GOODS, IS RESIDENCE)'; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c.appendChild(r); }
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of STR_OWNERS) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = strOwnerVal(o); q.onchange = () => { const v = q.value; if (v === 'player') o.own = 'player'; else if (+v < 0) delete o.own; else o.own = +v; strSave(); }; const l = el('label', '', 'OWNER'); l.title = 'Owner (armies start only at their own hangars)'; r.append(l, q); c.appendChild(r); }
   if (isGunS(o)) { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of GUN_TYPES) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = o.wt || 'cannon'; q.onchange = () => { o.wt = q.value; strChanged(); }; const l = el('label', '', 'WEAPON'); l.title = 'Which gun it carries'; r.append(l, q); c.appendChild(r); }   // (a GUN's weapon - 50-zz-structh.js)
@@ -79381,7 +79396,7 @@ const slNewId = () => { let n = SLINES.length + 1, id; do { id = 'L' + n++; } wh
 
 // ---- what the game is: the place's name, what you carry, the objective's destination
 const slStr = id => strsUsed().find(o => o.id === id) || null;
-const slPlaceName = o => { const p = typeof pfGet === 'function' ? pfGet(o.pf) : null; return String(p ? p.name : (STR_KINDS[o.k] || { lab: 'HOME' }).lab).toUpperCase(); };   // (its prefab's name - PHARMACY - else its kind's)
+const slPlaceName = o => { if (o.name) return String(o.name).toUpperCase(); const p = typeof pfGet === 'function' ? pfGet(o.pf) : null; return String(p ? p.name : (STR_KINDS[o.k] || { lab: 'HOME' }).lab).toUpperCase(); };   // (its prefab's name - PHARMACY - else its kind's)
 const slVehName = sv => String((STR_VEHS[sv] || { lab: 'VEHICLE' }).lab).toUpperCase();
 const slWho = id => { const r = STR_OWNERS.find(q => q[0] === id); return r && id !== -1 ? String(r[1]).toUpperCase() : ''; };
 // a destination: 's:<structure id>' or 'k:<vehicle kind>' (the nearest of yours of that kind)
