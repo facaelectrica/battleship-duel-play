@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1214;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 15:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1215;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 15:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -68560,7 +68560,7 @@ fn texel(I: u32, B: bool, t: vec2i) -> vec4f {
      NOBODY, PLAYER, these - and TEAM 1, TEAM 2 outside the Story world (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
    - The CARGO list itself: 50-zz-cargo.js (CARGO). The tabs: STORY > CHARACTERS, CARGO, STORY SETTINGS (50-zzz-story-tab.js).
    ================================================================ */
-const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, fishM: 10, farM: 400, keepD: 10, urgD: 3, pri: ['danger', 'call', 'family', 'work'] };   // (keepD / urgD / pri: STORY > PRIORITIES - KEEP FOR, URGENT AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
+const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, fishM: 10, farM: 400, warnD: 5, pri: ['danger', 'call', 'work'] };   // (warnD / pri: STORY > PRIORITIES - WARN AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
 //   // (fishM: FISH A MINUTE - a character's boat fishing out of view, 50-zzzzz-story-folk.js)
 let STORY_CFG = JSON.parse(JSON.stringify(STORY_CFG_DEF));
 function storyClockBuild() {
@@ -68571,6 +68571,7 @@ worldLoad(() => {
   let o = null; try { o = JSON.parse(localStorage.getItem('bd_story_cfg') || 'null'); } catch (e) { }
   STORY_CFG = Object.assign(JSON.parse(JSON.stringify(STORY_CFG_DEF)), o && typeof o === 'object' ? o : {});
   STORY_CFG.inv = Object.assign({}, STORY_CFG_DEF.inv, (o && o.inv) || {});
+  delete STORY_CFG.keepD; delete STORY_CFG.urgD;   // (KEEP FOR and URGENT AT gone - user Nov 20 14:04: one WARN AT)
   storyClockBuild();
 });
 function storyCfgSave() { try { localStorage.setItem('bd_story_cfg', JSON.stringify(STORY_CFG)); } catch (e) { } storyClockBuild(); }
@@ -76560,8 +76561,7 @@ function styFill(el) {
       up.onclick = () => mv(-1); dn.onclick = () => mv(1);
       r.append(n, up, dn); c.appendChild(r);
     });
-    slider(c, 'KEEP FOR', 'keepD', 1, 30, 1, 'DAYS', 'A family member\'s home is kept stocked for this many days');
-    slider(c, 'URGENT AT', 'urgD', 0, 10, 0.5, 'DAYS', 'Fewer days than this left: everything else is dropped');
+    slider(c, 'WARN AT', 'warnD', 0, 30, 0.5, 'DAYS', 'Days left at which a need is said, and family acts');
     const r = el('div', 'row'), go = el('button', '', 'NOW'); go.title = 'What each would do at the start of a new story, and why';
     go.onclick = () => { try { STY.pre = famPreview(); } catch (e) { STY.pre = [{ who: 'ERROR', why: String(e && e.message || e), steps: [] }]; } STY.preSig = famSig(); storyTabSync(); };
     r.append(go); c.appendChild(r);
@@ -79831,25 +79831,27 @@ function famDrop(a, b) { const A = charOf(a), B = charOf(b); for (const [X, y] o
    would go through. The pharmacy asks for money. If they don't have money, they go make money"; "they look at the vehicles that make the
    money"; "they would just make money by doing that naturally, even if they don't need it"). One order for every character (STORY_CFG.pri,
    STORY > PRIORITIES), the first that holds is what they do next:
-   - DANGER: a family member with less than URGENT AT days of what they need at home - dropping whatever they were doing;
+   - DANGER (user Nov 20 14:04: "when he has 5 days or less, he should always warn you"; "the family in danger should work with what we've
+     created for the medicine and death"): a family member whose need ends in DEATH (ON EMPTY) has WARN AT days or fewer left of what they carry -
+     they say so, it's your objective, and a character of their family drops whatever they were doing;
    - EMERGENCIES: something happened that their work answers - today an impounded vehicle, for one with TOW in their ROUTINE (the police
      answer a theft from their station - folkAlarm, 50-zzzzz-story-folk.js);
-   - FAMILY: a family member with less than KEEP FOR days of it - when they're home between jobs, from the hour they leave;
    - WORK: once a day, in their WORK place's HOURS (not the sick - those with NEEDS) - its day (50-zzzzz-story-work.js): its ROUTINE; with none, what it's short
      of (a market out of something it sells, a maker short of an ingredient - fetched from a place that has it), else on duty; with no WORK place, earning.
    Getting what's needed is worked out from where things are, never written (famSteps): BUY it where it's sold and in stock and DELIVER it
    home; short of coins, earn first - the quickest way they have, today FISH with a fishing boat they can use (their own or their family's)
    and SELL the catch at a market. The player's objective is the first of the same steps (slWantOf). ---- */
 // [key, name, what it is (the editor's help line), its tooltip (one short line)]
-const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'A family member has less than URGENT AT days of what they need: drop everything', 'Family under URGENT AT days: drop everything'], ['call', 'EMERGENCIES', 'Something happened that their work answers: an impounded vehicle to tow back (TOW in their ROUTINE)', 'What their work answers: an impounded vehicle (TOW)'], ['family', 'FAMILY NEEDS', 'A family member has less than KEEP FOR days of what they need: get it when home', 'Family under KEEP FOR days: get it when home'], ['work', 'WORK', 'Once a day: their WORK place\'s day (its HOURS, ROUTINE), else earning', 'Once a day: their WORK place\'s day, else earn']];
+const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'Family member at or under WARN AT days before ON EMPTY: DEATH', 'Family need at or under WARN AT days'], ['call', 'EMERGENCIES', 'Work emergency: impounded vehicle to tow (TOW in ROUTINE)', 'Work emergency (TOW)'], ['work', 'WORK', 'Workplace day once a day (HOURS, ROUTINE); no workplace: earning', 'Workplace day; else earning']];
 // what NOW's answer depends on, written out: a change to any of it makes the answer old (STORY > PRIORITIES)
 const famSig = () => JSON.stringify([STORY_CFG, OWNERS, PLAYER_C, CARGO, STRS.length]);
 const priOrder = () => { const L = Array.isArray(STORY_CFG.pri) ? STORY_CFG.pri.filter(k => PRI_KINDS.some(q => q[0] === k)) : []; PRI_KINDS.forEach(([k], i) => { if (!L.includes(k)) L.splice(Math.min(i, L.length), 0, k); }); return L; };   // (a kind missing from a saved order: at its own place)
-// what member m needs and how short their home is of KEEP FOR days of it: { m, k, n (to buy), sd (days of stock), H (their home) }
+// member m in danger: their need ends in DEATH and what they carry lasts WARN AT days or fewer - { m, k, n (to buy: over WARN AT again), sd (days), H (their home) }
 function famShort(m) {
   const N = stNeeds(m), H = stHome(m); if (!N || !H || stGone(m.id)) return null;
   const u = stU('c' + m.id), have = invN(m.id, N.k) - u.f, sd = Math.max(0, have) / N.per;
-  const n = Math.ceil(STORY_CFG.keepD * N.per - have - 1e-6); return n >= 1 ? { m, k: N.k, n, sd, H } : null;
+  if ((N.out || 'death') !== 'death' || sd > STORY_CFG.warnD + 1e-9) return null;
+  return { m, k: N.k, n: Math.max(1, Math.floor(STORY_CFG.warnD * N.per - have + 1e-9) + 1), sd, H };
 }
 // the family members c cares for who are short, the shortest first
 const famShorts = c => charsAll().filter(m => m !== c && famOf(c.id, m.id)).map(famShort).filter(Boolean).sort((a, b) => a.sd - b.sd);
@@ -79895,13 +79897,11 @@ function famSteps(who, F, coins, carry, fish, x) {
 function famDecide(c, S) {
   const home = stHome(c), x = home ? home.x : 0, W0 = workOf(c), day = env.time >= placeH(W0)[0];   // (from the hour their workplace's day starts)
   for (const kind of priOrder()) {
-    if (kind === 'danger' || kind === 'family') {
-      if (kind === 'family' && !day) continue;
+    if (kind === 'danger') {
       for (const F of famShorts(c)) {
-        if (kind === 'danger' && F.sd >= STORY_CFG.urgD) continue;
         if (OWNERS.some(q => q !== c && FOLK.c[q.id] && FOLK.c[q.id].g && FOLK.c[q.id].g.for === F.m.id)) continue;   // (someone else of the family already on it)
         const J = famSteps(c.id, F, S.k || 0, 0, 0, x); if (!J) continue;
-        return { pri: kind, for: F.m.id, why: (kind === 'danger' ? 'URGENT: ' : '') + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J };
+        return { pri: kind, for: F.m.id, why: 'URGENT: ' + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J };
       }
       continue;
     }
@@ -79938,7 +79938,7 @@ function famPreview() {
     for (const v of [...storyCars, ...jetboats]) if (v.story && v.state === 'run' && folkOwner(v)) placedPutAway(v);
     const F = famShorts(PLAYER_C)[0];
     const P = F && famSteps('player', F, story.coins, slCarry(F.k), slCarry('fish'), (storyHome() || { x: 0 }).x);
-    out.push({ who: 'YOU', why: F ? String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name + ' (' + (F.sd < STORY_CFG.urgD ? 'URGENT' : 'FAMILY NEEDS') + ') - YOUR OBJECTIVE IS THE FIRST' : 'NO FAMILY NEED - NO OBJECTIVE OF ITS OWN', steps: P ? P.map(famStepTxt) : [] });
+    out.push({ who: 'YOU', why: F ? String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name + ' (' + 'FAMILY IN DANGER' + ') - YOUR OBJECTIVE IS THE FIRST' : 'NO FAMILY NEED - NO OBJECTIVE OF ITS OWN', steps: P ? P.map(famStepTxt) : [] });
     for (const c of OWNERS) {
       if (stGone(c.id)) continue;
       const S = { at: (stHome(c) || {}).id || 0, in: 0, j: -1, day: 0, k: c.coins || 0 }; FOLK.c[c.id] = S;
@@ -80285,7 +80285,7 @@ function folkStep(dt) {
       S.g = null; const G = famDecide(c, S); if (!G) { S.nx = time + 1; continue; }   // (nothing to do: a look a second)
       S.g = G; S.j = G.start || 0; if (G.work) S.day = W.day; folkLog({ t: 'leave', who: c.id, why: G.why });
     } else if (S.g && S.g.pri !== 'danger' && !(S.in && FOLK.v[S.in]) && !S.carry) {
-      const F = famShorts(c).find(q => q.sd < STORY_CFG.urgD && !OWNERS.some(o => o !== c && FOLK.c[o.id] && FOLK.c[o.id].g && FOLK.c[o.id].g.for === q.m.id));
+      const F = famShorts(c).find(q => !OWNERS.some(o => o !== c && FOLK.c[o.id] && FOLK.c[o.id].g && FOLK.c[o.id].g.for === q.m.id));
       const v = S.in ? folkSid(S.in) : null, J = F && famSteps(c.id, F, S.k || 0, v ? cargoN(v, F.k) : 0, v ? cargoN(v, 'fish') : 0, v ? v.x : (slStr(S.at) || {}).x || 0);
       if (J) { S.g = { pri: 'danger', for: F.m.id, why: 'URGENT: ' + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J }; S.j = 0; folkLog({ t: 'leave', who: c.id, why: S.g.why }); }
     }
@@ -80424,12 +80424,13 @@ const slHousehold = c => !!c && famOf('player', c.id);   // (your FAMILY - STORY
 function slWantOf(c) {
   const out = [], N = stNeeds(c), home = stHome(c);
   if (N && !stGone(c.id)) {
-    const u = stU('c' + c.id), left = invN(c.id, N.k) - u.f, F = slHousehold(c) ? famShort(c) : null;
-    // said when less than one whole is left; your family's, short of KEEP FOR days: your objective all the same - the first of the steps
-    // a character would take (famSteps, 50-zzzzz-story-family.js): deliver what you carry, buy it, short of coins earn first (fish, sell)
-    if (left < 1 - 1e-9 || F) {
+    const F = slHousehold(c) ? famShort(c) : null;
+    // (user Nov 20 14:04) said at WARN AT days or fewer (STORY > PRIORITIES); your family's is your objective then - the first of the steps
+    // a character would take (famSteps, 50-zzzzz-story-family.js): give what you carry, buy it, short of coins earn first (fish, sell)
+    const warn = stDays(c) <= STORY_CFG.warnD + 1e-9;
+    if (warn || F) {
       const d = stDays(c), n = Math.max(0, Math.ceil(d - 1e-6)), gd = String(CARGO_LAB[N.k] || N.k).toUpperCase();
-      const w = { id: 'w:need:' + c.id + ':' + N.k, who: c.id, txt: 'I NEED ' + gd + '. ' + n + (n === 1 ? ' DAY' : ' DAYS') + ' LEFT.', d, k: N.k, to: '', do: 'go', quiet: left >= 1 - 1e-9 };
+      const w = { id: 'w:need:' + c.id + ':' + N.k, who: c.id, txt: 'I NEED ' + gd + '. ' + n + (n === 1 ? ' DAY' : ' DAYS') + ' LEFT.', d, k: N.k, to: '', do: 'go', quiet: !warn };
       if (F) {
         const cur = storyCur(), hx = (home || { x: 0 }).x, x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : hx) : hx;
         const S0 = (famSteps('player', F, story.coins, slCarry(N.k), slCarry('fish'), x) || [])[0];
@@ -80693,10 +80694,11 @@ function stOffer(o) {
 }
 function stDeliver(p, id) {
   if (p !== 0 || !STORY) return; const o = strsUsed().find(q => q.id === +id); if (!o || !storyTargets().some(T => T.key === 'd:' + o.id)) return;
-  let T = null;
-  for (const [k, n, V] of stOffer(o)) { story.coins += stPays(o, k, n, 'player'); stHand(o, k, n); if (story.inv[k]) story.inv[k] = 0; for (const v of V) cargoPut(v, k, 0); slObjEv('deliver', o.id, k); T = T || slThanks(o, k); }
+  let T = null; const ks = [];
+  for (const [k, n, V] of stOffer(o)) { story.coins += stPays(o, k, n, 'player'); stHand(o, k, n); if (story.inv[k]) story.inv[k] = 0; for (const v of V) cargoPut(v, k, 0); ks.push(k); T = T || slThanks(o, k); }
   sound('clink', o.x, 1);
-  if (T && !(story.say && story.say.open)) slineSay(T, o);   // (whoever needed it: how long it lasts them now - 50-zzzzz-story-lines.js)
+  if (T && !(story.say && story.say.open)) slineSay(T, o);   // (whoever needed it: how long it lasts them now - 50-zzzzz-story-lines.js; said first, what's next after it's read)
+  for (const k of ks) slObjEv('deliver', o.id, k);
 }
 ACTS.storyDeliver = (p, id) => stDeliver(p, id);
 // the countdown at the top: the place whose character's life hangs on what it uses, the soonest first (purple, beside the day)
