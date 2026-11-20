@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1195;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1196;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79010,7 +79010,7 @@ function dealHeatRows(sv, c, el, css, row) {
    - DELETE: the type, its designs and their copies in this world (asked again first). The kind stays in STR_KINDS, gone - a copy in the
      other world still reads; gone kinds are in no list.
    ================================================================ */
-var WT0 = null;   // (the game's own work kinds' NAME and ONE PER LAND as the code has them - a var: wtApply first runs from 50-zz-struct.js, before this part)
+var WT0;   // (the game's own work kinds' NAME and ONE PER LAND as the code has them - a var with no value given here: wtApply first runs from 50-zz-struct.js, before this part, and `= null` here wiped what it had set - NEW then failed, user Nov 20 13:16)
 function wtApply() {
   if (!WT0) { WT0 = {}; for (const k in STR_KINDS) if (STR_KINDS[k].work) WT0[k] = { lab: STR_KINDS[k].lab, one: !!STR_KINDS[k].one }; }
   for (const k in WT0) { const K = STR_KINDS[k]; K.lab = WT0[k].lab; if (WT0[k].one) K.one = true; else delete K.one; delete K.gone; }
