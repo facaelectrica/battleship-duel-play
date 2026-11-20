@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1165;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 11:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1166;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 11:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36713,9 +36713,9 @@ const ED_GROUPS = [['SUN', ['DISC', 'LIGHT ON CLOUDS', 'BACKLIGHT & BURN', 'RAYS
 // PROPERTIES: the rest. A top tab not named here is a world property.
 // (user Nov 2 12:54: STRUCTURES and VEHICLE one tab, OBJECTS - "the properties just change depending on what I want to spawn OR what I
 // have selected"; GROUPING its own tab - groups of anything, not only structures: 50-zzz-objects-tab.js)
-const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'STRUCTURES', 'VEHICLES', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLE SETTINGS', 'BATTLE ZOOM LEVELS']],
+const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'STRUCTURES', 'VEHICLES', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'STRUCTURE DESIGNS', 'VEHICLE DESIGNS', 'PRIORITIES', 'LINES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLE SETTINGS', 'BATTLE ZOOM LEVELS']],
   // (user Nov 1 21:55: PREFABS - every structure and vehicle designed there, 50-zz-prefabs.js; DISPLAY - what the editor shows, not the world)
-  ['PREFABS', ['PREFABS']], ['DISPLAY', ['COLLISION', 'CHANGE HISTORY']]];   // (CHANGE HISTORY: UNDO's steps - 50-zz-undo.js, user Nov 3)
+  ['DISPLAY', ['COLLISION', 'CHANGE HISTORY']]];   // (PREFABS gone, user Nov 20 10:20: "Isnt that the same as structures?" - a design is made in the SPAWN half of STRUCTURES / VEHICLES / OBJECTS)   // (CHANGE HISTORY: UNDO's steps - 50-zz-undo.js, user Nov 3)
 // buttons the game adds to a tab (TUNE.buttons): [tab, category, [[label, description, onclick(button)]...]]
 const ED_BTNS = [];
 // tabs that build their own pane (TUNE.pane): { tab: build(pane, el) } - the OPEN WORLD's caves, with tabs of their own
@@ -72244,6 +72244,7 @@ function vehFill() {
   P.textContent = '';
   if (!VE.sel) return;
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PROPERTIES'));   // (its name: SELECTED's heading)
+  { const sv = VE.sel.v && VE.sel.v.sv; if (sv && STR_VEHS[sv]) { const r = el('div', 'row'), l = el('label', '', 'DESIGN'), b = el('button', '', 'EDIT DESIGN'); l.title = b.title = 'Its design: STORY > VEHICLE DESIGNS'; b.onclick = () => dsnOpen('v', sv); r.append(l, el('output', '', STR_VEHS[sv].lab), b); c.appendChild(r); } }
   { // OWNER (user Nov 1 21:11): every vehicle's; the armies' are their teams' (shown, not changed) - 50-zz-placed.js vehOwnerSet
     const r = el('div', 'row'), q = el('select'), v = VE.sel.v; q.style.cssText = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:180px';
     for (const [val, lab] of STR_OWNERS) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); }
@@ -73188,7 +73189,8 @@ function vehLookOf(sv) {
      STR_VEHS as its own type, 'vp<n>', so a spot's list and the game take it as any other).
    Kept in bd_prefabs - not a world key: both worlds use the same prefabs (and a SNAPSHOT carries them, WORLD_PACK.game).
    ================================================================ */
-const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js)
+const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'market', 'maxL', 'restrict', 'allow', 'n', 'pl', 'res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'startH', 'endH', 'rt'];   // (res, stores: WHAT IT DOES - 50-zz-cargo.js; sells... its MARKET; work...: its WORK - 50-zzzzz-story-work.js)
+const PF_USE = ['res', 'stores', 'sells', 'buys', 'openH', 'closeH', 'work', 'wv', 'wage', 'startH', 'endH', 'rt'];   // (what it does - not what it is: left out of a copy's prefab found from its looks, pfSig)
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
@@ -73196,7 +73198,7 @@ worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = J
 function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 const pfClone = v => Array.isArray(v) ? v.map(e => e && typeof e === 'object' ? Object.assign({}, e) : e) : v;   // (a list of records - its PLANTS: each its own)
-const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && q !== 'res' && q !== 'stores').map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
+const pfSig = o => JSON.stringify(pfFields(o.k).filter(q => q !== 'pl' && !PF_USE.includes(q)).map(q => o[q] === undefined ? null : o[q]));   // (its plants aren't what it is: a copy's prefab from before them found as it was)
 // the kinds' own prefabs and the old switches' variants: what SPAWN made of each before
 function pfBases() {
   const L = [];
@@ -73204,6 +73206,7 @@ function pfBases() {
     const K = STR_KINDS[k], p = { id: 'k:' + k, name: K.lab, k, base: true };
     if (k === 'dock') p.spr = 'dock-wood'; else if (K.takes) p.n = 1;
     if (K.market) p.market = true;
+    if (K.work) p.work = true;                                 // (a workplace: its WORK - 50-zzzzz-story-work.js)
     if (K.buys) p.buys = K.buys.slice();                       // (what its market buys - a FISHERY's fish: marketBuys, 50-zz-cargo.js)
     if (K.res) p.res = true;
     if (K.rep) p.rep = true;                                   // (a kind that mends: REPAIR on - MECHANIC & TOW)
@@ -73223,7 +73226,7 @@ function pfAllS() {
   for (const b of pfBases()) if (!PF_S.some(p => p.id === b.id)) PF_S.push(b);
   // (user Nov 3 10:00: MARKET - "the current market object should have it on by default") a prefab that never said: its kind's; the
   // old ACCEPTS FISH gone (a catch is sold at a MARKET now - 50-zz-cargo.js)
-  for (const p of PF_S) { if (p.market === undefined && STR_KINDS[p.k].market) p.market = true; if (p.res === undefined && STR_KINDS[p.k].res) p.res = true; delete p.fish; }
+  for (const p of PF_S) { if (p.work === undefined && STR_KINDS[p.k].work) p.work = true; if (p.market === undefined && STR_KINDS[p.k].market) p.market = true; if (p.res === undefined && STR_KINDS[p.k].res) p.res = true; delete p.fish; }
   return PF_S;
 }
 const pfGet = id => id ? pfAllS().find(p => p.id === id) || null : null;
@@ -73262,6 +73265,8 @@ function pfEdited(p, held) {
 // a NEW structure prefab: a copy of the one picked, its own id and name
 function pfNewS(from) { const p = Object.assign({}, from, { id: 'p' + (++PREFABS.next), name: pfFreeName(from.name), base: false }); for (const q of PF_KEYS) if (Array.isArray(p[q])) p[q] = pfClone(p[q]); pfAllS().push(p); pfSave(); return p; }
 const pfCopies = p => STRS.filter(o => o.pf === p.id).length;
+// what it's for: 'res' a RESIDENCE, 'work' a WORKPLACE, '' neither (its own say, else its kind's)
+const pfUse = p => { const K = STR_KINDS[p.k] || {}; return (p.work ?? !!K.work) ? 'work' : (p.res ?? !!K.res) ? 'res' : ''; };
 // ---- vehicle prefabs: the vehicle types, and NEW ones made from one (in STR_VEHS as their own types)
 function pfVehRegister() {
   for (const sv in PREFABS.vn) if (STR_VEHS[sv] && PREFABS.vn[sv]) { if (!STR_VEHS[sv].lab0) STR_VEHS[sv].lab0 = STR_VEHS[sv].lab; STR_VEHS[sv].lab = PREFABS.vn[sv]; }
@@ -73280,63 +73285,35 @@ function pfRenameV(sv, name) {
   else { if (!D.lab0) D.lab0 = D.lab; D.lab = name; if (name === D.lab0) delete PREFABS.vn[sv]; else PREFABS.vn[sv] = name; }
   pfSave();
 }
-// ---- the PREFABS tab: pick one (STRUCTURES or VEHICLES), NEW makes a copy of it, NAME, and what it is
-const PFE = { pick: null, ui: null };
-NSKY.editor.TUNE.pane('PREFABS', (pane, el) => {
-  const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:220px';
-  const top = el('div', 'cvbar'), sp = el('select'), nm = el('input'), bNew = el('button', '', 'NEW'), info = el('span', '');
-  sp.style.cssText = css; nm.style.cssText = css + ';width:170px'; nm.type = 'text'; info.style.cssText = 'color:#8fa0bf;font-size:11px';
-  bNew.title = 'New prefab, copied from this one';
-  top.append(sp, bNew, el('span', '', 'NAME'), nm, info);
-  const box = el('div', 'cats');
-  pane.append(top, box);
-  PFE.ui = { sp, nm, box, el, css, info };
-  sp.onchange = () => { PFE.pick = sp.value; pfSync(); };
-  bNew.onclick = () => {
-    const id = PFE.pick || '';
-    if (id.startsWith('s:')) { const p = pfGet(id.slice(2)); if (p) PFE.pick = 's:' + pfNewS(p).id; }
-    else if (id.startsWith('v:')) { const v = pfNewV(id.slice(2)); if (v) PFE.pick = 'v:' + v; }
-    pfSync();
-  };
-  nm.onchange = () => {
-    const id = PFE.pick || '', n = nm.value.trim().toUpperCase(); if (!n) { pfSync(); return; }
-    if (id.startsWith('s:')) { const p = pfGet(id.slice(2)); if (p) { p.name = n; p.base = false; pfSave(); strSync(); } }
-    else if (id.startsWith('v:')) { pfRenameV(id.slice(2), n); strSync(); }
-    pfSync();
-  };
-  new MutationObserver(() => { if (!pane.hidden) pfSync(); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
-  pfSync();
-});
-function pfSync() {
-  const U = PFE.ui; if (!U) return;
-  pfAttachAll();
-  const { sp, nm, box, el, css, info } = U;
-  sp.textContent = '';
-  const grp = (lab, L) => { const g = document.createElement('optgroup'); g.label = lab; for (const [v, t] of L) { const o = document.createElement('option'); o.value = v; o.textContent = t; g.appendChild(o); } sp.appendChild(g); };
-  grp('STRUCTURES', pfSorted().map(p => ['s:' + p.id, p.name]));
-  grp('VEHICLES', Object.keys(STR_VEHS).map(sv => ['v:' + sv, STR_VEHS[sv].lab]));
-  if (!PFE.pick || ![...sp.options].some(o => o.value === PFE.pick)) PFE.pick = sp.options[0] ? sp.options[0].value : null;
-  sp.value = PFE.pick || '';
-  box.textContent = '';
-  const id = PFE.pick || '';
-  if (id.startsWith('s:')) { const p = pfGet(id.slice(2)); nm.value = p ? p.name : ''; info.textContent = p ? pfCopies(p) + ' IN THIS WORLD' : ''; if (p) pfStructBox(p, box, el, css); }
-  else if (id.startsWith('v:')) { const sv = id.slice(2); nm.value = STR_VEHS[sv] ? STR_VEHS[sv].lab : ''; info.textContent = ''; pfVehBox(sv, box, el, css); }
-}
+// (user Nov 20 10:20-10:25: no PREFABS tab - the designs are lists in the STORY editor: STORY > STRUCTURE DESIGNS / VEHICLE DESIGNS, 50-zzzz-designs-tab.js;
+// the WORLD EDITOR only places them) pfSync: the shown list drawn again, and the WORLD EDITOR's design picks
+function pfSync() { pfAttachAll(); if (typeof dsnSync === 'function') for (const w of ['s', 'v']) { const U = DSN.ui[w]; if (U && U.list.parentNode && !U.list.parentNode.hidden) dsnSync(w); } if (typeof objFill === 'function' && OBJ.ui) objFill(); }
 // (LOOK - the prefab's picture: pfLook / vehLook, 50-zz-prefab-look.js)
 // a structure prefab: its picture and what it is (the copies' own properties are in WORLD EDITOR > OBJECTS)
 function pfStructBox(p, box, el, css) {
   const T = NSKY.editor.TUNE, K = STR_KINDS[p.k], ed = () => pfEdited(p);
   pfLook(p, box, el);
-  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PREFAB SETTINGS'));
+  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'DESIGN'));
   const row = (lab, ...xs) => { const r = el('div', 'row'); r.append(el('label', '', lab), ...xs); return r; };
   const sel = (L, v, f) => { const q = el('select'); q.style.cssText = css; for (const [val, lab] of L) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = v; q.onchange = () => f(q.value); return q; };
   const sw = (box2, lab, key, tip) => { const t = T.toggle(p[key] ? 1 : 0); t.addEventListener('input', () => { if (+t.value) p[key] = true; else delete p[key]; ed(); }); const r = row(lab, t); if (tip) r.title = tip; box2.appendChild(r); };
   const sl = (box2, lab, key, lo, hi, unit, v0, tip) => { const i = el('input'), v = p[key] ?? v0, out = el('output', '', v + unit); i.type = 'range'; i.min = lo; i.max = hi; i.step = 1; i.value = v; i.oninput = () => { out.textContent = i.value + unit; p[key] = +i.value; pfEdited(p, true); }; i.onchange = () => { p[key] = +i.value; ed(); }; const rr = row(lab, i, out); if (tip) rr.title = tip; box2.appendChild(rr); };
-  c.appendChild(row('KIND', el('output', '', K.lab)));
+  // (user Nov 20 10:07) USE: RESIDENCE (RESIDENTS live in its copies), WORKPLACE (WORKERS work there - its TYPE OF WORK and its WORK), or NEITHER
+  { const s = sel([['res', 'RESIDENCE'], ['work', 'WORKPLACE'], ['', 'NEITHER']], pfUse(p), v => { p.res = v === 'res'; p.work = v === 'work'; if (v === 'work' && !STR_KINDS[p.k].work) { p.k = 'bldg2'; delete p.art; delete p.pl; } if (v === 'res' && !(STR_KINDS[p.k].res || STR_KINDS[p.k].home)) { p.k = 'home'; delete p.art; delete p.pl; } ed(); pfSync(); });
+    const r = row('USE', s); r.title = 'A residence (people live in it) or a workplace (people work in it)'; c.appendChild(r); }
+  if (pfUse(p) === 'work') { const r = row('TYPE OF WORK', sel(Object.keys(STR_KINDS).filter(k => STR_KINDS[k].work).map(k => [k, STR_KINDS[k].lab]), p.k, v => { p.k = v; delete p.art; delete p.pl; if (STR_KINDS[v].pl) p.pl = pfClone(STR_KINDS[v].pl); if (STR_KINDS[v].market) p.market = true; ed(); pfSync(); })); r.title = 'What is done here: one of each a land for the services'; c.appendChild(r); }
+  else c.appendChild(row('KIND', el('output', '', K.lab)));
   // its picture: any of the structures' pictures, where the kind is drawn from one (not the harbour's parts, the big hangar, a dock's tiles)
+  // (user Nov 20 10:07: "if I set it as a certain type of workplace, we pick from the sprites that apply to it") a RESIDENCE: the homes' pictures (a
+  // picture of another home kind makes it that kind); a WORKPLACE: its TYPE OF WORK's; anything else: any of the structures' pictures
+  const use = pfUse(p);
   if (K.art && p.k !== 'dock' && p.k !== 'hangarSea' && !(p.k === 'hangarAir' && p.big)) {
-    const arts = [...new Set(Object.values(STR_KINDS).flatMap(q => [q.art, ...(q.arts || [])]).filter(a => a && a !== 'dock-wood'))];
-    c.appendChild(row('PICTURE', sel(arts.map(a => [a, a.toUpperCase()]), p.art || K.art, v => { if (v === K.art) delete p.art; else p.art = v; ed(); })));
+    const kindArts = k => [STR_KINDS[k].art, ...(STR_KINDS[k].arts || [])].filter(Boolean).map(a => [k, a]);
+    const L = use === 'res' ? Object.keys(STR_KINDS).filter(k => STR_KINDS[k].res || STR_KINDS[k].home).flatMap(kindArts) : use === 'work' ? kindArts(p.k)
+      : [...new Map(Object.keys(STR_KINDS).flatMap(kindArts).filter(([, a]) => a !== 'dock-wood').map(([, a]) => [a, [p.k, a]])).values()];
+    const cur = p.art || K.art, opts = L.map(([k, a]) => [k + '|' + a, a.toUpperCase().replace(/-/g, ' ')]);
+    if (!opts.some(q => q[0] === p.k + '|' + cur)) opts.unshift([p.k + '|' + cur, cur.toUpperCase().replace(/-/g, ' ')]);
+    c.appendChild(row('PICTURE', sel(opts, p.k + '|' + cur, v => { const [k, a] = v.split('|'); if (k !== p.k) { p.k = k; delete p.pl; if (STR_KINDS[k].pl) p.pl = pfClone(STR_KINDS[k].pl); } if (a === STR_KINDS[p.k].art) delete p.art; else p.art = a; ed(); pfSync(); })));
   }
   if (p.k === 'dock') c.appendChild(row('SPRITE', sel(DOCK_SPRITES.map(n => [n, n.toUpperCase()]), p.spr || DOCK_SPRITES[0], v => { p.spr = v; ed(); })));
   if (p.k === 'hangarAir' || p.k === 'hangarSea') c.appendChild(row('SIZE', sel([['', 'SMALL'], ['1', 'LARGE']], p.big ? '1' : '', v => { if (v) p.big = true; else delete p.big; ed(); })));
@@ -73350,9 +73327,23 @@ function pfStructBox(p, box, el, css) {
   const takes = (p.takes || K.takes || []);
   { const t = T.toggle(takes.length ? 1 : 0); t.addEventListener('input', () => { if (+t.value) { p.takes = (K.takes && K.takes.length ? K.takes : ['car']).slice(); if (!Number.isInteger(p.n) && p.k !== 'dock') p.n = 1; } else p.takes = []; ed(); pfSync(); });
     const r = row('STORES VEHICLES', t); r.title = 'Vehicles are put away here (which ones: VALID VEHICLES, how many: SPOTS)'; d.appendChild(r); }
-  for (const [lab, key, def, tip] of [['STORES GOODS', 'stores', !K.noGoods && !K.prop, 'It keeps a stock of goods: its CARGO, what it MAKES, what is delivered here'], ['SELLS GOODS', 'market', !!K.market, 'A market: trades cargo through its sheet (SELLS, OPENS / CLOSES on a copy)'], ['IS RESIDENCE', 'res', !!K.res, 'A home: the player can enter one of his, sleep there; its chimney smokes']]) {
-    const t = T.toggle((p[key] ?? def) ? 1 : 0); t.addEventListener('input', () => { p[key] = !!+t.value; ed(); }); const r = row(lab, t); r.title = tip; d.appendChild(r); }
+  for (const [lab, key, def, tip] of [['STORES GOODS', 'stores', !K.noGoods && !K.prop, 'It keeps a stock of goods: its CARGO, what it MAKES, what is delivered here'], ['SELLS GOODS', 'market', !!K.market, 'A market: trades cargo through its sheet (SELLS, OPENS / CLOSES on a copy)'], ['__RES__', 'res', !!K.res, 'A home: the player can enter one of his, sleep there; its chimney smokes']]) {
+    if (lab === '__RES__') continue;   // (IS RESIDENCE: its USE now)
+    const t = T.toggle((p[key] ?? def) ? 1 : 0); t.addEventListener('input', () => { p[key] = !!+t.value; ed(); if (key === 'market') pfSync(); }); const r = row(lab, t); r.title = tip; d.appendChild(r); }
   box.appendChild(d);
+  // its MARKET (SELLS GOODS): the hours it trades, what it SELLS and what it BUYS - every copy's (was each copy's own, user Nov 20 09:49)
+  if (p.market ?? K.market) {
+    const m = el('div', 'cat'); m.appendChild(el('h4', '', 'MARKET'));
+    for (const [lab, key, tip] of [['OPENS', 'openH', 'Hour it opens'], ['CLOSES', 'closeH', 'Hour it closes (same as OPENS: always open)']]) {
+      const i = el('input'), out = el('output', '', hourName(p[key] ?? 0)); i.type = 'range'; i.min = 0; i.max = 23.5; i.step = 0.5; i.value = p[key] ?? 0;
+      i.oninput = () => { out.textContent = hourName(+i.value); p[key] = +i.value; if (!p.openH && !p.closeH) { delete p.openH; delete p.closeH; } pfEdited(p, true); }; i.onchange = () => pfEdited(p);
+      const r = row(lab, i, out); r.title = tip; m.appendChild(r); }
+    const goods = (lab, key, all, tip) => { m.appendChild(el('h4', '', lab)); const cur = () => Array.isArray(p[key]) ? p[key] : all ? CARGO_KINDS.map(q => q[0]) : [];
+      for (const [k, kl] of CARGO_KINDS) { const t = T.toggle(cur().includes(k) ? 1 : 0); t.addEventListener('input', () => { const S = new Set(cur()); if (+t.value) S.add(k); else S.delete(k); p[key] = [...S]; ed(); }); const r = row(kl, t); r.title = tip + kl.toLowerCase(); m.appendChild(r); } };
+    goods('SELLS', 'sells', false, 'Bought here: '); goods('BUYS', 'buys', true, 'Sold here for coins: ');
+    box.appendChild(m);
+  }
+  if (pfUse(p) === 'work' && typeof workPrefabBox === 'function') box.appendChild(workPrefabBox(p, el, css, () => { ed(); pfSync(); }));   // (its WORK - 50-zzzzz-story-work.js)
   if (!takes.length) return;
   const v = el('div', 'cat'); v.appendChild(el('h4', '', 'VALID VEHICLES'));
   for (const [f, lab] of STR_FAMS) {
@@ -73381,7 +73372,7 @@ function pfStructBox(p, box, el, css) {
 function pfVehBox(sv, box, el, css) {
   const D = STR_VEHS[sv]; if (!D) return;
   vehLook(sv, box, el);
-  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PREFAB SETTINGS'));
+  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'DESIGN'));
   const row = (lab, ...xs) => { const r = el('div', 'row'); r.append(el('label', '', lab), ...xs); c.appendChild(r); return r; };
   row('MODEL', el('output', '', D.pf && STR_VEHS[D.base] ? (STR_VEHS[D.base].lab0 || STR_VEHS[D.base].lab) : D.lab0 || D.lab));
   if (!D.army && typeof storyTypePrice === 'function') {
@@ -73956,15 +73947,15 @@ const STR_KINDS = {
   // (user Nov 1: "Everything must have a spawn location" - the armies' families start at the hangars: structures-everywhere-plan-nov1.md)
   hangarAir: { lab: 'AIRCRAFT HANGAR', art: 'hangar-cessna-small', enclosed: true, takes: ['plane', 'warplane', 'warheli', 'tank'] },
   hangarSea: { lab: 'MARINE HANGAR', art: 'hangar-cessna-small', enclosed: true, takes: ['boat', 'warship', 'warsub'] },   // (the Cessna hangar's picture until its own comes)
-  fire: { lab: 'FIRE STATION', art: 'fire-station', enclosed: true, takes: ['car'], only: ['fireEngine', 'ambulance'], one: true },   // (the spec: 'restrict accepted vehicle types, such as fire trucks at a Fire Station or police cars at a Police Station')
-  police: { lab: 'POLICE STATION', art: 'police-station', enclosed: true, takes: ['car'], only: ['suv', 'van', 'motorcycle'], one: true },   // (one: a service - one of its kind a land, named by it: 50-zzzzz-story-cities.js)   // (police cars: the SUV, van and motorcycle till their own art comes)
+  fire: { lab: 'FIRE STATION', work: true, art: 'fire-station', enclosed: true, takes: ['car'], only: ['fireEngine', 'ambulance'], one: true },   // (the spec: 'restrict accepted vehicle types, such as fire trucks at a Fire Station or police cars at a Police Station')
+  police: { lab: 'POLICE STATION', work: true, art: 'police-station', enclosed: true, takes: ['car'], only: ['suv', 'van', 'motorcycle'], one: true },   // (one: a service - one of its kind a land, named by it: 50-zzzzz-story-cities.js)   // (police cars: the SUV, van and motorcycle till their own art comes)
   taxi: { lab: 'TAXI SHELTER', art: 'taxi-shelter-back', front: 'taxi-shelter-front', takes: ['car'] },
   // (user Nov 19 13:30, his picture gen/tropical_src/ref-parking-nov19.png: "a new car parking" - in Story every vehicle is put away at a
   // structure, a car at a parking or a shelter) its two bollards 6.6 m apart: maxL, the longest car it takes (a taxi, an SUV, a van)
   parking: { lab: 'PARKING', art: 'parking', takes: ['car'], maxL: 6.6 },
   home: { lab: 'HOME', art: 'home-hut', res: true },          // (res: residential - someone cooks there: its chimney smokes)
-  hospital: { lab: 'HOSPITAL', art: 'hospital', one: true },
-  school: { lab: 'SCHOOL', art: 'school', one: true, pl: [PL('pf-6', -18, 0, 0.45), PL('pf-10', 18, 0, 0.45)] },
+  hospital: { lab: 'HOSPITAL', work: true, art: 'hospital', one: true },
+  school: { lab: 'SCHOOL', work: true, art: 'school', one: true, pl: [PL('pf-6', -18, 0, 0.45), PL('pf-10', 18, 0, 0.45)] },
   // (user Nov 19 19:44, ref-town-nov19.png: "a set of buildings ... It would replace the current ones" - the houses, school, market, stations and
   // the two town buildings are his new pictures under their old names; MECHANIC & TOW, the porch house and the green house are new)
   // pl: the plants its own prefab starts with (user 19:44: "Please add plants when it makes sense"; 20:35: "The house only has the bushes and flowers in
@@ -73984,16 +73975,16 @@ const STR_KINDS = {
   town7: { lab: 'BALCONY HOUSE', art: 'town-7', res: true, pl: [PL('pf-13', 22, 0, 0.45)] },
   town8: { lab: 'TEAL HOUSE', art: 'town-8', res: true, pl: [PL('pf-7', 28, 0, 0.45)] },
   // (a garage that mends cars - REPAIR on; the Story's tow trucks live here: a character's routine TOW - 50-zzzzz-story-folk.js)
-  mechanic: { lab: 'MECHANIC & TOW', art: 'mechanic', enclosed: true, takes: ['car'], only: ['taxi', 'suv', 'van'], rep: true, one: true },
-  market: { lab: 'MARKET', art: 'market', market: true, one: true },
+  mechanic: { lab: 'MECHANIC & TOW', work: true, art: 'mechanic', enclosed: true, takes: ['car'], only: ['taxi', 'suv', 'van'], rep: true, one: true },
+  market: { lab: 'MARKET', work: true, art: 'market', market: true, one: true },
   // (user Nov 20 09:38: "FISHERY ... sits on a dock. Its workers drop their catch there ... the marketplace person goes to the fishery to get their fish
   // to sell") a market that BUYS fish and sells nothing - the fishermen's workplace (50-zzzzz-story-work.js). Its picture: the hardware store's till its own comes
-  fishery: { lab: 'FISHERY', art: 'building-2', market: true, buys: ['fish'], one: true },   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
-  tower: { lab: 'CONTROL TOWER', art: 'control-tower' },
+  fishery: { lab: 'FISHERY', work: true, art: 'building-2', market: true, buys: ['fish'], one: true },   // (market: its prefab a MARKET unless turned off - 50-zz-cargo.js) church: { lab: 'CHURCH', art: 'church' },
+  tower: { lab: 'CONTROL TOWER', work: true, art: 'control-tower' },
   // (user Nov 19 13:30: "lighthouses are the only place where you can save your progress, so we will have a library of them") arts: its
   // other pictures - each its own prefab, LIGHTHOUSE 2... (pfBases), and a PICTURE any of its prefabs can take; a new lighthouse is one more
-  lighthouse: { lab: 'LIGHTHOUSE', art: 'lighthouse', arts: ['lighthouse-2'] },
-  bldg1: { lab: 'ART CAFE', art: 'building-1' }, bldg2: { lab: 'HARDWARE STORE', art: 'building-2' },
+  lighthouse: { lab: 'LIGHTHOUSE', art: 'lighthouse', arts: ['lighthouse-2'], home: true },   // (home: lived in, though no chimney - a RESIDENCE's pictures: 50-zz-prefabs.js)
+  bldg1: { lab: 'ART CAFE', work: true, art: 'building-1' }, bldg2: { lab: 'HARDWARE STORE', work: true, art: 'building-2' },
   windsock: { lab: 'WINDSOCK', noGoods: true, art: 'windsock' },
   // (user Nov 3 16:53: "a buoy should be an object I place manually ... Lets add a PROPS category that contains small objects ... Lets also
   // make 'street lamps' another object (the ones that piers place) that we can add manually") PROPS: small things placed by hand -
@@ -74838,10 +74829,12 @@ function strFill() {
   // (user Nov 1 21:57: "I never edit anything in the world apart from very specific properties") this copy's own: its prefab (what
   // it is - the PREFABS tab), where it stands and which way, its owner, its length, what starts at each spot
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PROPERTIES'));
-  { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; q.title = 'Which prefab this is (edit in PREFABS)';
+  { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; q.title = 'Which design this is (STORY > STRUCTURE DESIGNS)';
     for (const p of pfSorted().filter(p => p.k === o.k)) { const z = document.createElement('option'); z.value = p.id; z.textContent = p.name; q.appendChild(z); }
     q.value = o.pf; q.onchange = () => { const p = pfGet(q.value); if (!p) return; o.pf = p.id; pfApply(o, p); if (strTakes(o)) dockRefit(o); strSave(); if (typeof hplChanged === 'function') hplChanged(); strSync(); };   // (its plants are the new prefab's - laid again)
-    const lp = el('label', '', 'PREFAB'); lp.title = 'Which prefab this is (edit in PREFABS)'; r.append(lp, q); c.appendChild(r); }
+    const lp = el('label', '', 'DESIGN'); lp.title = 'Which design this is (STORY > STRUCTURE DESIGNS)';
+    const eb = el('button', '', 'EDIT DESIGN'); eb.title = 'Its design, beside: what it is and does, for every copy'; eb.onclick = () => objEditDesign(o);   // (user Nov 20 10:07: the design in the structure editor)
+    r.append(lp, q, eb); c.appendChild(r); }
   const sw = (lab, key, f, tip, on = () => o[key]) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(on() ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); if (f) f(); }); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, t); c.appendChild(r); };
   // what it does - its prefab's, read only here (user Nov 19 19:39: the World Plan's properties; edit them in PREFABS - strDoesLine, 50-zz-cargo.js)
   // (user Nov 20 00:26) this copy's own NAME - shown wherever it's named (the editor's lists, the story's words, its arrow); empty: its prefab's
@@ -74859,7 +74852,7 @@ function strFill() {
       s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q[key] = o.id; ownersSave(); } strSync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); }
     c.appendChild(r);
   }
-  { const r = el('div', 'row'), l = el('label', '', 'FUNCTIONS'), t = el('output', '', strDoesLine(o)); l.title = t.title = 'What its prefab is for (edit in PREFABS > FUNCTIONS)'; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c.appendChild(r); }
+  { const r = el('div', 'row'), l = el('label', '', 'FUNCTIONS'), t = el('output', '', strDoesLine(o)); l.title = t.title = 'What its design is for (STORY > STRUCTURE DESIGNS)'; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c.appendChild(r); }
   { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of STR_OWNERS) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = strOwnerVal(o); q.onchange = () => { const v = q.value; if (v === 'player') o.own = 'player'; else if (+v < 0) delete o.own; else o.own = +v; strSave(); }; const l = el('label', '', 'OWNER'); l.title = 'Owner (armies start only at their own hangars)'; r.append(l, q); c.appendChild(r); }
   if (isGunS(o)) { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [val, lab] of GUN_TYPES) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = o.wt || 'cannon'; q.onchange = () => { o.wt = q.value; strChanged(); }; const l = el('label', '', 'WEAPON'); l.title = 'Which gun it carries'; r.append(l, q); c.appendChild(r); }   // (a GUN's weapon - 50-zz-structh.js)
   if (o.k !== 'dock' || isPierS(o)) sw('FLIP', 'flip', null, 'Face the other way');
@@ -74873,25 +74866,17 @@ function strFill() {
   if (strStretchOf(o)) { const r = el('div', 'row'), l = el('label', '', 'LENGTH'), w = el('output', '', Math.round(o.len ?? (o.k === 'runway' ? 260 : o.k === 'road' ? 80 : isPierS(o) ? PIER_M : 24)) + ' M'); l.title = w.title = 'Drag the handles at its ends to stretch it'; r.append(l, w); c.appendChild(r); }
   if (o.k === 'runway') sl(c, 'HEIGHT', 'hgt', -10, 40, ' M', 0, null, 'Runway height over the ground, metres');
   U.box.appendChild(c);
-  if (STORY_WORLD && strStores(o) && typeof workBox === 'function') U.box.appendChild(workBox(o, el, U.selCss, strSync));   // (WORK: its workers' day - 50-zzzzz-story-work.js)
+  if (STORY_WORLD && typeof workBox === 'function' && (strWork(o) || charsAll().some(q => q.work === o.id))) U.box.appendChild(workBox(o, el, U.selCss, strSync));   // (a workplace's prefab only - user Nov 20 09:49: "if a lighthouse is only a residence, it cannot have workers")   // (WORK: its workers' day - 50-zzzzz-story-work.js)
   { const pc = typeof hplStrBox === 'function' && hplStrBox(o, el, U.selCss); if (pc) U.box.appendChild(pc); }   // (its prefab's PLANTS - 50-zzzz-hand-plants.js)
   if (strStores(o)) { U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js; STORES GOODS)
     U.box.appendChild(stockBox(el, U.selCss, o, strSave)); }   // (user Nov 19: what it makes and uses a day - 50-zzzzz-story-stock.js)
   // (Nov 7, user: "select any structure and choose what they sell if they have the market property") a market's SELLS: each kind of cargo on or off
-  if (strMarket(o)) { const c2 = el('div', 'cat'); c2.appendChild(el('h4', '', 'SELLS'));
-    // (Nov 7: OPENS / CLOSES - the hours it trades; the same hour both: always open; closed it's dark at night)
-    for (const [lab, key, tip] of [['OPENS', 'openH', 'Hour the market opens'], ['CLOSES', 'closeH', 'Hour the market closes (same as OPENS: always open)']]) {
-      const r = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', hourName(o[key] ?? 0)); l.title = tip; i.type = 'range'; i.min = 0; i.max = 23.5; i.step = 0.5; i.value = o[key] ?? 0;
-      i.oninput = () => { out.textContent = hourName(+i.value); o[key] = +i.value; if (!o.openH && !o.closeH) { delete o.openH; delete o.closeH; } strSave(); };   // (as it moves - user Nov 11 23:41)
-      r.append(l, i, out); c2.appendChild(r); }
-    for (const [k, lab] of CARGO_KINDS) { const r = el('div', 'row'), on = marketSells(o).includes(k), t = NSKY.editor.TUNE.toggle(on ? 1 : 0), l = el('label', '', lab); l.title = 'The player can buy ' + lab.toLowerCase() + ' here';
-      t.addEventListener('input', () => { const S = new Set(marketSells(o)); if (+t.value) S.add(k); else S.delete(k); if (S.size) o.sells = [...S]; else delete o.sells; strSave(); });
-      r.append(l, t); c2.appendChild(r); }
-    // (user Nov 20 09:38) BUYS: what you can sell here - each kind on or off (a FISHERY: fish)
-    c2.appendChild(el('h4', '', 'BUYS'));
-    for (const [k, lab] of CARGO_KINDS) { const r = el('div', 'row'), on = marketBuys(o).includes(k), t = NSKY.editor.TUNE.toggle(on ? 1 : 0), l = el('label', '', lab); l.title = 'Sold here for coins: ' + lab.toLowerCase();
-      t.addEventListener('input', () => { const S = new Set(marketBuys(o)); if (+t.value) S.add(k); else S.delete(k); o.buys = [...S]; strSave(); });
-      r.append(l, t); c2.appendChild(r); }
+  // its MARKET: its prefab's (PREFABS > MARKET), read only here
+  if (strMarket(o)) { const c2 = el('div', 'cat'); c2.appendChild(el('h4', '', 'MARKET'));
+    const ln = (lab, txt, tip) => { const r = el('div', 'row'), l = el('label', '', lab), t = el('output', '', txt); l.title = t.title = tip; t.style.cssText = 'white-space:normal;text-align:right'; r.append(l, t); c2.appendChild(r); };
+    const nm = L => L.length ? L.map(k => CARGO_LAB[k] || k).join(', ') : 'NOTHING';
+    ln('HOURS', (o.openH ?? 0) === (o.closeH ?? 0) ? 'ALWAYS OPEN' : hourName(o.openH ?? 0) + '-' + hourName(o.closeH ?? 0), 'Its prefab\'s: STORY > STRUCTURE DESIGNS');
+    ln('SELLS', nm(marketSells(o)), 'Its prefab\'s: STORY > STRUCTURE DESIGNS'); ln('BUYS', nm(marketBuys(o)), 'Its prefab\'s: STORY > STRUCTURE DESIGNS');
     U.box.appendChild(c2); }
   // what starts at each spot (what's allowed there: its prefab's VALID VEHICLES, SIZE, MAX SIZE, RESTRICT): its SPOTS - ADD SPOT, REMOVE;
   // each spot's own properties are the spot's, picked over the world (user Nov 3 12:03 - 50-zzzz-spots.js)
@@ -76005,7 +75990,11 @@ function objFill() {
   if (c == null) { T.item.textContent = ''; T.n.textContent = ''; return; }
   const L = objList(c), cur = objCur(c); opts(T.item, L, cur); OBJ.pick[c] = cur;
   T.n.textContent = L.length + ' OF THIS TYPE';
+  const design = objStrCat(c) || !!STR_VEHS[cur];
+  T.bEd.hidden = !design;
 }
+// EDIT DESIGN (a copy's): its design up in the SPAWN half beside it
+const objEditDesign = o => dsnOpen('s', o.pf);   // (STORY > STRUCTURE DESIGNS - 50-zzzz-designs-tab.js)
 // a tab of the three shown: the SELECTED section moved into it, its type the one SPAWN uses
 function objShowTab(t) {
   const U = OBJ.ui; if (!U || !U.tabs[t]) return;
@@ -76054,10 +76043,18 @@ function objWreckFill(box, el, id) {
   box.appendChild(cargoBox(el, OBJ.ui.css, k => cargoN(r, k), (k, n) => wreckSet(id, q => cargoPut(q, k, n))));   // (her chest: its gold bars - user Nov 3 10:05, 50-zz-cargo.js)
   return true;
 }
+// everything picked, each [name, press: picks it alone - null: none]
+function objPicked() {
+  const L = [];
+  for (const id of SE.sel) { const o = strById(id); if (o) L.push([strName(o), () => { for (const k in WK) WK[k].clear(); SE.sel = [id]; strSync(); wedSync(); }]); }
+  for (const e of VE.sel ? [VE.sel, ...VE.more] : []) L.push([vehName(e), () => { for (const k in WK) WK[k].clear(); VE.sel = e; VE.more = []; vehSync(); wedSync(); }]);
+  for (const n of seaNames()) L.push([n, null]);
+  return L;
+}
 function objSelText() {
   const sea = seaNames(), n = SE.sel.length + (VE.sel ? 1 + VE.more.length : 0) + sea.length;
   if (!n) { const o = SP.sel && strById(SP.sel.s), e = o && strVehs(o)[SP.sel.i]; return e && spotType(e.v) ? 'SPOT ' + (SP.sel.i + 1) + ' - ' + spotLab(e.v) : 'NONE'; }   // (a structure's spot - 50-zzzz-spots.js)
-  if (n > 1) return n + ' PICKED';
+  if (n > 1) return n + ' ITEMS';
   return SE.sel.length ? strName(strById(SE.sel[0])) : VE.sel ? vehName(VE.sel) : sea[0];
 }
 // what the OBJECTS tab shows besides the picked one's own (strFill, vehFill): what's picked, the spawn's prefab when nothing is
@@ -76067,6 +76064,9 @@ function objSync() {
   for (const t in U.tabs) U.tabs[t].spawn.textContent = '';
   const B = U.oBox; B.textContent = '';
   const el = U.el, sea = seaNames();
+  // several picked: the list, nothing to edit till one is pressed
+  const P = objPicked(), multi = P.length > 1; U.many.hidden = !multi; U.grid2.hidden = multi; U.many.textContent = '';
+  if (multi) { U.many.appendChild(el('span', 'olab', 'PRESS ONE TO EDIT IT:')); for (const [nm, f] of P) { const b = el('button', '', nm); b.title = f ? 'Edit this one alone' : 'Picked'; b.disabled = !f; if (f) b.onclick = f; U.many.appendChild(b); } return; }
   // what's picked that isn't a structure or a vehicle: its own, in SELECTED
   if (HPE.sel.length && hplFill(B, el)) return;   // (a plant placed by hand: its own - 50-zzzz-hand-plants.js)
   if (SE.sel.length || VE.sel) return;
@@ -76075,15 +76075,6 @@ function objSync() {
   if (NE.sel != null && natureFill(B, el)) return;   // (a creature area: its MIN / MAX - 50-zz-nature.js)
   if (SEAPICK.wrecks.length === 1 && !SEAPICK.krakens.length && objWreckFill(B, el, SEAPICK.wrecks[0])) return;   // (a wreck: its own)
   if (sea.length) { const k = el('div', 'cat'); k.append(el('h4', '', sea.join(', ')), el('div', 'tabnote', 'Nothing to set.')); B.appendChild(k); return; }   // (a kraken, several)
-  // nothing picked: the SPAWN section shows what SPAWN brings
-  const T = U.tabs[OBJ.tab]; if (!T) return; const SP = T.spawn;
-  const c = OBJ.cat, id = objCur(c); if (id == null) return;
-  const one = objOneName(c, id), name = one ? one[1] : objStrCat(c) ? (pfGet(id) || { name: id }).name : placedLab(id);
-  if (!one) SP.appendChild(el('div', 'tabnote', 'Its prefab\'s settings: every copy has them'));
-  if (one) { const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', id.startsWith('area:') ? 'SPAWN an area, then set its counts.' : id.startsWith('bgpic:') ? 'Far backdrop picture: SPAWN, drag, FLIP.' : id === 'marker' ? 'Named spot for GO TO, seen only here.' : 'SPAWN puts a new one in the view.')); SP.appendChild(k); }
-  else if (objStrCat(c)) { const p = pfGet(id); if (p) pfStructBox(p, SP, el, U.css); }
-  else if (STR_VEHS[id]) pfVehBox(id, SP, el, U.css);
-  else { vehLook(id, SP, el); const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); SP.appendChild(k); }   // (its LOOK - 50-zz-prefab-look.js)
 }
 const OBJ_CSS = `
 #skyEd .ocat { display: flex; flex-direction: column; gap: 1px; font-size: 10px; letter-spacing: .06em; color: #7a8294; }
@@ -76113,13 +76104,14 @@ function objSelSec(el) {
   const sel = el('span', 'osel', 'NONE'); h.append(el('span', 'olab', 'SELECTED: '), sel);
   const part = () => { const d = el('div', ''); d.style.display = 'contents'; return d; };
   const sBox = part(), vBox = part(), oBox = part();
-  const selBar = el('div', 'cvbar'), dup = el('button', '', 'DUPLICATE'); dup.title = 'Copy the pick and place it beside (Ctrl+D)'; dup.disabled = true; dup.onclick = () => wedDuplicate();   // (50-zzzz-zdup.js)
-  const del = el('button', '', 'DELETE'); del.title = 'Delete what is picked (Delete key)'; del.disabled = true; del.onclick = () => { wedDelete(); setTimeout(undoCommit, 0); };   // (user Nov 20 09:42: a pick's own DELETE, whatever it is)
-  selBar.append(multiBtn(el), dup, del);
+  // (user Nov 20 10:23: "There should be a clear separation between multiple selections and the thing you're editing" - as Unity's, Unreal's: what acts on the
+  // whole selection - PICK MORE, DUPLICATE, DELETE - is the top bar's, beside each other (50-zzz-world-ed.js); this is the inspector: one thing's
+  // properties. Several picked: their list - press one to edit it alone)
+  const many = el('div', 'cvbar'); many.hidden = true;
   const none = el('div', 'tabnote', 'Nothing picked: click something in the world.');
   const grid2 = el('div', 'cats'); grid2.append(sBox, vBox, oBox);
-  s.append(selBar, none, grid2);
-  return { sSel: s, sel, sBox, vBox, oBox, dup, del, none };
+  s.append(many, none, grid2);
+  return { sSel: s, sel, sBox, vBox, oBox, many, grid2, none };
 }
 for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
   pane.className = 'opane';   // (user Nov 20 00:35: SPAWN and SELECTED side by side - "we have more room horizontally")
@@ -76129,7 +76121,7 @@ for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
     const S = objSelSec(el), chk = el('div', 'cat');
     Object.assign(SE.ui, { el, box: S.sBox, chk, selCss: css });
     Object.assign(VE.ui, { el, box: S.vBox });
-    OBJ.ui = { el, css, tabs: {}, sel: S.sel, sSel: S.sSel, oBox: S.oBox, dup: S.dup, del: S.del, none: S.none, chk };
+    OBJ.ui = { el, css, tabs: {}, sel: S.sel, sSel: S.sSel, oBox: S.oBox, many: S.many, grid2: S.grid2, none: S.none, chk };
   }
   const U = OBJ.ui, what = t === 'STRUCTURES' ? 'STRUCTURE' : t === 'VEHICLES' ? 'VEHICLE' : 'OBJECT';
   // SPAWN: TYPE, the one of that type, SPAWN; under them what SPAWN brings (nothing picked) - and on STRUCTURES the WORLD CHECK
@@ -76141,12 +76133,16 @@ for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
   const n = el('span', 'olab', '');
   type.onchange = () => { OBJ.tcat[t] = type.value; objFill(); objSync(); };
   item.onchange = () => { OBJ.pick[OBJ.tcat[t]] = item.value; objSync(); };
-  top.append(lab('TYPE', type), lab(what, item), bSpawn, n);
+  // (user Nov 20 10:20) the design itself: NEW (a new design from this one) and its NAME - a structure's, a prop's, a vehicle's
+  // (user Nov 20 10:25) the designs are the STORY editor's lists: here only which to place, and EDIT DESIGN to open it there
+  const bEd = el('button', '', 'EDIT DESIGN'); bEd.title = 'Open this design in STORY > ' + (t === 'VEHICLES' ? 'VEHICLE' : 'STRUCTURE') + ' DESIGNS';
+  bEd.onclick = () => { const c = OBJ.tcat[t], id = OBJ.pick[c]; if (objStrCat(c)) dsnOpen('s', id); else if (STR_VEHS[id]) dsnOpen('v', id); };
+  top.append(lab('TYPE', type), lab(what, item), bSpawn, n, bEd);
   const grid = el('div', 'cats'), spawn = el('div', ''); spawn.style.display = 'contents';
   grid.appendChild(spawn); if (t === 'STRUCTURES') grid.appendChild(U.chk);
   sSpawn.append(top, grid);
   pane.appendChild(sSpawn);
-  U.tabs[t] = { pane, type, item, n, spawn };
+  U.tabs[t] = { pane, type, item, n, spawn, bEd };
   if (t === 'STRUCTURES') SE.pane = pane;   // (the tools' __ed.pane)
   new MutationObserver(() => { if (!pane.hidden) { objShowTab(t); strSync(); vehSync(); } }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
   if (t === 'STRUCTURES') { objShowTab(t); strSync(); vehSync(); }
@@ -76200,7 +76196,7 @@ NSKY.editor.TUNE.pane('GROUPING', (pane, el) => {
   const top = el('div', 'cvbar'), b = (lab, tip, f) => { const x = el('button', '', lab); x.title = tip; x.onclick = f; return x; };
   const msg = el('span', 'olab', '');
   const gb = b('GROUP', 'Make everything picked one group', grpGroup), ub = b('UNGROUP', 'Split up the picked groups', grpUngroup);
-  top.append(multiBtn(el), gb, ub, msg);
+  top.append(gb, ub, msg);   // (PICK MORE: the top bar's)
   { const st = document.createElement('style'); st.textContent = GRP_CSS; document.head.appendChild(st); }
   const list = el('div', 'glist'); list.hidden = true;
   pane.append(top, list);
@@ -76238,13 +76234,6 @@ function styFill(el) {
   for (const k in STY.panes) STY.panes[k].textContent = '';
   const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:2px 6px';
   const cat = name => { const c = el('div', 'cat'); c.appendChild(el('h4', '', name)); const P = STY.panes[STY_TABS[name]]; if (P) P.appendChild(c); return c; };
-  // a tab's one-paragraph guide at its top (what it's for, how to start)
-  const guide = (tab, txt) => { const P = STY.panes[tab]; if (!P) return; const d = el('div', 'help'); d.textContent = txt; d.style.cssText = 'color:#9aa3b8;padding:6px 8px 10px;line-height:1.4;font-size:11px'; P.appendChild(d); };
-  guide('CHARACTERS', 'The people of your story, you (PLAYER) among them. Press a name to open it, CLOSE when done. Each lives somewhere (HOME - yours is where a new story starts), can have a FAMILY they care about, need something to stay alive (NEEDS, taken from their home), have a VEHICLE of their own (made at their home, again the morning after one is lost) and WORK somewhere (its day - hours, routine, wage - belongs to the workplace: STRUCTURES > SELECTED > WORK). What your family needs is your objective, and their vehicles are yours to use. The places and vehicles a character owns (OWNER) are theirs.');
-  guide('LINES', 'What characters say. Press a line to open it, CLOSE when done. ADD LINE, pick who says it (SAID BY) and write the TEXT. It is said where they are - their home or a place they own (or pick one place). Add ONLY WHEN conditions so it is said only then. GIVES OBJECTIVE: where to go next and what to do there. The first line not yet said whose conditions hold is the one said. With no line, a character says what they want by themselves.');
-  guide('PRIORITIES', 'What every character does next, the player included: the first of these that holds, top to bottom. Getting a good is worked out from where things are: buy it where it is sold, and short of coins earn first (fish with a boat they can use, sell the catch). Your objective is the first of the same steps. NOW shows what each would do at the start of a new story, and why.');
-  guide('SIMULATE', 'Runs a new story fast - only its clock, stock and characters, every vehicle unseen - for so many days, and lists what happened: each trip and how long it took, each job done or skipped, who waited, and every place\'s stock at the end of each day. Nothing in the world is changed.');
-  guide('CARGO', 'Every good in the world: its price at a market, whether the player carries it himself (INVENTORY), and what one is MADE FROM. Places make goods in OBJECTS (MAKES).');
   const help = (l, tip) => { l.title = tip; l.dataset.help = tip; };
   // a slider row writing STORY_CFG[k]
   const slider = (c, lab, k, lo, hi, st, unit, tip, fmt) => {
@@ -76716,13 +76705,11 @@ function wedSync() {
   if (typeof dupSync === 'function') dupSync();             // (DUPLICATE named as DELETE is - 50-zzzz-zdup.js)
   if (WED.pbtn) { const K = edPlayKey(); btnSet(WED.pbtn, K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY', !K); }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
   if (!b) return;
-  btnSet(b, null, null, !T.world()); if (b.hidden) return;
+  btnSet(b, null, null, !T.world()); for (const x of [WED.dbtn, WED.mbtn]) if (x) x.hidden = b.hidden; if (b.hidden) return;   // (DUPLICATE, PICK MORE: with DELETE, on WORLD EDITOR)
   const D = wedPicked().filter(i => i.del);
   // (user Nov 1, 12:59: "Delete (Dock)" - what's picked in brackets, not in capitals, so it reads apart from the button's word)
   const nm = btnVar;
-  const lab = !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')';
-  btnSet(b, lab, !D.length);
-  if (typeof OBJ !== 'undefined' && OBJ.ui && OBJ.ui.del) btnSet(OBJ.ui.del, lab, !D.length);   // (SELECTED's own DELETE, named the same - 50-zzz-objects-tab.js)
+  btnSet(b, !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);
 }
 (function wedPlace() {
   const T = NSKY.editor.TUNE, bar = T.root && T.root.querySelector('.bar.top');
@@ -76730,6 +76717,10 @@ function wedSync() {
   const del = [...bar.querySelectorAll('button')].find(q => /^REVERT ALL CHANGES/.test(q.textContent));
   const b = document.createElement('button'); b.textContent = 'DELETE'; b.title = 'Delete everything picked'; b.disabled = true; b.onclick = wedDelete;
   bar.insertBefore(b, del ? del.nextSibling : bar.lastChild); WED.btn = b;
+  // (user Nov 20 10:23) what acts on the whole selection, together: PICK MORE, DUPLICATE, DELETE
+  const dup = document.createElement('button'); dup.textContent = 'DUPLICATE'; dup.title = 'Copy everything picked and place it beside (Ctrl+D)'; dup.disabled = true; dup.onclick = () => wedDuplicate(); WED.dbtn = dup;
+  const pm = multiBtn((t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }); WED.mbtn = pm;
+  b.before(pm, dup);
   const sv = document.createElement('button'); sv.textContent = 'SAVE CHANGES'; sv.title = 'Save the world as edited'; sv.onclick = () => { sceneSave(); wedSync(); }; WED.sbtn = sv;
   const redo = typeof UNDO !== 'undefined' && UNDO.rbtn; if (redo) redo.after(sv); else bar.insertBefore(sv, bar.firstChild);
   const close = [...bar.querySelectorAll('button')].find(q => q.textContent === 'CLOSE');
@@ -76960,6 +76951,59 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd
   };
   setTimeout(go, 300);
 }
+
+//@src 50-zzzz-designs-tab.js:1
+/* ================================================================
+   THE DESIGNS, IN THE STORY EDITOR (user Nov 20 10:25: "the world editor should refer to the things that are placed in the scene, and you can
+   select and move them and change their unique properties. Then the story would be the story editor, which is kind of similar to the lists we
+   have in the world plan, where we can change the characters, the different structures we can drop, vehicles"): STORY > STRUCTURE DESIGNS and
+   VEHICLE DESIGNS - each a list down the left (by type), the picked design's settings beside it (pfStructBox / pfVehBox, 50-zz-prefabs.js):
+   NEW (a design copied from the picked one), NAME. Every copy in the world is its design's; the WORLD EDITOR only places them (its SPAWN:
+   TYPE, design, SPAWN - EDIT DESIGN opens it here).
+   ================================================================ */
+const DSN = { s: null, v: null, ui: {} };
+const DSN_CSS = `
+#skyEd .dsn { display: flex; gap: 10px; align-items: flex-start; }
+#skyEd .dsn > .dlist { flex: 0 0 210px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid #2c3850; border-radius: 6px; padding: 5px; }
+#skyEd .dsn > .dlist h4 { margin: 6px 0 2px; }
+#skyEd .dsn > .dlist button { text-align: left; }
+#skyEd .dsn > .dbody { flex: 1 1 0; min-width: 0; }
+`;
+// the list: [heading, [[id, name], ...]] - structures by their type (every house one HOUSE), vehicles by family
+const dsnGroups = w => {
+  const G = new Map(), add = (g, q) => { if (!G.has(g)) G.set(g, []); G.get(g).push(q); };
+  if (w === 's') for (const p of pfSorted()) add(STR_KINDS[p.k].prop ? 'PROPS' : objStrType(p.k), [p.id, p.name]);
+  else for (const sv of Object.keys(STR_VEHS)) add((STR_FAMS.find(q => q[0] === STR_VEHS[sv].fam) || [0, String(STR_VEHS[sv].fam).toUpperCase()])[1], [sv, STR_VEHS[sv].lab]);
+  return [...G];
+};
+function dsnSync(w) {
+  const U = DSN.ui[w]; if (!U) return;
+  pfAttachAll();
+  const { list, body, el, css } = U, G = dsnGroups(w), all = G.flatMap(([, L]) => L.map(q => q[0]));
+  if (!all.includes(DSN[w])) DSN[w] = all[0] || null;
+  const keep = list.scrollTop; list.textContent = '';
+  for (const [h, L] of G) { list.appendChild(el('h4', '', h)); for (const [id, nm] of L) { const b = el('button', '', nm); b.classList.toggle('on', id === DSN[w]); b.onclick = () => { DSN[w] = id; dsnSync(w); }; list.appendChild(b); } }
+  list.scrollTop = keep;
+  body.textContent = ''; const id = DSN[w]; if (id == null) return;
+  const bar = el('div', 'cvbar'), nm = el('input'), bNew = el('button', '', 'NEW'), n = el('span', 'olab', '');
+  nm.type = 'text'; nm.style.cssText = css + ';width:180px'; nm.title = 'The design\'s name'; bNew.title = 'A new design, copied from this one';
+  if (w === 's') { const p = pfGet(id); nm.value = p ? p.name : ''; n.textContent = p ? pfCopies(p) + ' IN THIS WORLD' : ''; }
+  else nm.value = STR_VEHS[id] ? STR_VEHS[id].lab : '';
+  nm.onchange = () => { const v = nm.value.trim().toUpperCase(); if (v) { if (w === 's') { const p = pfGet(id); if (p) { p.name = v; p.base = false; pfSave(); strSync(); } } else pfRenameV(id, v); } dsnSync(w); };
+  bNew.onclick = () => { if (w === 's') { const p = pfGet(id); if (p) DSN.s = pfNewS(p).id; } else { const v = pfNewV(id); if (v) DSN.v = v; } dsnSync(w); };
+  const L = el('label', 'ocat'); L.append(el('span', '', 'NAME'), nm); bar.append(L, bNew, n); body.appendChild(bar);
+  const box = el('div', 'cats'); body.appendChild(box);
+  if (w === 's') { const p = pfGet(id); if (p) pfStructBox(p, box, el, css); } else pfVehBox(id, box, el, css);
+}
+for (const [t, w] of [['STRUCTURE DESIGNS', 's'], ['VEHICLE DESIGNS', 'v']]) NSKY.editor.TUNE.pane(t, (pane, el) => {
+  if (!document.getElementById('dsnCss')) { const st = document.createElement('style'); st.id = 'dsnCss'; st.textContent = DSN_CSS; document.head.appendChild(st); }
+  pane.className = 'dsn';
+  const list = el('div', 'dlist'), body = el('div', 'dbody'); pane.append(list, body);
+  DSN.ui[w] = { list, body, el, css: 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:220px' };
+  new MutationObserver(() => { if (!pane.hidden) dsnSync(w); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
+});
+// EDIT DESIGN: a structure's (a copy's prefab id) or a vehicle type's design, open in the STORY editor
+function dsnOpen(w, id) { DSN[w] = id; NSKY.editor.TUNE.show(w === 's' ? 'STRUCTURE DESIGNS' : 'VEHICLE DESIGNS'); dsnSync(w); }
 
 //@src 50-zzzz-dock-ropes.js:1
 /* ================================================================
@@ -79149,7 +79193,7 @@ function wedDuplicate() {
 }
 // the button: in the OBJECTS tab's grid, beside the WORLD CHECK; DUPLICATE (Aircraft Hangar) as DELETE names what it acts on
 function dupSync() {
-  const b = OBJ.ui && OBJ.ui.dup; if (!b) return;
+  const b = WED.dbtn; if (!b) return;   // (the top bar's, beside DELETE - 50-zzz-world-ed.js)
   const ks = dupKinds(), D = ks.flatMap(k => WK[k].items());
   btnSet(b, !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);   // (only when it changes - btnSet, 50-zzz-world-ed.js)
 }
@@ -79469,7 +79513,7 @@ const folkDo = J => J.do === 'buy' ? 'collect' : J.do === 'sell' ? 'deliver' : J
 // what they're doing now: the goal the PRIORITIES set (S.g - its jobs: a ROUTINE, a family member's medicine...) - famDecide; their ROUTINE as
 // written (folkRoutine). BUY / SELL pay (pay -1 / 1): their coins (S.k)
 const folkList = L => (Array.isArray(L) ? L : []).map(J => J && Object.assign({}, J, { do: folkDo(J), pay: J.do === 'buy' ? -1 : J.do === 'sell' ? 1 : 0 })).filter(J => J && (J.do === 'tow' || (J.do === 'fish' ? NATURE.some(a => a.id === J.at) : !!slStr(J.at))));   // (TOW: wherever the impounded are)
-const folkRoutine = c => { const W0 = workOf(c); return folkList(W0 && W0.rt); };   // (their workplace's ROUTINE - 50-zzzzz-story-work.js)
+const folkRoutine = c => { const W0 = workOf(c); return folkList(W0 ? workJobs(W0) : []); };   // (their workplace's ROUTINE - 50-zzzzz-story-work.js)
 const folkJobs = c => { const S = FOLK.c[c.id]; return folkList(S && S.g ? S.g.jobs : c.jobs); };
 // (a structure kept over the water - a dock - counts as a way for either: a car drives its deck, a boat comes alongside)
 const folkDeck = x => strsUsed().some(o => o.k === 'dock' && (() => { const B = strBox(o); return x > B.x0 && x < B.x1; })());
@@ -80310,7 +80354,7 @@ function workOut(c, S, W0) {
 }
 // a worker's day as one goal's jobs: START WORK, the routine (none: on duty), END WORK
 // (a TOW in its routine is an emergency's - famDecide's EMERGENCIES - not the day's)
-const workRt = W0 => (Array.isArray(W0.rt) ? W0.rt : []).filter(J => J && J.do !== 'tow');
+const workRt = W0 => workJobs(W0).filter(J => J.do !== 'tow');
 function workDay(c, W0) { return [{ do: 'clockin', at: W0.id }, ...workRt(W0), { do: 'clockout', at: W0.id }]; }
 // (each step) the workers' hours: from the end of their workplace's day, what's left of the routine is dropped - END WORK next, between trips
 function workHours(c, S) {
@@ -80343,41 +80387,87 @@ function workPlayerStep() {
   // (a lost work vehicle's or own vehicle's row, the next morning: taken away - its new one made)
   for (const v of [...storyCars, ...jetboats]) if ((v.wk != null || v.cv != null) && v.state !== 'run' && v.lostDay != null && W.day > v.lostDay && env.time >= STORY_WAKE_H) workVehGone(v);
 }
-// ---- the editor (STRUCTURES > SELECTED, the Story world): WORK - its WORKERS, HOURS, WAGE, WORK VEHICLE and ROUTINE (strFill, 50-zz-struct.js)
-function workBox(o, el, css, sync) {
+/* ---- THE DESIGN AND THE COPY (user Nov 20 10:07: "I go to the structure editor and I build a new Structure. Assign residence vs Workplace. If Workplace,
+   I define the type of work (Police, Fireman, etc) ... if I set it as a certain type of workplace, we pick from the sprites that apply to it"; 09:49: "I could
+   change who lives there, but I should not change a thing from being a residence to a workplace"). What a workplace's day is - HOURS, WAGE, WORK VEHICLE,
+   ROUTINE - is its PREFAB's (PREFABS > WORK, every copy the same; carried onto each copy by pfApply as any prefab field); a placed copy only says who
+   WORKS there. A routine names its places by TYPE, never one building: the workplace itself (THIS PLACE), a kind (THE MARKET - the one on the copy's own
+   land, else the nearest), the nearest FISH AREA - each copy finds its own (workAt). ---- */
+const WORK_KEYS = ['work', 'wv', 'wage', 'startH', 'endH', 'rt'];
+const strWork = o => strProp(o, 'work', K => !!K.work);   // (a workplace: its prefab's USE)
+// where routine job J of workplace W is: a structure id, a fish area id - null: none in the world
+function workAt(W, J) {
+  if (J.do === 'tow') return null;
+  if (J.do === 'fish') { if (J.to !== 'near' && J.at != null && NATURE.some(a => a.id === J.at)) return J.at; const A = NATURE.filter(a => a.k === 'fish').sort((a, b) => Math.abs((a.x0 + a.x1) / 2 - W.x) - Math.abs((b.x0 + b.x1) / 2 - W.x))[0]; return A ? A.id : null; }
+  if (J.to === 'self') return W.id;
+  if (typeof J.to === 'string' && J.to.startsWith('k:')) {
+    const k = J.to.slice(2), L = strsUsed().filter(o => o.k === k && o !== W); if (!L.length) return null;
+    const land = typeof strLand === 'function' ? strLand(W) : null, near = (a, b) => Math.abs(a.x - W.x) - Math.abs(b.x - W.x);
+    const mine = land ? L.filter(o => strLand(o) === land) : []; return (mine.length ? mine : L).sort(near)[0].id;
+  }
+  return J.at != null && slStr(J.at) ? J.at : null;   // (an older routine: one building)
+}
+// a workplace's routine with each job's place found for it
+function workJobs(W) { return (Array.isArray(W && W.rt) ? W.rt : []).map(J => J && Object.assign({}, J, { at: workAt(W, J) })).filter(J => J && (J.do === 'tow' || J.at != null)); }
+// (an older world, before Nov 20 10:07) a copy's own WORK, SELLS / BUYS / OPENS / CLOSES: its prefab's now - its places by type (the place itself, else its kind)
+worldLoad(() => {
+  if (typeof pfGet !== 'function') return;
+  for (const o of STRS) {
+    const p = pfGet(o.pf); if (!p) continue;
+    for (const key of [...WORK_KEYS, 'sells', 'buys', 'openH', 'closeH']) {
+      if (o[key] === undefined || p[key] !== undefined) continue;
+      p[key] = key === 'rt' ? o.rt.map(J => { const q = Object.assign({}, J); if (J.do === 'fish') q.to = 'near'; else if (J.do !== 'tow') { const t = STRS.find(z => z.id === J.at); q.to = t === o ? 'self' : t ? 'k:' + t.k : 'self'; } delete q.at; return q; }) : pfClone(o[key]);
+      p.base = false;
+    }
+    if (charsAll().some(c => c.work === o.id) && p.work === undefined) { p.work = true; p.base = false; }
+  }
+  for (const o of STRS) { const p = pfGet(o.pf); if (p && !p.base) pfApply(o, p); }   // (every copy takes its prefab's now)
+});
+// a routine's place, named for the editor: THIS PLACE, THE MARKET, THE NEAREST FISH AREA
+const workToName = J => J.do === 'fish' ? 'THE NEAREST FISH AREA' : J.to === 'self' ? 'THIS PLACE' : typeof J.to === 'string' && J.to.startsWith('k:') && STR_KINDS[J.to.slice(2)] ? 'THE ' + STR_KINDS[J.to.slice(2)].lab : J.at != null && slStr(J.at) ? strName(slStr(J.at)) : '?';
+// ---- PREFABS > WORK (a workplace's prefab): HOURS, WAGE, WORK VEHICLE, ROUTINE
+function workPrefabBox(p, el, css, ed) {
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'WORK'));
-  const save = () => { strSave(); sync(); if (typeof storyTabSync === 'function') storyTabSync(); };
   const L = (t, tip) => { const l = el('label', '', t); l.title = tip; return l; };
-  const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); save(); }; return s; };
-  const row = () => { const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; c.appendChild(r); return r; };
-  // WORKERS: the characters whose WORK this is (the player too)
-  { const r = row(); r.appendChild(L('WORKERS', 'Who works here: its day is theirs'));
-    for (const q of charsAll().filter(q => q.work === o.id)) { const t = el('span', '', q === PLAYER_C ? 'PLAYER' : q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = 'Not a worker here'; x.onclick = () => { delete q.work; ownersSave(); save(); }; r.append(t, x); }
-    const can = charsAll().filter(q => q.work !== o.id);
-    if (can.length) r.appendChild(S([['', '+ WORKER'], ...can.map(q => [q.id, q === PLAYER_C ? 'PLAYER' : q.name])], '', v => { if (v === '') return; const q = charOf(v === 'player' ? 'player' : +v); if (q) { q.work = o.id; ownersSave(); } }, 110, 'Add a worker (their work moves here)')); }
-  if (!workers(o).length && !Array.isArray(o.rt)) return c;   // (no one works here: the rest when someone does)
-  const hrs = Array.from({ length: 48 }, (_, i) => [i / 2, hourName(i / 2)]), [a, b] = workH(o);
-  { const r = row(); r.append(L('HOURS', 'When the work day starts and ends'), S(hrs, a, v => { o.startH = +v; }, 80, 'Workers leave home'), L('TO', 'Then home'), S(hrs, b, v => { o.endH = +v; }, 80, 'Workers finish and go home')); }
-  { const r = row(), n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(o.wage | 0); n.style.cssText = css + ';width:64px'; n.title = 'Coins a day of work pays (0: paid by what they sell)';
-    n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) o.wage = v; else delete o.wage; save(); };
-    r.append(L('WAGE', 'Coins a day, whatever there was to do'), n, L((o.wage | 0) ? 'A DAY' : 'PAID BY WHAT THEY SELL', '0: only what they sell pays')); }
-  { const r = row(); r.append(L('WORK VEHICLE', 'Made for each worker as they start, put away as they finish'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.wv || '', v => { if (v) o.wv = v; else delete o.wv; }, 130, 'Each worker\'s vehicle here'));
-    if (o.wv && !workSpotsAt(o).length) { const t = el('span', '', 'NOWHERE FOR IT: JOIN A ' + (STR_VEHS[o.wv].fam === 'boat' ? 'DOCK' : 'PARKING')); t.style.cssText = 'color:#ff6a5a;font-weight:bold'; r.appendChild(t); } }
-  // ROUTINE: its jobs in order, done again and again through the day (none: on duty here)
-  const places = strsUsed().map(q => [q.id, strName(q)]), areas = NATURE.filter(q => q.k === 'fish').map((q, i) => [q.id, 'FISH AREA ' + (i + 1)]);
-  { const r = row(); r.append(L('ROUTINE', 'Its jobs in order, again through the day')); if (!(o.rt || []).length) r.appendChild(L('NONE: ON DUTY HERE', 'Workers stay here till the day ends')); }
-  (o.rt || []).forEach((J, i) => {
+  const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ed(); }; return s; };
+  const row = () => { const r = el('div', 'row'); c.appendChild(r); return r; };
+  const hrs = Array.from({ length: 48 }, (_, i) => [i / 2, hourName(i / 2)]), [a, b] = workH(p);
+  row().append(L('HOURS', 'When the work day starts and ends'), S(hrs, a, v => { p.startH = +v; }, 80, 'Workers leave home'), L('TO', 'Then home'), S(hrs, b, v => { p.endH = +v; }, 80, 'Workers finish and go home'));
+  { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(p.wage | 0); n.style.cssText = css + ';width:64px'; n.title = 'Coins a day of work pays (0: paid by what they sell)';
+    n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) p.wage = v; else delete p.wage; ed(); };
+    row().append(L('WAGE', 'Coins a day, whatever there was to do'), n, L((p.wage | 0) ? 'A DAY' : 'PAID BY WHAT THEY SELL', '0: only what they sell pays')); }
+  row().append(L('WORK VEHICLE', 'Made for each worker as they start, put away as they finish'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], p.wv || '', v => { if (v) p.wv = v; else delete p.wv; }, 130, 'Each worker\'s vehicle'));
+  // ROUTINE: its jobs in order, done again and again through the day (none: on duty) - places by type
+  const kinds = Object.keys(STR_KINDS).filter(k => !STR_KINDS[k].prop && !STR_KINDS[k].noGoods).map(k => ['k:' + k, 'THE ' + STR_KINDS[k].lab]);
+  { const r = row(); r.append(L('ROUTINE', 'Its jobs in order, again through the day')); if (!(p.rt || []).length) r.appendChild(L('NONE: ON DUTY HERE', 'Workers stay here till the day ends')); }
+  (p.rt || []).forEach((J, i) => {
     const r = row(); r.style.paddingLeft = '14px';
-    r.append(L(String(i + 1), 'Done in this order'), S(VERBS, J.do, v => { J.do = v; J.at = v === 'fish' ? (areas[0] || [0])[0] : (places[0] || [0])[0]; }, 90, 'What they do'));
+    r.append(L(String(i + 1), 'Done in this order'), S(VERBS, J.do, v => { J.do = v; delete J.at; J.to = v === 'fish' ? 'near' : 'self'; }, 90, 'What they do'));
     if (J.do === 'tow') r.append(L('IMPOUNDED VEHICLES, BACK TO THEIR OWNERS', 'When a vehicle is impounded: towed back where its owner keeps it'));
-    else if (J.do === 'fish') r.append(S(areas.length ? areas : [[0, 'NO FISH AREA']], J.at, v => { J.at = +v; }, 120, 'Where they fish'));
-    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); r.append(L('AT', 'Where'), S(places, J.at, v => { J.at = +v; }, 130, 'Where')); }
-    if (J.do !== 'go' && J.do !== 'tow') { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; save(); }; r.append(n); }
-    const x = el('button', '', 'X'); x.title = 'Remove this job'; x.onclick = () => { o.rt.splice(i, 1); if (!o.rt.length) delete o.rt; save(); }; r.append(x);
+    else if (J.do === 'fish') r.append(L('AT THE NEAREST FISH AREA', 'The fish area nearest each workplace'));
+    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); r.append(L('AT', 'Where: by type - each workplace finds its own, on its own land first'), S([['self', 'THIS PLACE'], ...kinds], J.to || 'self', v => { J.to = v; delete J.at; }, 150, 'Where')); }
+    if (J.do !== 'go' && J.do !== 'tow') { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; ed(); }; r.append(n); }
+    const x = el('button', '', 'X'); x.title = 'Remove this job'; x.onclick = () => { p.rt.splice(i, 1); if (!p.rt.length) delete p.rt; ed(); }; r.append(x);
   });
   const aj = el('button', '', '+ JOB'); aj.title = 'Another job in its routine'; aj.style.marginLeft = '14px';
-  aj.onclick = () => { (o.rt || (o.rt = [])).push({ do: 'collect', k: (CARGO[0] || {}).k || '', at: o.id }); save(); };
+  aj.onclick = () => { (p.rt || (p.rt = [])).push({ do: 'collect', k: (CARGO[0] || {}).k || '', to: 'self' }); ed(); };
   c.appendChild(aj);
+  return c;
+}
+// ---- the copy (STRUCTURES > SELECTED, the Story world): who WORKS here, and its prefab's day, read only
+function workBox(o, el, css, sync) {
+  const c = el('div', 'cat'); c.appendChild(el('h4', '', 'WORK'));
+  const L = (t, tip) => { const l = el('label', '', t); l.title = tip; return l; };
+  const row = () => { const r = el('div', 'row'); c.appendChild(r); return r; };
+  { const r = row(); r.appendChild(L('WORKERS', 'Who works here: its day is theirs'));
+    for (const q of charsAll().filter(q => q.work === o.id)) { const t = el('span', '', q === PLAYER_C ? 'PLAYER' : q.name); t.style.cssText = 'padding:1px 6px;border:1px solid #2c3850;border-radius:4px'; const x = el('button', '', 'X'); x.title = 'Not a worker here'; x.onclick = () => { delete q.work; ownersSave(); sync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.append(t, x); }
+    const can = charsAll().filter(q => q.work !== o.id);
+    if (can.length) { const s = el('select'); s.style.cssText = css + ';width:110px'; s.title = 'Add a worker (their work moves here)'; for (const [v, t] of [['', '+ WORKER'], ...can.map(q => [q.id, q === PLAYER_C ? 'PLAYER' : q.name])]) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); }
+      s.onchange = () => { if (s.value === '') return; const q = charOf(s.value === 'player' ? 'player' : +s.value); if (q) { q.work = o.id; ownersSave(); } sync(); if (typeof storyTabSync === 'function') storyTabSync(); }; r.appendChild(s); } }
+  const [a, b] = workH(o), J = workJobs(o);
+  row().append(L('ITS DAY', 'Its prefab\'s: STORY > STRUCTURE DESIGNS'), el('output', '', hourName(a) + '-' + hourName(b) + ' · ' + ((o.wage | 0) ? (o.wage | 0) + ' A DAY' : 'PAID BY WHAT THEY SELL') + (workVehD(o) ? ' · ' + STR_VEHS[o.wv].lab : '')));
+  row().append(L('ROUTINE', 'Its prefab\'s: each place found for this one'), el('output', '', J.length ? J.map((q, i) => (i + 1) + '. ' + famStepTxt(q)).join(' · ') : 'ON DUTY HERE'));
+  if (o.wv && !workSpotsAt(o).length) { const t = el('div', 'tabnote', 'NOWHERE FOR ITS ' + STR_VEHS[o.wv].lab + 'S: JOIN A ' + (STR_VEHS[o.wv].fam === 'boat' ? 'DOCK' : 'PARKING')); t.style.color = '#ff6a5a'; c.appendChild(t); }
   return c;
 }
 /* ---- CONNECTIONS (user Nov 20 09:38: "We also need a graphical way to represent these, so I can see that its all connected correctly and editable"): over
@@ -80409,8 +80499,8 @@ function workLinksDraw(q) {
     }
     for (const c of workers(o)) { const H = stHome(c); if (H && H !== o) line(A, mid(H), WL_COL.home, nm(c) + ' LIVES HERE'); }
     if (workVehD(o)) { const L = workSpotsAt(o); for (const s of L) if (s !== o) line(A, mid(s), WL_COL.veh, STR_VEHS[o.wv].lab + 'S'); if (!L.length) drawTextC(C, 'NO SPOT FOR ITS ' + STR_VEHS[o.wv].lab + 'S', Math.round(PX(A[0])), Math.round(PY(strBox(o).top) - 14 * q), WL_COL.bad, q, 'center', [4, 7, 15]); }
-    (Array.isArray(o.rt) ? o.rt : []).forEach((J, i) => { const B = J.do === 'fish' ? area(J.at) : J.do === 'tow' ? null : (s => s && s !== o ? mid(s) : null)(slStr(J.at)); line(A, B, WL_COL.job, (i + 1) + '. ' + famStepTxt(J).replace(/ AT .*$/, '')); });
-    for (const W0 of strsUsed()) if (W0 !== o && Array.isArray(W0.rt)) W0.rt.forEach(J => { if (J.do !== 'fish' && J.at === o.id) line(mid(W0), A, WL_COL.job, strName(W0) + ': ' + famStepTxt(J).replace(/ AT .*$/, '')); });
+    workJobs(o).forEach((J, i) => { const B = J.do === 'fish' ? area(J.at) : J.do === 'tow' ? null : (s => s && s !== o ? mid(s) : null)(slStr(J.at)); line(A, B, WL_COL.job, (i + 1) + '. ' + famStepTxt(J).replace(/ AT .*$/, '')); });
+    for (const W0 of strsUsed()) if (W0 !== o && Array.isArray(W0.rt)) workJobs(W0).forEach(J => { if (J.do !== 'fish' && J.at === o.id) line(mid(W0), A, WL_COL.job, strName(W0) + ': ' + famStepTxt(J).replace(/ AT .*$/, '')); });
   }
 }
 
