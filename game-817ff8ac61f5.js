@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1182;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 13:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1183;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 13:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -76589,7 +76589,9 @@ const WK = {
       const H = [VE.sel, ...VE.more].map(vehHost).filter(Boolean);
       if (H.length) { SE.sel = [...new Set(SE.sel.concat(H.map(o => o.id)))]; strDelete(); }   // (its structure, and what goes with it)
       for (const e of [VE.sel, ...VE.more]) if (e && e.k === 'shuttle' && vehHost(e) === null && typeof e.v.R === 'object') { const t = vehTable(e); if (t) emit('tableRemove', { t, o: e.v }); }   // (a deleted pad's stack gone now, as a tower is - landTowersBuild)
-      for (const e of [VE.sel, ...VE.more]) { if (vehHost(e) || !vehDeletable(e)) continue; const t = vehTable(e); if (t) emit('tableRemove', { t, o: e.v }); placedGone(e.v); vehSpotEmpty(e.v); }   // (its owner takes it out - 36-zz-tables.js)
+      // (user Nov 20 12:10: a placed boat back after every DELETE, SAVE CHANGES and SUBMIT) the world's records let go first - its placed record, its spot
+      // - then its owner takes it out (36-zz-tables.js): a record table's row read after it's taken out reads nothing (its handle's fields undefined)
+      for (const e of [VE.sel, ...VE.more]) { if (vehHost(e) || !vehDeletable(e)) continue; const t = vehTable(e); placedGone(e.v); vehSpotEmpty(e.v); if (t) emit('tableRemove', { t, o: e.v }); }
       VE.sel = null; VE.more = []; vehSync();
     },
   },
