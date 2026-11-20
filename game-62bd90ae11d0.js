@@ -4148,72 +4148,73 @@ const SRC = {
   wheels: __ART[1],        // (the user's wheel set, Nov 2: gen/wheels/prep.py - 50-zz-wheels)
   bpsheet: __ART[2],      // (the user's blueprint sheet for the Story showrooms, Nov 2: gen/showroom/prep.py - 50-zz-story-swap)
   titleOpen: __ART[3],  // (Story's opening shot, Nov 13: the user's Far Far Away picture as his mockup - gen/title/opening.py, 50-zzzz-story-open.js)
-  chimney: __ART[4],      // (the user's chimney for the hut, Nov 2: gen/chimney/prep.py - 50-zz-struct)
-  tropical: __ART[5],    // (the user's tropical set and land vehicles, Oct 31: gen/tropical/prep.py - 50-zz-struct)
-  shipIntact: __ART[6],
-  shipDamaged: __ART[7],
-  shell: __ART[8],
-  seabed: __ART[9],
-  coastL: __ART[10],
-  coastR: __ART[11],
-  tower: __ART[12],
-  dock: __ART[13],
-  hangar: __ART[14],
-  hgDoor: __ART[15],
-  subDoor: __ART[16],
-  sub: __ART[17],
-  subTurn: __ART[18],
-  hudAtlas: __ART[19],
-  padXb: __ART[20],
-  padPs: __ART[21],
-  spitfire: __ART[22],    // (the user's Spitfire renders, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
-  p51: __ART[23],    // (the user's P-51 pixel-art sheet, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
-  c172: __ART[24],    // (the user's Cessna 172 pixel-art sheet, Nov 3: gen/warplanes.py - 50-land-traffic.js)
-  b747: __ART[25],    // (the user's Boeing 747-8 renders made pixel art, Nov 3: gen/warplanes.py - 50-land-traffic.js)
-  seaplane: __ART[26],    // (the user's seaplane renders made pixel art, Nov 3: gen/warplanes.py - 50-land-seaplanes.js)
-  bBase: __ART[27],
-  bLever: __ART[28],
-  sailR: __ART[29],
-  sailB: __ART[30],
-  sailC: __ART[31],
-  sailRD: __ART[32],
-  sailBD: __ART[33],
-  sailCD: __ART[34],
-  flags: __ART[35],
-  heli: __ART[36],              // (LAND TEST's helicopter, three damage levels: gen/land/units2.py)
-  tank2: __ART[37],            // (LAND TEST's tank, three damage levels: gen/land/units2.py)
+  chimney: __ART[4],
+  chimney01: __ART[5],  // (the same chimney at the world's 0.1 m pixel: the town's houses - 50-zz-struct TROP_CHIMNEY pic)      // (the user's chimney for the hut, Nov 2: gen/chimney/prep.py - 50-zz-struct)
+  tropical: __ART[6],    // (the user's tropical set and land vehicles, Oct 31: gen/tropical/prep.py - 50-zz-struct)
+  shipIntact: __ART[7],
+  shipDamaged: __ART[8],
+  shell: __ART[9],
+  seabed: __ART[10],
+  coastL: __ART[11],
+  coastR: __ART[12],
+  tower: __ART[13],
+  dock: __ART[14],
+  hangar: __ART[15],
+  hgDoor: __ART[16],
+  subDoor: __ART[17],
+  sub: __ART[18],
+  subTurn: __ART[19],
+  hudAtlas: __ART[20],
+  padXb: __ART[21],
+  padPs: __ART[22],
+  spitfire: __ART[23],    // (the user's Spitfire renders, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
+  p51: __ART[24],    // (the user's P-51 pixel-art sheet, Nov 3: gen/warplanes.py - 29-zzz-warplanes.js)
+  c172: __ART[25],    // (the user's Cessna 172 pixel-art sheet, Nov 3: gen/warplanes.py - 50-land-traffic.js)
+  b747: __ART[26],    // (the user's Boeing 747-8 renders made pixel art, Nov 3: gen/warplanes.py - 50-land-traffic.js)
+  seaplane: __ART[27],    // (the user's seaplane renders made pixel art, Nov 3: gen/warplanes.py - 50-land-seaplanes.js)
+  bBase: __ART[28],
+  bLever: __ART[29],
+  sailR: __ART[30],
+  sailB: __ART[31],
+  sailC: __ART[32],
+  sailRD: __ART[33],
+  sailBD: __ART[34],
+  sailCD: __ART[35],
+  flags: __ART[36],
+  heli: __ART[37],              // (LAND TEST's helicopter, three damage levels: gen/land/units2.py)
+  tank2: __ART[38],            // (LAND TEST's tank, three damage levels: gen/land/units2.py)
   // (OPEN WORLD's big ships, from the user's pictures, Oct 25 late: bow right)
-  liner: __ART[38],
-  space: __ART[39],          // (gen/open/space.py: the user's satellite, orbiter, tank and booster, launch pad)
-  civicons: __ART[40],
-  dockart: __ART[41],
-  containerEmpty: __ART[42],
-  lighthouseL: __ART[43],
-  forestMtn: __ART[44],     // (gen/open/forest.py: from the user's Nature Art Kit, Oct 26)
-  forestFar: __ART[45],
-  forestNear: __ART[46],
-  desertMtn: __ART[47],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
-  desertDunes: __ART[48],
-  desertCity: __ART[49],     // (the user's own city, Oct 27, 16:55)
-  hangar2: __ART[50],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
-  wrecks: __ART[51],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
-  linerBare: __ART[52],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
-  linerParts: __ART[53],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
-  shuttles: __ART[54],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
-  cessna: __ART[55],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
-  jet747: __ART[56],          // (its colour band red: each country's colour goes on it, as on the army's)
-  cruise2: __ART[57],
-  container: __ART[58],
-  tanker: __ART[59],
+  liner: __ART[39],
+  space: __ART[40],          // (gen/open/space.py: the user's satellite, orbiter, tank and booster, launch pad)
+  civicons: __ART[41],
+  dockart: __ART[42],
+  containerEmpty: __ART[43],
+  lighthouseL: __ART[44],
+  forestMtn: __ART[45],     // (gen/open/forest.py: from the user's Nature Art Kit, Oct 26)
+  forestFar: __ART[46],
+  forestNear: __ART[47],
+  desertMtn: __ART[48],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
+  desertDunes: __ART[49],
+  desertCity: __ART[50],     // (the user's own city, Oct 27, 16:55)
+  hangar2: __ART[51],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
+  wrecks: __ART[52],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
+  linerBare: __ART[53],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
+  linerParts: __ART[54],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
+  shuttles: __ART[55],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
+  cessna: __ART[56],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
+  jet747: __ART[57],          // (its colour band red: each country's colour goes on it, as on the army's)
+  cruise2: __ART[58],
+  container: __ART[59],
+  tanker: __ART[60],
   // (the user's sheets, Oct 25 late, cut by gen/open/sheets.py: rows of sprites - see the JSONs)
-  balloons: __ART[60],   // (14 balloons: whole, popped, falling)
-  civhelis: __ART[61],   // (12 helicopters: clean, hit, wrecked; nose left)
-  airport: __ART[62],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
-  research: __ART[63],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
-  minisub: __ART[64],
-  caveBack: __ART[65],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
-  seaKit: __ART[66],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
-  caveStal: __ART[67],     // (the exploration sub: side, three-quarter, front; nose left)
+  balloons: __ART[61],   // (14 balloons: whole, popped, falling)
+  civhelis: __ART[62],   // (12 helicopters: clean, hit, wrecked; nose left)
+  airport: __ART[63],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
+  research: __ART[64],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
+  minisub: __ART[65],
+  caveBack: __ART[66],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
+  seaKit: __ART[67],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
+  caveStal: __ART[68],     // (the exploration sub: side, three-quarter, front; nose left)
 };
 
 //@src 01-z-vehicle-tune.js:1
@@ -5106,7 +5107,7 @@ function artStep() {
    pixels); scaled() draws the big one in its place, and whatever is made from a picture (mirrored, team colours,
    charred, cut, darkened) makes the same from its big one (hiPass, 04-art-prep.js).
    ================================================================ */
-const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[68],0,0],[__ART[69],630,0],[__ART[70],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[71],0,0],[__ART[72],480,0],[__ART[73],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[74],0,0],[__ART[75],840,0],[__ART[76],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[77],0,0],[__ART[78],600,0],[__ART[79],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[80],0,0],[__ART[81],1048,0],[__ART[82],2096,0]]}};
+const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[69],0,0],[__ART[70],630,0],[__ART[71],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[72],0,0],[__ART[73],480,0],[__ART[74],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[75],0,0],[__ART[76],840,0],[__ART[77],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[78],0,0],[__ART[79],600,0],[__ART[80],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[81],0,0],[__ART[82],1048,0],[__ART[83],2096,0]]}};
 async function loadBigArt() {
   for (const [key, B] of Object.entries(BIGART)) {
     const old = img[key];
@@ -12950,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1139;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 21:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1140;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 21:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53311,6 +53312,11 @@ function tropPalms() {
   // (user Nov 4 13:44: "one of the islands is not getting any vegetation" - an airport's: the 80 m / 300 m keep-away is for trees, what an aircraft can
   // hit - treeAt: trees and palms). A plant that isn't a tree (a bush, the jungle behind) only keeps off the airport's own parts - its concrete, buildings
   const AP = []; for (const o of strsUsed()) if (AIR_PARTS[o.k]) { try { const b = strBox0(o); AP.push([b.x0, b.x1]); } catch (e) { } }
+  // (user Nov 19 20:16: "House bushes, House, BG vegetation - How can they ever render in front?") a building's front is its own: no plant of the
+  // front deck (drawn in front of the structures) over a building drawn from its picture on the ground - only its prefab's own plants
+  // (hand-placed - 50-zzzz-hand-plants.js); the decks behind still grow behind it. [x0, x1, its terrain layer]
+  const BS = []; for (const o of strsUsed()) { const K = STR_KINDS[o.k]; if (K && K.art && !K.water && !K.prop) { try { const b = strBox0(o); BS.push([b.x0, b.x1, o.lay || 0]); } catch (e) { } } }
+  const bldOver = (a, b, L) => BS.some(q => q[2] === L && b > q[0] && a < q[1]);
   let tree = true; const nearAir = x => tree ? nearAirport(x, AS) : AP.some(([a, b]) => x > a - 4 && x < b + 4);
   let B = 'tropical';   // (the biome being planted: its ground's columns only - biomeAtX)
   const backOwn = x => !layHas(x) || layTop(x, 1) > landTop(x, 0) + 1;   // (terrain layers: the top here the back ground's own, not a front layer's - that one's plants are its own: okLay)
@@ -53346,7 +53352,7 @@ function tropPalms() {
       const flip = W.a[i] < 0.5, z = d + 0.01 + (n + W.b[i]) / list.length * 0.98;   // (user Nov 4 10:37: the deck's order - its first prefab in front, its last behind)
       const pick = W.p[i];
       // (ROAD - user Nov 19 10:18: "trees and bushes in Deck 1 would not be allowed if that segment is marked as 'Road'") no DECK 1 plant over a road's cement or its fade
-      const road = L => d === 0 && roadOver(x - P.w, x + P.w, L);
+      const road = L => d === 0 && (roadOver(x - P.w, x + P.w, L) || bldOver(x - P.w, x + P.w, L));   // (and none in front of a building - BS)
       const at = road(0) ? null : ok(x, P.w) ? {} : okIsl(x, P.w) ? { isl: true } : null;
       if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn }, D0 === VEG_DECKS ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
       for (const L of SHP.layList) if (layHas(x, L) && !road(L) && okLay(x, P.w, L) && vegFadeKeep(x, d * 13 + n, false, L)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, lay: L }, D0 === VEG_DECKS ? {} : { ve: e }, P.make));
@@ -73641,7 +73647,7 @@ const tropArt = {};
 function tropPic(n) {
   const c0 = tropArt[n]; if (c0) return c0;
   const t = TROP[n], s = img.tropical; if (!t || !s || !s.width) return null;
-  const A = TROP_CHIMNEY[n], ch = A && A.add ? img.chimney : null;
+  const A = TROP_CHIMNEY[n], ch = A && A.add ? img[A.pic || 'chimney'] : null;   // (pic: the chimney's picture at the house's own pixel)
   if (A && A.add && !(ch && ch.width)) return null;           // (its chimney's picture not there yet)
   const up = ch ? Math.max(0, ch.height - A.add[1]) : 0;      // (the picture grows up by what of the chimney stands over its top)
   const c = makeCanvas(t.w, t.h + up);
@@ -73718,11 +73724,11 @@ function flagCut(c, n, up) {
    (tropPic). Every residential structure (STR_KINDS res) with a chimney puffs a near-white wisp from it - strChimneys. ---- */
 const TROP_CHIMNEY = {
   'home-hut': { add: [138, 8] },                              // (the hut: no chimney in its art - the user's on its thatch)
-  // (Nov 19: the town sheet's houses have none painted - the user's chimney on each roof's far side)
-  'house-orange-roof': { add: [31, 7] }, 'house-tin-roof': { add: [32, 7] }, 'house-blue-roof': { add: [64, 3] },
-  'house-porch': { add: [46, 3] }, 'house-green': { add: [36, 8] },
-  'town-1': { add: [86, 13] }, 'town-2': { add: [52, 10] }, 'town-3': { add: [30, 8] }, 'town-4': { add: [80, 9] },
-  'town-5': { add: [82, 20] }, 'town-6': { add: [50, 12] }, 'town-7': { add: [62, 12] }, 'town-8': { add: [80, 6] },
+  // (Nov 19: the town sheet's houses have none painted - the user's chimney on each roof's far side, at their 0.1 m pixel: chimney01)
+  'house-orange-roof': { add: [31, 7], pic: 'chimney01' }, 'house-tin-roof': { add: [32, 7], pic: 'chimney01' }, 'house-blue-roof': { add: [64, 3], pic: 'chimney01' },
+  'house-porch': { add: [46, 3], pic: 'chimney01' }, 'house-green': { add: [36, 8], pic: 'chimney01' },
+  'town-1': { add: [86, 13], pic: 'chimney01' }, 'town-2': { add: [52, 10], pic: 'chimney01' }, 'town-3': { add: [30, 8], pic: 'chimney01' }, 'town-4': { add: [80, 9], pic: 'chimney01' },
+  'town-5': { add: [82, 20], pic: 'chimney01' }, 'town-6': { add: [50, 12], pic: 'chimney01' }, 'town-7': { add: [62, 12], pic: 'chimney01' }, 'town-8': { add: [80, 6], pic: 'chimney01' },
 };
 // each kind: its label, its picture (a dock's: its tiles - DOCK_SPRITES), what it takes in (the vehicle families that may
 // dock, park or go in: what decides REPAIR and REFUEL are offered), enclosed (a gate), on the water (a dock)
