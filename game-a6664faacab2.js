@@ -12965,8 +12965,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1159;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 01:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1160;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 02:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79315,7 +79315,7 @@ function folkPlan(c, S) {
     if (J && T.o) {
       if (folkBeside(v, T.o)) {
         if (J.do === 'collect') { let n = folkN(J, stN(T.o, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
-        else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { cargoAdd(v, J.k, -n); stAdd(T.o, J.k, n); if (J.pay > 0) S.k = (S.k || 0) + cargoCoins(J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
+        else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { const pay = J.pay > 0 ? cargoCoins(J.k, n) : stPays(T.o, J.k, n, c.id); cargoAdd(v, J.k, -n); stAdd(T.o, J.k, n); S.k = (S.k || 0) + pay; }   /* (paid as the player is: a SELL at its price, a delivery of what the place takes - stPays) */ folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
         S.j++; return;
       }
       if (can(v)) { folkGo(v, T.x, null); return; }
@@ -79334,7 +79334,7 @@ function folkPlan(c, S) {
     folkLog({ t: 'skip', who: c.id, verb: J.do, at: T.o ? slPlaceName(T.o) : 'THE FISH AREA' }); S.j++; return;                                                          // (no way there: that job left)
   }
   const P = slStr(S.at); if (!P) { S.at = (stHome(c) || {}).id || 0; return; }
-  if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; folkLog({ t: 'home', who: c.id }); return; } const H = folkHand(S); if (J.do === 'deliver' && H && H[J.k] > 0) { const n = folkN(J, H[J.k]); stAdd(T.o, J.k, n); if (J.pay > 0) S.k = (S.k || 0) + cargoCoins(J.k, n); H[J.k] -= n; if (!Object.values(H).some(q => q > 0)) S.carry = null; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); } S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
+  if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; folkLog({ t: 'home', who: c.id }); return; } const H = folkHand(S); if (J.do === 'deliver' && H && H[J.k] > 0) { const n = folkN(J, H[J.k]); S.k = (S.k || 0) + (J.pay > 0 ? cargoCoins(J.k, n) : stPays(T.o, J.k, n, c.id)); stAdd(T.o, J.k, n); H[J.k] -= n; if (!Object.values(H).some(q => q > 0)) S.carry = null; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); } S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
@@ -79794,13 +79794,17 @@ function stockStep() {
    who lives there needs it (not your own household: what you bring home is yours). Stopped by it with that good (carried, or in your vehicle
    by it), it wears a DELIVER arrow (storyTargets 'd:<id>'); A hands it all into the place's stock and pays its price for each (stDeliver). A
    market takes goods through its own sheet (SELL - marketSell), into its stock too. ---- */
-function stTakes(o) {
+// (user Nov 20 01:03: "if you get paid for deliveries, the other character should get paid too. It should be the same system") who: the one
+// delivering - the player ('player') or a character's id; a family member's needs aren't paid work for them (what you bring your family is theirs)
+function stTakes(o, who = 'player') {
   if (!strStores(o)) return [];
   const K = new Set(), M = stMakes(o);
   if (M) for (const q of (cargoKind(M.k).needs || [])) if (cargoKind(q.k)) K.add(q.k);
-  for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id) && !slHousehold(c)) K.add(c.needs.k);
+  for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id) && c.id !== who && !famOf(who, c.id)) K.add(c.needs.k);
   return [...K];
 }
+// what a place pays whoever delivers n of good k to it: its price for each when it takes that good from them, else nothing
+const stPays = (o, k, n, who) => stTakes(o, who).includes(k) ? cargoCoins(k, n) : 0;
 // what you could hand over here: [good, how many] - carried, and in your vehicles stopped by it
 function stOffer(o) {
   const ks = stTakes(o); if (!ks.length) return [];
@@ -79809,7 +79813,7 @@ function stOffer(o) {
 }
 function stDeliver(p, id) {
   if (p !== 0 || !STORY) return; const o = strsUsed().find(q => q.id === +id); if (!o || !storyTargets().some(T => T.key === 'd:' + o.id)) return;
-  for (const [k, n, V] of stOffer(o)) { stAdd(o, k, n); if (story.inv[k]) story.inv[k] = 0; for (const v of V) cargoPut(v, k, 0); story.coins += cargoCoins(k, n); slObjEv('deliver', o.id, k); }
+  for (const [k, n, V] of stOffer(o)) { stAdd(o, k, n); if (story.inv[k]) story.inv[k] = 0; for (const v of V) cargoPut(v, k, 0); story.coins += stPays(o, k, n, 'player'); slObjEv('deliver', o.id, k); }
   sound('clink', o.x, 1);
 }
 ACTS.storyDeliver = (p, id) => stDeliver(p, id);
