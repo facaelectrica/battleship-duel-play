@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1198;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1199;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -76420,17 +76420,17 @@ function styFill(el) {
       const L = (t, tip) => { const l = el('label', '', t); help(l, tip); return l; };
       // (user Nov 20 13:18: "This line is very confusing. They need one Medicine a day? what is that last 0 for?") one property a row (rules.md section 6)
       const prow = (...kids) => { const r = el('div', 'row'); r.style.cssText = rowCss; r.append(...kids); c.appendChild(r); return r; };
-      prow(L('HOME', 'Where they live'), S(placeOpts(strIsRes, o.home, [0, 'NOWHERE'], 'A RESIDENCE'), o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
-      prow(L('NEEDS', 'A good they use up from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
+      prow(L('HOME', 'Residence'), S(placeOpts(strIsRes, o.home, [0, 'NOWHERE'], 'A RESIDENCE'), o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Residence'));
+      prow(L('NEEDS', 'Good consumed from home stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, out: 'death' }, o.needs, { k: v }); else delete o.needs; }, 100, 'Good'));
       if (o.needs) {
-        prow(L('USES A DAY', 'How many they use a day (0.2: one lasts 5 days)'), N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'));
-        prow(L('DAYS WITHOUT IT', 'Days they last with none at home, then gone'), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'));
+        prow(L('PER DAY', 'Units consumed per day'), N(o.needs.per, v => { o.needs.per = v; }, 'Units per day', '0.1'));
+        prow(L('ON EMPTY', 'Effect when home stock reaches 0'), S(NEED_OUT, o.needs.out || 'death', v => { o.needs.out = v; }, 100, 'Effect'));
       }
       famRow(o);
       // (user Nov 19 21:05-21:10) the coins they start with, and where they work - a job is what their WORK place is short of (PRIORITIES)
-      prow(L('COINS', 'Coins they start with'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Coins they start with', '1'));
-      prow(L('WORK', 'Where they work: its design\'s WORK is their day'), S(placeOpts(strWork, o.work, [0, 'NOWHERE'], 'A WORKPLACE'), o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'));
-      prow(L('VEHICLE', 'Their own vehicle: at their home, again the morning after it\'s lost'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh || '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Their own vehicle'));
+      prow(L('COINS', 'Starting coins'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Starting coins', '1'));
+      prow(L('WORK', 'Workplace'), S(placeOpts(strWork, o.work, [0, 'NOWHERE'], 'A WORKPLACE'), o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Workplace'));
+      prow(L('VEHICLE', 'Own vehicle, at home; respawns next morning'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh || '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Own vehicle'));
       // (their ROUTINE: their WORK place's since Nov 20 - STRUCTURES > SELECTED > WORK, 50-zzzzz-story-work.js)
     }
     const add = el('button', '', 'ADD CHARACTER'); add.title = 'A new character';
@@ -79447,9 +79447,9 @@ function benchOn(M, fn) {
     storyReset(); env.time = Math.max(STORY_CFG.startH, 8); W.day = 1;
     for (const v of [...storyCars, ...jetboats]) if (v.story && v.state === 'run' && folkOwner(v)) placedPutAway(v);
     keptVehStep();   // (everyone's own and work vehicles at their spots, as a story starts - 50-zzzzz-story-work.js)
-    for (const d of stNeedy()) { const want = M.days[d.id]; if (want == null) continue;   // (the days left: their home's stock of it, then their grace)
-      const N = stNeeds(d), H = stHome(d), u = stU('c' + d.id), g = Math.max(0, N.grace || 0), n = Math.max(0, Math.round((want - g) * N.per));
-      u.f = 0; u.g = want < g ? g - Math.max(0, want) : 0; stAdd(H, N.k, n - stN(H, N.k)); }
+    for (const d of stNeedy()) { const want = M.days[d.id]; if (want == null) continue;   // (the days left: their home's stock of it)
+      const N = stNeeds(d), H = stHome(d), u = stU('c' + d.id), n = Math.max(0, Math.round(want * N.per));
+      u.f = 0; stAdd(H, N.k, n - stN(H, N.k)); }
     const c = charOf(M.who) || PLAYER_C, o = strById(M.at);
     if (c === PLAYER_C) {
       const P = crew[0]; if (P.mode === 'civ') civRelease(0); P.mode = 'dock'; P.watch = null;
@@ -79535,11 +79535,11 @@ function benchFill(P, el, css) {
     for (const A of O.arrows) {
       const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center';
       const t = el('span', '', A.name); t.style.cssText = 'font-size:11px;color:#ffb02e;min-width:110px';
-      let b; if (A.press) { b = el('button', '', 'PRESS ' + key + ': ' + A.does); b.title = 'Do it: the moment moves on'; b.onclick = () => benchDo(A); }
-      else { b = el('span', '', 'PRESS ' + key + ': ' + (A.sheet ? 'ITS SHEET' : A.does)); b.style.cssText = 'font-size:11px;color:#9aa3b8'; b.title = A.sheet ? 'Its sheet\'s lines, under it' : 'Not in the bench: getting in and stealing are played'; }
+      let b; if (A.press) { b = el('button', '', 'PRESS ' + key + ': ' + A.does); b.title = 'Apply'; b.onclick = () => benchDo(A); }
+      else { b = el('span', '', 'PRESS ' + key + ': ' + (A.sheet ? 'ITS SHEET' : A.does)); b.style.cssText = 'font-size:11px;color:#9aa3b8'; b.title = A.sheet ? 'Sheet lines below' : 'Not simulated'; }
       r.append(t, b); L.appendChild(r);
       for (const q of A.sheet || []) { const s = el('div', 'row'); s.style.cssText = 'display:flex;gap:4px;align-items:center;padding-left:14px';
-        const sb = el('button', '', q.txt); sb.title = 'The sheet\'s line: ' + key + ' takes it'; sb.onclick = () => benchDo(A, q.arg); s.appendChild(sb);
+        const sb = el('button', '', q.txt); sb.title = 'Apply'; sb.onclick = () => benchDo(A, q.arg); s.appendChild(sb);
         if (q.no) { const n = el('span', '', q.no); n.style.cssText = 'font-size:11px;color:#ff6a5a'; s.appendChild(n); } L.appendChild(s); }
     }
   } else if (O) {
@@ -79551,12 +79551,12 @@ function benchFill(P, el, css) {
   const row = (lab, tip, ...kids) => { const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; r.append(help(el('label', '', lab), tip), ...kids); R.appendChild(r); return r; };
   const pick = (opts, val, set, tip) => { const s = el('select'); s.style.cssText = css + ';width:150px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); BENCH.said = null; storyTabSync(); }; return s; };
   const num = (val, set, tip, step) => { const i = el('input'); i.type = 'number'; i.min = '0'; i.step = step || '1'; i.value = String(val ?? 0); i.style.cssText = css + ';width:70px'; i.title = tip; i.onchange = () => { set(Math.max(0, +i.value || 0)); BENCH.said = null; storyTabSync(); }; return i; };
-  row('WHO', 'Whose moment it is', pick(charsAll().map(c => [c.id, c === PLAYER_C ? 'PLAYER (YOU)' : c.name]), M.who, v => { BENCH.m = Object.assign(benchStart(benchWho(v)), { days: M.days }); }, 'Whose moment it is'));
-  row('AT', 'Where they are', pick(placeOpts(() => true, M.at, [0, 'NOWHERE'], 'A PLACE'), M.at, v => { M.at = +v; }, 'Where they are'));
-  row('COINS', 'Their coins', num(M.coins, v => { M.coins = Math.floor(v); }, 'Their coins'));
-  if (mine) for (const C of CARGO) row(C.name, 'How many you carry', num(M.carry[C.k] || 0, v => { if (v) M.carry[C.k] = Math.floor(v); else delete M.carry[C.k]; }, 'How many you carry'));
-  for (const d of stNeedy()) row(String(d.name).toUpperCase() + ' DAYS LEFT', 'Days of what they need left at their home (then their grace)', num(M.days[d.id] ?? (O && O.days ? O.days[d.id] : ''), v => { M.days[d.id] = v; }, 'Days of ' + String(CARGO_LAB[d.needs.k] || d.needs.k).toLowerCase() + ' left', '0.5'));
-  const rs = el('button', '', 'NEW STORY'); rs.title = 'Back to a new story\'s start'; rs.onclick = () => { BENCH.m = benchStart(M.who); BENCH.said = null; storyTabSync(); };
+  row('WHO', 'Character', pick(charsAll().map(c => [c.id, c === PLAYER_C ? 'PLAYER (YOU)' : c.name]), M.who, v => { BENCH.m = Object.assign(benchStart(benchWho(v)), { days: M.days }); }, 'Character'));
+  row('AT', 'Location', pick(placeOpts(() => true, M.at, [0, 'NOWHERE'], 'A PLACE'), M.at, v => { M.at = +v; }, 'Location'));
+  row('COINS', 'Coins', num(M.coins, v => { M.coins = Math.floor(v); }, 'Coins'));
+  if (mine) for (const C of CARGO) row(C.name, 'Carried', num(M.carry[C.k] || 0, v => { if (v) M.carry[C.k] = Math.floor(v); else delete M.carry[C.k]; }, 'Carried'));
+  for (const d of stNeedy()) row(String(d.name).toUpperCase() + ' DAYS LEFT', 'Home stock, in days', num(M.days[d.id] ?? (O && O.days ? O.days[d.id] : ''), v => { M.days[d.id] = v; }, 'Home stock, in days', '0.5'));
+  const rs = el('button', '', 'NEW STORY'); rs.title = 'Reset to story start'; rs.onclick = () => { BENCH.m = benchStart(M.who); BENCH.said = null; storyTabSync(); };
   const r = el('div', 'row'); r.appendChild(rs); R.appendChild(r);
   if (!BENCH.watch) { BENCH.watch = new MutationObserver(() => { if (!P.hidden) storyTabSync(); }); BENCH.watch.observe(P, { attributes: true, attributeFilter: ['hidden'] }); }   // (opened: read for the world as it is now)
 }
@@ -80496,13 +80496,15 @@ window.__slines = { obj: () => story.obj, say: () => story.say, at: id => { cons
    - MAKES (`o.makes` { k, per }: so many a day): each one made takes what its good is MADE FROM (the CARGO list's `needs`) out of the
      same stock; without them nothing is made.
    - A CHARACTER's NEEDS (user 15:40: "even your grandfather being sick is part of the logic. Meaning we can set any entity as sick"):
-     one of the OWNERS with a HOME (a structure) and `needs` { k, per, grace } uses so many a day out of their home's stock; with none
-     there they last GRACE more days, then they are gone - their lines are no longer said, and the game goes on (user 15:29: "the game
+     one of the OWNERS with a HOME (a structure) and `needs` { k, per, out } uses PER DAY out of their home's stock; when it's empty
+     ON EMPTY happens (user Nov 20 13:22: "what happens to him after he runs out, which for now it would be 'death' as the only existing property"
+     - NEED_OUT): DEATH - they are gone - their lines are no longer said, and the game goes on (user 15:29: "the game
      continues. It's up to you to reload it or not"). How long they last is `stDays(c)` - a line's {DAYS} and DAYS LEFT, and the purple
      countdown at the top (the soonest).
    - A MARKET sells what it has: a line to buy only while its stock holds one, and buying takes it out (50-zz-cargo.js).
    Stepped with the story's clock (game hours: the day and the hour), over the structures that make or use something only.
    ================================================================ */
+const NEED_OUT = [['death', 'DEATH']];   // (ON EMPTY: what happens when a need's home stock is out)
 const STOCK = { s: {}, u: {}, gone: {}, h: null };   // (s: structure id -> goods in play; u: structure id -> { m: the share of the next one made } and 'c' + character id -> { f: the share of the one being used up, g: grace days used }; gone: character ids; h: the clock's last game hour)
 defTable('strStock', () => [STOCK], { make: () => STOCK });
 function stockReset() { STOCK.s = {}; STOCK.u = {}; STOCK.gone = {}; STOCK.h = null; }
@@ -80519,8 +80521,10 @@ const stHome = c => c && c.home ? strsUsed().find(o => o.id === c.home) || null 
 const stNeeds = c => c && c.needs && cargoKind(c.needs.k) && c.needs.per > 0 && stHome(c) ? c.needs : null;
 const stNeedy = () => OWNERS.filter(c => stNeeds(c));
 const stChar = id => OWNERS.find(c => c.id === id) || null;
-// how many days a character lasts: what their home holds of what they need (less the part of the one in use), then their grace
-function stDays(c) { const N = stNeeds(c); if (!N) return null; if (stGone(c.id)) return 0; const u = stU('c' + c.id); const d = (stN(stHome(c), N.k) - u.f) / N.per + Math.max(0, (N.grace || 0) - u.g); return d > 1e-6 ? d : 0; }
+// how many days a character's home stock of what they need lasts (less the part of the one in use)
+function stDays(c) { const N = stNeeds(c); if (!N) return null; if (stGone(c.id)) return 0; const u = stU('c' + c.id); const d = (stN(stHome(c), N.k) - u.f) / N.per; return d > 1e-6 ? d : 0; }
+// (an older world) a need's days without it gone: ON EMPTY, DEATH the only one
+worldLoad(() => { for (const c of OWNERS) if (c.needs) { delete c.needs.grace; if (!NEED_OUT.some(q => q[0] === c.needs.out)) c.needs.out = 'death'; } });
 // the days that matter at a place: the soonest of those who live there (null: nobody there needs anything)
 function stDaysAt(o) { let d = null; for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id)) { const x = stDays(c); if (d == null || x < d) d = x; } return d; }
 const stDaysText = d => { const n = Math.max(0, Math.ceil(d - 1e-6)); return n + (n === 1 ? ' DAY' : ' DAYS'); };
@@ -80541,11 +80545,8 @@ function stockStep() {
   for (const c of stNeedy()) {
     if (stGone(c.id)) continue;
     const N = stNeeds(c), o = stHome(c), u = stU('c' + c.id); let t = N.per * dd;   // (in goods)
-    while (t > 0) {
-      if (stN(o, N.k) > 0) { const a = Math.min(t, 1 - u.f); u.f += a; t -= a; if (u.f >= 1 - 1e-9) { stAdd(o, N.k, -1); u.f = 0; } continue; }
-      u.g += t / N.per; t = 0;                          // (none left: their grace runs)
-    }
-    if (stDays(c) <= 1e-6) { STOCK.gone = Object.assign({}, STOCK.gone, { [c.id]: 1 }); sound('empty', o.x); if (typeof folkLog === 'function') folkLog({ t: 'gone', who: c.id }); }
+    while (t > 0 && stN(o, N.k) > 0) { const a = Math.min(t, 1 - u.f); u.f += a; t -= a; if (u.f >= 1 - 1e-9) { stAdd(o, N.k, -1); u.f = 0; } }
+    if (stDays(c) <= 1e-6 && (N.out || 'death') === 'death') { STOCK.gone = Object.assign({}, STOCK.gone, { [c.id]: 1 }); sound('empty', o.x); if (typeof folkLog === 'function') folkLog({ t: 'gone', who: c.id }); }
   }
 }
 /* ---- DELIVERING AND GIVING (user Nov 19 15:44: "any character could express what they're doing if you run into them ... you hear about the
