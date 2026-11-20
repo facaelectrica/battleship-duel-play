@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1169;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 11:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1170;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 11:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36773,6 +36773,19 @@ const ED_CSS = `
 #skyEd .cvlist button { padding: 1px 6px; margin-left: 6px; }
 #skyEd .cvlist .warn { color: #ff8a7a; }
 #skyEd .cat { border: 1px solid #2c3850; border-radius: 6px; padding: 5px 9px 7px; display: grid; gap: 2px; }
+/* (the panel's one system - TUNE.sync below) hidden is hidden, whatever the box's own display; a button that can't act now is greyed, one look */
+#skyEd [hidden] { display: none !important; }
+#skyEd button:disabled { opacity: 0.4; cursor: default; }
+/* halves side by side: a tab's tools, then SELECTED - what's picked (TUNE.buttons' '=NAME' groups, the OBJECTS tabs' SPAWN | SELECTED) */
+#skyEd .opane { display: flex; gap: 10px; align-items: flex-start; }
+#skyEd .opane > .osec { flex: 1 1 0; min-width: 0; }
+#skyEd .opane > .osec:first-child { flex: 0 1 auto; }   /* (the tools' half as wide as its sections need - the room left is SELECTED's) */
+#skyEd .opane > .osec:first-child > .cats { display: flex; flex-wrap: wrap; }   /* (its sections side by side as far as the room goes) */
+#skyEd .opane > .osec:first-child > .cats > * { flex: 0 1 350px; }
+#skyEd .osec { border: 1px solid #3a4a68; border-radius: 8px; padding: 6px 10px 8px; margin: 0; background: rgba(255,255,255,0.02); }
+#skyEd .osec > h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; color: #ffb347; font-weight: bold; }
+#skyEd .osec > h3 .olab { color: #9aa3b8; }
+#skyEd .osec .cvbar { flex-wrap: wrap; row-gap: 4px; }
 /* (user Nov 20 09:49: "parts are just coming out of their boxes. Or the box doesnt fit inside its defined area. Cant you just have a rule that this never
    happens?") THE ONE RULE: nothing is wider than the box it's in - every box may shrink to its column (min-width 0), everything in a section is at most its
    width, and a row of anything but a slider is a wrapping line (what doesn't fit goes to the next line). A slider's row keeps its columns, which fit a section */
@@ -36784,7 +36797,6 @@ const ED_CSS = `
 #skyEd .row:not(:has(> input[type=range])) > output { margin-left: auto; }
 #skyEd .row > .tgl { flex: 0 0 auto; }
 #skyEd h4 { margin: 0 0 3px; color: #7a8294; font-weight: normal; font-size: 11px; letter-spacing: .1em; }
-#skyEd h3.grp { grid-column: 1 / -1; flex-basis: 100%; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid #2c3850; color: #d8dce8; font-weight: 600; font-size: 12px; letter-spacing: .12em; }
 #skyEd .row { display: grid; grid-template-columns: minmax(64px, 96px) minmax(150px, 1fr) 44px 50px; align-items: center; gap: 6px; }
 #skyEd .row label { color: #7a8294; letter-spacing: .04em; cursor: help; }
 #skyEd .row output { text-align: right; color: #ffb347; font-variant-numeric: tabular-nums; }
@@ -36882,6 +36894,7 @@ function edBuild(host) {
   edHost = host;
   const st = document.createElement('style'); st.textContent = ED_CSS; document.head.appendChild(st);
   const root = edEl('div'); root.id = 'skyEd'; root.hidden = true;
+  new MutationObserver(() => edOneProp(root)).observe(root, { childList: true, subtree: true });   // (one property a row - edOneProp)
   const tabs = edEl('div', 'bar');
   const bCmp = edEl('button', '', 'COMPARE: MINE'); bCmp.title = 'Switch between your settings and the defaults';
   const bClose = edEl('button', '', 'CLOSE');
@@ -36966,7 +36979,7 @@ function edBuild(host) {
     // editors in one page in turn: ONE set, TUNE.terrPane, shown in whichever editor is up - put back here as this tab shows)
     if (t !== 'TERRAIN') edFillPane(t, pane);
   }
-  const edShow = () => { for (const t in panes) panes[t].hidden = t !== edTab; if (edTab === 'COLOURS') edColours(panes.COLOURS); if (edTab === 'TERRAIN') { const P = TUNE.terrPane(); if (P.parentNode !== panes.TERRAIN) panes.TERRAIN.appendChild(P); } };
+  const edShow = () => { TUNE.sync(); for (const t in panes) panes[t].hidden = t !== edTab; if (edTab === 'COLOURS') edColours(panes.COLOURS); if (edTab === 'TERRAIN') { const P = TUNE.terrPane(); if (P.parentNode !== panes.TERRAIN) panes.TERRAIN.appendChild(P); } };
   bClose.onclick = () => { root.hidden = true; TUNE.open = false; };
   const setV = (k, v) => { P[k] = v; if (TUNE.rows[k]) { TUNE.rows[k].inp.value = v; TUNE.rows[k].show(); } };
   bCmp.onclick = () => {
@@ -37000,20 +37013,29 @@ function edBuild(host) {
 // element: the TERRAIN tab's do - so a tab is filled in one place only). TUNE.fillTab(tab, host): the same into another panel (the Biome Editor's)
 function edFillPane(t, pane) {
   const cats = ED_TABS[t]; if (!cats) return;
+  // (user Nov 20 10:40: "Why pile sections vertically when the rest of the section is empty?") a tab with groups ('=NAME') is halves side by side,
+  // each its sections side by side - the sections before the first group in the first half; a half whose sections are all hidden says so
+  let host = pane;
+  const half = title => { const h = edEl('div', 'osec'); if (title) h.appendChild(edEl('h3', '', title)); const g = edEl('div', 'cats'); h.appendChild(g); pane.appendChild(h);
+    if (title) { const n = edEl('div', 'tabnote', 'Nothing picked: click something in the world.'); h.insertBefore(n, g); TUNE.when(n, () => ![...g.children].some(c => !c.hidden)); }
+    return g; };
+  if (ED_BTNS.some(([bt, name]) => bt === t && name[0] === '=')) { pane.classList.remove('cats'); pane.classList.add('opane'); host = half(null); }
   const smHint = Object.fromEntries(SM_SL.concat(FW_SL, BG_SL).map(r => [r[0], r[6]])), rowOf = Object.fromEntries(SL.concat(SM_SL, FW_SL, BG_SL).map(r => [r[0], r]));
   for (const [name, keys] of cats) {
     const c = edEl('div', 'cat'); c.appendChild(edEl('h4', '', name));
     for (const k of keys) { const r = rowOf[k]; if (!r) continue; c.appendChild(edRow(k, ED_SHORT[k] || r[1], r[2], r[3], r[4], DESC[k] || smHint[k])); TUNE.tab[k] = t; }
-    pane.appendChild(c);
+    host.appendChild(c);
   }
   if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
-  for (const [bt, name, list] of ED_BTNS) {
+  for (const [bt, name, list, opts] of ED_BTNS) {
     if (bt !== t) continue;
-    if (name[0] === '=') { pane.appendChild(edEl('h3', 'grp', name.slice(1))); continue; }   // (a group's heading over the sections after it - TERRAIN's SELECTED PROPERTIES, Nov 7)
+    if (name[0] === '=') { host = half(name.slice(1)); continue; }   // (a group: the next half - TERRAIN's SELECTED, Nov 7)
     const c = edEl('div', 'cat btns'); c.appendChild(edEl('h4', '', name));
-    for (const [lab, desc, fn] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); c.appendChild(b); }
-    pane.appendChild(c);
+    if (opts && opts.when) TUNE.when(c, opts.when);
+    for (const [lab, desc, fn, need] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); if (need) TUNE.need(b, need); c.appendChild(b); }
+    host.appendChild(c);
   }
+  TUNE.sync();
 }
 TUNE.fillTab = (t, host) => { const pane = edEl('div', 'cats'); edFillPane(t, pane); host.appendChild(pane); return pane; };
 let ED_TERR = null;   // (the TERRAIN tab's one set of sections: the GAME EDITOR's TERRAIN tab and the BIOME EDITOR's EDIT TERRAIN show this same one)
@@ -37022,7 +37044,48 @@ TUNE.terrPane = () => { if (!ED_TERR) { ED_TERR = edEl('div', 'cats'); edFillPan
 TUNE.toggle = edToggle; TUNE.isOnOff = isOnOff; TUNE.help = edHelp;   // (TUNE.help(name, text): the help line, from any panel)   // (the on/off switch, for the tabs that build their own rows)
 TUNE.pane = (tab, build) => { ED_PANES[tab] = build; if (!ED_TABS[tab]) ED_TABS[tab] = []; };
 TUNE.sliders = (tab, name, keys) => { if (!ED_TABS[tab]) ED_TABS[tab] = []; ED_TABS[tab].push([name, keys]); };   // (a group of the sliders above, on another chat's tab - e.g. TERRAIN)
-TUNE.buttons = (tab, name, list) => { ED_BTNS.push([tab, name, list]); if (!ED_TABS[tab]) ED_TABS[tab] = []; };
+TUNE.buttons = (tab, name, list, opts) => { ED_BTNS.push([tab, name, list, opts]); if (!ED_TABS[tab]) ED_TABS[tab] = []; };   // (opts.when: the section shows only then; a button's 4th item: what it needs to act - TUNE.sync)
+/* THE PANEL'S ONE SYSTEM (user Nov 20 10:33: "If I select the terrain shape and then I deselect, the create terrain section completely disappears";
+   10:34: "make sure this kind of issue does never happen again anywhere ... the game editor is a patched assembly of things, because when one changes,
+   it breaks another, versus a logical system"; 10:40: "Why pile sections vertically when the rest of the section is empty?"):
+   - LAYOUT: a tab is sections side by side (.cats, wrapping to the width) - one titled thing a section, never two piled in one box; a tab with
+     groups is halves side by side (.opane / .osec): its tools, then SELECTED - what's picked.
+   - WHAT SHOWS: a section that applies only to some picks says when (TUNE.buttons' opts.when, TUNE.when(el, fn)); a button that needs something
+     to act on says what (a button's 4th item, TUNE.need(el, fn)). TUNE.sync() sets them all from what is so now - as a tab is filled and shown,
+     after every press (wedSync) and every 0.2 s while anything of the editor is up: what the panel shows is worked out from the pick, never left
+     from whenever something last remembered to refresh it. Hidden is hidden and greyed is one look (the CSS above).
+   - SCROLL: a pick scrolls the panel to its section (wedAfter); nothing picked any more - the panel back at its top, where the tab's tools are.
+   A new section or button that depends on the pick uses these - never its own .hidden / .disabled set from a sync of its own. */
+const ED_WHEN = [], ED_NEED = [], ED_ONSYNC = [];
+let edHadPick = false;
+TUNE.when = (el, fn) => { ED_WHEN.push([el, fn]); return el; };
+TUNE.need = (el, fn) => { ED_NEED.push([el, fn]); return el; };
+TUNE.picked = null;   // (() => is anything picked in the world - 50-zzz-world-ed.js)
+TUNE.onSync = f => { ED_ONSYNC.push(f); return f; };   // (what's written from the pick - a button's name (DELETE (Dock)) - kept in step with it the same way)
+TUNE.sync = () => {
+  const ok = f => { try { return !!f(); } catch (e) { return true; } };
+  for (const f of ED_ONSYNC) try { f(); } catch (e) { }
+  for (const [el, f] of ED_WHEN) if (el.isConnected) { const v = ok(f); if (el.hidden === v) el.hidden = !v; }
+  for (const [el, f] of ED_NEED) if (el.isConnected) { const v = ok(f); if (el.disabled === v) el.disabled = !v; }
+  if (TUNE.picked) { const p = ok(TUNE.picked); if (edHadPick && !p) edScrollHome(); edHadPick = p; }
+};
+// (user Nov 20 10:48: "properties that are not related, each should have its own line organized vertically. Otherwise its confusing") ONE PROPERTY A
+// ROW: a row (.row) is one property - its name (a label) and what sets it. A row built with more names than one is cut into one row each, in place,
+// as it's put in the panel (a sub-label inside one property is a span, not a label) - every tab's, whoever builds it
+function edOneProp(root) {
+  for (const r of root.querySelectorAll('.row')) {
+    const L = [...r.children].filter(c => c.tagName === 'LABEL'); if (L.length < 2) continue;
+    let at = r;
+    for (const l of L.slice(1)) {
+      const n = document.createElement('div'); n.className = r.className; n.style.cssText = r.style.cssText;
+      for (let c = l; c; ) { const nx = c.nextSibling; if (c !== l && c.tagName === 'LABEL') break; n.appendChild(c); c = nx; }
+      at.after(n); at = n;
+    }
+  }
+}
+// nothing picked any more: every panel of the editor back at its top
+function edScrollHome() { for (const R of document.querySelectorAll('#skyEd .body, #vgBot .body')) if (R.scrollTop > 0) R.scrollTop = 0; }
+setInterval(() => { if (TUNE.open || (typeof VEG_MODE !== 'undefined' && VEG_MODE)) TUNE.sync(); }, 200);
 TUNE.add = (tab, rows) => { ED_TABS[tab] = [[tab, rows.map(r => r[0])]]; for (const r of rows) { if (!(r[0] in P)) P[r[0]] = r[5]; P_DEF[r[0]] = r[5]; DESC[r[0]] = r[6]; SL.push(r); } };
 // the lab's views (user Oct 27 evening: "In the Lab we have these view: tones etc... I cant find any of that in the game
 // editor"): the clouds' VIEW (TONES, LOBES, BILLOWS, LIGHT - each lobe, billow or puff in a colour of its own; the decks drawn
@@ -59650,7 +59713,8 @@ function terrainSetShape(i, v) {
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
-  terrainSyncSecs();
+  if (typeof landNameSync === 'function') landNameSync();   // (LAND's name - 50-zzzzz-story-cities.js; which sections show: TUNE.sync)
+  NSKY.editor.TUNE.sync();
   let sk; if (s && s.Is) { const set = new Set(); for (const n of s.Is) if (ISLANDS[n]) for (const p of ISLANDS[n].p) set.add(p[2] || null); if (set.size) sk = set.size === 1 ? [...set][0] : 'mixed'; }   // (whole shapes: every piece round them)
   else if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
@@ -59755,8 +59819,7 @@ function terrainDelSeg() {
 }
 function terrainSyncSplit() {
   const s = TERRAIN_ED.sel, on = !!(s && selPts(s));
-  for (const b of TERRAIN_ED.splitBtns || []) { b.textContent = 'SPLIT SEGMENT ' + (typeof btnVar === 'function' ? btnVar('in ' + ED_SPLIT.v) : ED_SPLIT.v); b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
-  for (const b of TERRAIN_ED.delSegBtns || []) { b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
+  for (const b of TERRAIN_ED.splitBtns || []) b.textContent = 'SPLIT SEGMENT ' + (typeof btnVar === 'function' ? btnVar('in ' + ED_SPLIT.v) : ED_SPLIT.v);   // (greyed by its need - TUNE.sync)
   if (TERRAIN_ED.splitRow) TERRAIN_ED.splitRow.inp.value = ED_SPLIT.v;
   if (TERRAIN_ED.splitNote) TERRAIN_ED.splitNote.textContent = on ? (selHi(s) > selLo(s) ? (selHi(s) - selLo(s) + 1) + ' segments picked.' : '1 segment picked.') : 'Pick a segment.';
 }
@@ -59772,7 +59835,6 @@ function terrainSplitRow(b) {
   terrainSyncSplit();
 }
 terrainSplit.init = b => { (TERRAIN_ED.splitBtns || (TERRAIN_ED.splitBtns = [])).push(b); setTimeout(() => terrainSplitRow(b), 0); };
-terrainDelSeg.init = b => { (TERRAIN_ED.delSegBtns || (TERRAIN_ED.delSegBtns = [])).push(b); };
    // (DELETE: the editor's one, on its top bar - user Nov 1)
 // (user Oct 28, 21:04) the island lines: in the middle plane, behind the water - the boats and the subs go through them
 // (the Story spec section 8: 'Replace "Create Island" with "Create Segment"' - a new segment comes picked whole, so FOREST /
@@ -59809,15 +59871,20 @@ const roadBtn = () => { const f = () => islToggleRoad(); f.init = b => { TERRAIN
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
 
 // (Nov 7, user: "TERRAIN EDITOR Changes ... 2 CLEAR SECTIONS: TERRAIN SHAPES - only these options, to create terrain ... SELECTED
-// PROPERTIES (based on what you have selected)") the tab: TERRAIN SHAPES - what makes a new shape; SELECTED PROPERTIES - its parts shown
-// by what's picked: SEGMENT TYPE and SEGMENT ACTIONS for any shape, TERRAIN TYPE for a terrain shape, CAVE TYPE for a cave or tunnel
+// PROPERTIES (based on what you have selected)") the tab is two halves side by side (user Nov 20 10:40): TERRAIN SHAPES - what makes a new shape;
+// SELECTED - what's picked: SEGMENT TYPE and SEGMENT ACTIONS for any pick, TERRAIN TYPE and LAND for a terrain shape, CAVE WATER for a cave - each
+// section saying when it shows and each button what it needs (TUNE.sync, sky/90-editor.js)
+// what's picked on the terrain (TUNE.sync asks these): segments or whole shapes (s), a point (q), the shapes' kinds
+const terrPick = () => { const s = TERRAIN_ED.sel, q = typeof ISL_ED !== 'undefined' ? ISL_ED.pt : null, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : q ? [q.n] : []).filter(n => ISLANDS[n]); return { s, q, seg: !!(s && s.I != null), ks: L.map(n => shpK(ISLANDS[n])) }; };
+const terrAny = () => { const P = terrPick(); return !!(P.s || P.q); }, terrSeg = () => terrPick().seg, terrSegs = () => !!terrPick().s, terrPt = () => !!terrPick().q;
+const terrLand = () => terrPick().ks.some(k => k !== 'H');
 islAdd.init = terrainTabInit;
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   ['CREATE TERRAIN', 'Adds a new piece of ground in the middle of the view', islAdd],
   ['CREATE TUNNEL', 'Adds a tunnel: a passage dug through the ground', islAddTunnel],
   ['CREATE CAVE', 'Adds a cave: a hollow space dug into the ground', islAddHole],
 ]);
-NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED PROPERTIES', []);
+NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED', []);
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
   skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
   skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
@@ -59827,19 +59894,17 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
   skinBtn('SWAMP', 'W', 'Picked segments: dark mud and wet grass'),
   skinBtn('VOLCANIC', 'V', 'Picked segments: black rock with lava'),
   skinBtn('DEEP SEA', 'S', 'Picked underwater segments: the deep sea floor'),   // (user Nov 7 16:35: "select terrain segments and assign them as deep sea")
-]);
+].map(b => b.concat([terrSegs])), { when: terrAny });
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
-  ['SPLIT SEGMENT', 'Cuts each picked segment into equal pieces, so you can give them different types', terrainSplit],
-  ['SPLIT SHAPE', 'Cuts the shape into two shapes at the picked segment', islSplitShape],
-  ['ADD LAYER', 'Adds a shape in front, joined at the picked segment', islAddLayer],   // (terrain layers - 50-land-islands)
-  ['DETACH', 'Undoes the picked point\'s extra join', islDetach],
-  seamBtn(),
-  roadBtn(),
-  ['FLIP', 'Mirrors the picked shape, its layers and what stands on them', () => islFlip()],   // (50-zzz-objects-tab.js)
-]);
-const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
-{ const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
-  NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN TYPE', [k, kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'), ugBtn()]); }
+  ['SPLIT SEGMENT', 'Cuts each picked segment into equal pieces, so you can give them different types', terrainSplit, () => { const s = TERRAIN_ED.sel; return !!(s && selPts(s)); }],
+  ['SPLIT SHAPE', 'Cuts the shape into two shapes at the picked segment', islSplitShape, terrSeg],
+  ['ADD LAYER', 'Adds a shape in front, joined at the picked segment', islAddLayer, terrSeg],   // (terrain layers - 50-land-islands)
+  ['DETACH', 'Undoes the picked point\'s extra join', islDetach, terrPt],
+  seamBtn().concat([terrSeg]),
+  roadBtn().concat([terrSeg]),
+  ['FLIP', 'Mirrors the picked shape, its layers and what stands on them', () => islFlip(), terrAny],   // (50-zzz-objects-tab.js)
+], { when: terrAny });   // (user Nov 20 10:30: "the segment actions are available and not grayed out if I don't have any segment selected")
+NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN TYPE', [kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'), kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'), ugBtn()], { when: terrLand });
 // (Nov 7, user: no see-through shapes - CAVE TYPE (CAVE / HOLE) gone: every cave and tunnel shows the cave behind it)
 // (user Nov 7 14:15) CAVE WATER: a picked cave's own pool - ADD / REMOVE WATER LINE and its WATER LEVEL (bottom 0% .. top 100%); off by default,
 // the cave floods by itself only where it meets the sea or a lake
@@ -59847,28 +59912,11 @@ const caveRooms = () => { const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s &&
 const caveSpan = I => { const ys = I.p.map(p => WATER_Y + p[1]); return [Math.min(...ys), Math.max(...ys)]; };
 function caveWaterSet(on) { const L = caveRooms(); if (!L.length) return; for (const I of L) { if (on) { const [a, b] = caveSpan(I); I.wl = Math.round(b - (b - a) * 0.3); } else delete I.wl; } islChanged(); terrainSyncSkin(); }
 { const a = ['ADD WATER LINE', 'Puts a pool of water in the picked cave', () => caveWaterSet(true)], r = ['REMOVE WATER LINE', 'Takes the pool of water out of the picked cave', () => caveWaterSet(false)];
-  a[2].init = secOf('cwater', b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.cwLvl) return; const row = document.createElement('div'); row.className = 'row';
+  a[2].init = b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.cwLvl) return; const row = document.createElement('div'); row.className = 'row';
     row.innerHTML = '<label>WATER LEVEL</label><input type="range" min="0" max="100" step="1"><output></output><span class="dv"></span>'; row.querySelector('label').title = 'How high the water in the picked cave comes up';
     const inp = row.querySelector('input'); inp.addEventListener('input', () => { for (const I of caveRooms()) { if (!Number.isFinite(I.wl)) continue; const [lo, hi] = caveSpan(I); I.wl = Math.round(hi - (hi - lo) * (+inp.value / 100)); } islChanged(); terrainSyncSkin(); });
-    cat.appendChild(row); TERRAIN_ED.cwLvl = { inp, out: row.querySelector('output') }; terrainSyncSkin(); }, 0); });
-  NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE WATER', [a, r]); }
-// the SELECTED PROPERTIES parts for what's picked: TERRAIN TYPE with a terrain shape, CAVE TYPE with a cave or tunnel
-function terrainSyncSecs() {
-  const S = TERRAIN_ED.secs; if (!S) return;
-  const s = TERRAIN_ED.sel, q = typeof ISL_ED !== 'undefined' ? ISL_ED.pt : null, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : q ? [q.n] : []).filter(n => ISLANDS[n]), ks = L.map(n => shpK(ISLANDS[n]));   // (a point picked alone: its shape's sections)
-  if (S.terrain) S.terrain.hidden = !ks.some(k => k !== 'H');
-  if (S.cave) S.cave.hidden = !ks.some(k => k === 'H');
-  if (S.cwater) S.cwater.hidden = !caveRooms().length;   // (a cave - not a tunnel - picked)
-  if (S.land) { S.land.hidden = !ks.some(k => k !== 'H'); if (typeof landNameSync === 'function') landNameSync(); }   // (LAND: a terrain shape - 50-zzzzz-story-cities.js)
-  // (user Nov 20 10:30: "the segment actions are available and not grayed out if I don't have any segment selected") SEGMENT TYPE and SEGMENT
-  // ACTIONS greyed till what each acts on is picked: a type, SPLIT SHAPE, ADD LAYER, SEAM, ROAD - segments (or whole shapes for a type); DETACH -
-  // a point; FLIP - a shape, any way it's picked (SPLIT SEGMENT: terrainSyncSplit)
-  const seg = !!(s && s.I != null), any = !!(s || q), need = { 'SPLIT SHAPE': seg, 'ADD LAYER': seg, SEAM: seg, ROAD: seg, DETACH: !!q, FLIP: any };
-  const grey = (b, on) => { b.disabled = !on; b.style.opacity = on ? '' : '0.4'; };
-  for (const [b] of TERRAIN_ED.skinBtns || []) grey(b, !!s);
-  const A = TERRAIN_ED.seamBtn && TERRAIN_ED.seamBtn.parentNode;
-  if (A) for (const b of A.querySelectorAll('button')) { const k = Object.keys(need).find(t => b.textContent.trim().startsWith(t)); if (k) grey(b, need[k]); }
-}
+    cat.appendChild(row); TERRAIN_ED.cwLvl = { inp, out: row.querySelector('output') }; terrainSyncSkin(); }, 0); };
+  NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE WATER', [a, r], { when: () => caveRooms().length > 0 }); }   // (a cave - not a tunnel - picked)
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
 // (Nov 3: the WORLD SIZE buttons and the GROWTH slider gone - the world's size is its shapes', 50-zzzz-world-size.js)
@@ -70989,64 +71037,76 @@ function wxaEdDraw() {
     for (let i = 1; i <= Math.round(R * 0.3); i++) { C.fillRect(X - L + i - 1, Y - i, t, 2 * i); C.fillRect(X + L - i, Y - i, t, 2 * i); }
   }
 }
-// the panel: the picked area (or EVERYWHERE ELSE) - its name, colour, preset, settings, EDGE BLEND; then the presets
+// the panel (user Nov 20 10:40: "the Selected Area should be separate from the Presets, and they should be aligned horizontally since we have more
+// space"): two halves side by side, as every tab with a pick - WEATHER AREAS (ADD AREA; the PRESETS) and SELECTED: the picked area (or EVERYWHERE
+// ELSE) - its AREA (name, colour), its WEATHER (preset, settings, SAVE AS PRESET), its EDGES - each a section beside the others. Its DELETE is the
+// top bar's (WK.wxarea)
 function wxaSync() {
   const U = WXE.ui; if (!U.box) return;
-  U.box.textContent = '';
   const el = (t, h, cls) => { const e = document.createElement(t); if (h != null) e.textContent = h; if (cls) e.className = cls; return e; };
   const css = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px';
-  const row = (lab, tip, ...xs) => { const r = el('div', null, 'row'), l = el('label', lab); if (tip) l.title = tip; r.append(l, ...xs); U.box.appendChild(r); return r; };
-  const btn = (t, tip, f) => { const b = el('button', t); b.style.cssText = css + ';cursor:pointer;margin:2px 4px 2px 0'; b.title = tip; b.onclick = f; return b; };
-  const a = wxaSel();
-  if (!a) { U.box.appendChild(el('div', 'Pick an area on the view (its strip at the top, or anywhere in it), or the space between them: EVERYWHERE ELSE.', 'tabnote')); }
-  else {
-    const base = a === WXA.base;
-    U.box.appendChild(el('div', base ? 'EVERYWHERE ELSE' : 'AREA', 'row'));
+  const sec = (host, name) => { const c = el('div', null, 'cat'); c.appendChild(el('h4', name)); host.appendChild(c); return c; };
+  const row = (c, lab, tip, ...xs) => { const r = el('div', null, 'row'), l = el('label', lab); if (tip) l.title = tip; r.append(l, ...xs); c.appendChild(r); return r; };
+  const btn = (t, tip, f) => { const b = el('button', t); b.title = tip; b.onclick = f; return b; };
+  // SELECTED
+  U.box.textContent = '';
+  const a = wxaSel(), base = a === WXA.base;
+  U.sel.textContent = !a ? 'NONE' : base ? 'EVERYWHERE ELSE' : a.name || 'AREA';
+  U.none.hidden = !!a;
+  if (a) {
     if (!base) {
+      const c = sec(U.box, 'AREA');
       const nm = el('input'); nm.style.cssText = css + ';width:150px'; nm.value = a.name; nm.onchange = () => { a.name = nm.value.trim().toUpperCase(); wxaChanged(); setTimeout(undoCommit, 0); };
-      row('NAME', 'Its name, in its strip at the top', nm);
+      row(c, 'NAME', 'Its name, in its strip at the top', nm);
       const sw = el('div'); sw.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px';
-      for (const c of WXA_COLS) { const b = el('button'); b.style.cssText = `width:18px;height:18px;border-radius:3px;cursor:pointer;background:${c};border:2px solid ${c === a.col ? '#fff' : '#2c3850'}`; b.title = c; b.onclick = () => { a.col = c; wxaChanged(); setTimeout(undoCommit, 0); }; sw.appendChild(b); }
-      row('COLOUR', 'Its colour on the view', sw);
+      for (const col of WXA_COLS) { const b = el('button'); b.style.cssText = `width:18px;height:18px;padding:0;border-radius:3px;cursor:pointer;background:${col};border:2px solid ${col === a.col ? '#fff' : '#2c3850'}`; b.title = col; b.onclick = () => { a.col = col; wxaChanged(); setTimeout(undoCommit, 0); }; sw.appendChild(b); }
+      row(c, 'COLOUR', 'Its colour on the view', sw);
     }
+    const c = sec(U.box, 'WEATHER');
     const ps = el('select'); ps.style.cssText = css;
-    { const z = el('option', base || !a.pre ? '- CUSTOM -' : '- CUSTOM -'); z.value = ''; ps.appendChild(z); }
+    { const z = el('option', '- CUSTOM -'); z.value = ''; ps.appendChild(z); }
     for (const p of WXA.pre) { const z = el('option', p.name); z.value = p.id; ps.appendChild(z); }
     ps.value = !base && a.pre && WXA.pre.some(p => p.id === a.pre) ? a.pre : ''; ps.onchange = () => { if (ps.value) wxaApply(ps.value); };
-    row('PRESET', 'Set its weather from a preset (changing a setting makes it CUSTOM)', ps);
+    row(c, 'PRESET', 'Set its weather from a preset (changing a setting makes it CUSTOM)', ps);
     for (const [k, lab, lo, hi, st, tip] of WXA_KEYS) {
       const i = el('input'), show = v => k === 'fade' ? Math.round(v) + ' S' : Math.round(v * 100) + '', out = el('output', show(a[k]));
       i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = a[k];
-      i.oninput = () => { a[k] = +i.value; if (!base) a.pre = null; ps.value = ''; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); skyEdRefresh(); }; i.onchange = () => { wxaChanged(); setTimeout(undoCommit, 0); };   // (the held sky as it moves - skyEdRefresh)
-      row(lab, tip, i, out);
+      i.oninput = () => { a[k] = +i.value; if (!base) a.pre = null; ps.value = ''; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); skyEdRefresh(); }; i.onchange = () => { wxaChanged(); setTimeout(undoCommit, 0); };
+      row(c, lab, tip, i, out);
     }
+    { const r = el('div', null, 'row'); r.append(btn('SAVE AS PRESET', 'Keep these settings as a preset, named as it is (one of that name is written over)', wxaSavePreset)); c.appendChild(r); }
     if (!base) {
+      const c2 = sec(U.box, 'EDGES');
       const i = el('input'), out = el('output', Math.round(a.fw) + ' M'); i.type = 'range'; i.min = 5; i.max = 2000; i.step = 5; i.value = a.fw;
       i.oninput = () => { a.fw = +i.value; out.textContent = i.value + ' M'; skyEdRefresh(); }; i.onchange = () => { wxaChanged(); setTimeout(undoCommit, 0); };
-      row('EDGE BLEND', 'Metres each side of its edges where it blends into what is next to it', i, out);
-      const w = el('output', Math.round((a.x1 - a.x0) / UPM) + ' M'); row('LENGTH', 'Drag its edge handles to stretch it', w);
+      row(c2, 'EDGE BLEND', 'Metres each side of its edges where it blends into what is next to it', i, out);
+      row(c2, 'LENGTH', 'Drag its edge handles to stretch it', el('output', Math.round((a.x1 - a.x0) / UPM) + ' M'));
     }
-    { const r = el('div', null, 'row'); r.append(btn('SAVE AS PRESET', 'Keep these settings as a preset, named as it is (one of that name is written over)', wxaSavePreset)); if (!base) r.append(btn('DELETE AREA', 'Remove this area (what was under it: EVERYWHERE ELSE)', wxaDelete)); U.box.appendChild(r); }
   }
-  // the presets (the World Plan's weather list): each its name, colour, what it is; DELETE (one is always kept)
-  U.box.appendChild(el('h4', 'PRESETS'));
+  // the PRESETS (the World Plan's weather list): each its name, colour, what it is; X deletes it (one is always kept)
+  U.pre.textContent = ''; U.pre.appendChild(el('h4', 'PRESETS'));
   for (const p of WXA.pre) {
     const sw = el('span'); sw.style.cssText = `display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:${p.col}`;
     const nm = el('input'); nm.style.cssText = css + ';width:120px'; nm.value = p.name; nm.onchange = () => { p.name = nm.value.trim().toUpperCase() || p.name; wxaChanged(); setTimeout(undoCommit, 0); };
     const d = btn('X', 'Delete this preset (areas set from it keep their settings)', () => { if (WXA.pre.length < 2) return; WXA.pre = WXA.pre.filter(q => q !== p); for (const a2 of WXA.areas) if (a2.pre === p.id) a2.pre = null; wxaChanged(); setTimeout(undoCommit, 0); });
     const r = el('div', null, 'row'), l = el('label'); l.append(sw, el('span', `SKY ${Math.round(p.sky * 100)} RAIN ${Math.round(p.rain * 100)} SEA ${Math.round(p.sea * 100)}`)); l.style.cssText = 'font-size:85%;opacity:0.8';
-    r.append(nm, l, d); U.box.appendChild(r);
+    r.append(nm, l, d); U.pre.appendChild(r);
   }
-  if (!STORY_WORLD) U.box.appendChild(el('div', 'Weather areas work in Story only.', 'tabnote'));
+  U.story.hidden = !!STORY_WORLD;
 }
-{ const addBtn = () => wxaAdd();
-  addBtn.init = btn => setTimeout(() => {
-    const cat = btn.parentElement; if (!cat) return;
-    WXE.ui.cat = cat;
-    WXE.ui.box = document.createElement('div'); btn.after(WXE.ui.box); wxaSync();   // (DELETE: the editor's one too - 50-zzz-world-ed.js)
-  }, 0);
-  NSKY.editor.TUNE.buttons('WEATHER AREAS', 'WEATHER AREAS', [['ADD AREA', 'Add a weather area in the middle of the view (in the free space nearest it)', addBtn]]);
-}
+NSKY.editor.TUNE.pane('WEATHER AREAS', (pane, el) => {
+  pane.className = 'opane';
+  const L = el('div', 'osec'), Lc = el('div', 'cats'); L.append(el('h3', '', 'WEATHER AREAS'), Lc);
+  const add = el('div', 'cat btns'), b = el('button', '', 'ADD AREA'); b.title = 'Add a weather area in the middle of the view (in the free space nearest it)'; b.onclick = () => { wxaAdd(); NSKY.editor.TUNE.help(b.textContent, b.title); };
+  const story = el('div', 'tabnote', 'Weather areas work in Story only.');
+  add.append(el('h4', '', 'AREAS'), b, el('div', 'tabnote', 'Pick an area on the view (its strip at the top, or anywhere in it), or the space between them: EVERYWHERE ELSE.'), story);
+  const pre = el('div', 'cat'); Lc.append(add, pre);
+  const R = el('div', 'osec'), h = el('h3', ''), sel = el('span', 'osel', 'NONE'), none = el('div', 'tabnote', 'Nothing picked: click an area on the view.'), box = el('div', 'cats');
+  h.append(el('span', 'olab', 'SELECTED: '), sel); R.append(h, none, box);
+  pane.append(L, R);
+  Object.assign(WXE.ui, { box, sel, none, pre, story });
+  wxaSync();
+});
 
 //@src 50-zz-atmo-marks.js:1
 /* ---- the air's layers as lines in the GAME EDITOR (user Oct 31, 09:14: "horizontal markers that we can drag in the editor,
@@ -75339,7 +75399,7 @@ function undoApply(to) {
 function undoShows() { const r = NSKY.editor.TUNE.root; if (r) for (const i of r.querySelectorAll('input')) if (i._show) try { i._show(); } catch (e) { } }
 function undoBack() { if (!UNDO.back.length) return; undoCommit(); const to = UNDO.back.pop(); UNDO.fwd.push(UNDO.last); UNDO.fwdN.push(UNDO.lastN); UNDO.lastN = UNDO.backN.pop(); undoApply(to); }
 function undoFwd() { if (!UNDO.fwd.length) return; const to = UNDO.fwd.pop(); UNDO.back.push(UNDO.last); UNDO.backN.push(UNDO.lastN); UNDO.lastN = UNDO.fwdN.pop(); undoApply(to); }
-function undoButtons() { if (UNDO.btn) UNDO.btn.disabled = !UNDO.back.length; if (UNDO.rbtn) UNDO.rbtn.disabled = !UNDO.fwd.length; histDraw(); }
+function undoButtons() { NSKY.editor.TUNE.sync(); histDraw(); }   // (UNDO / REDO greyed by their needs - the panel's one system, sky/90-editor.js)
 // when to look: a press (before: the starting point) and after it's let go; a click; a value set; a key let go
 window.addEventListener('pointerdown', () => undoMark(), { capture: true });
 setInterval(() => { if (UNDO.last === null) undoMark(); }, 1000);   // (the editor just opened: a tab's own press handler may stop the press before it gets here)
@@ -75361,6 +75421,7 @@ window.addEventListener('keydown', e => {
   box.style.cssText = 'display:flex;gap:6px';
   const mk = (lab, f, tip) => { const b = document.createElement('button'); b.textContent = lab; b.title = tip; b.onclick = f; b.disabled = true; box.appendChild(b); return b; };
   UNDO.btn = mk('UNDO', undoBack, 'Undo the last change (Ctrl+Z)'); UNDO.rbtn = mk('REDO', undoFwd, 'Redo (Ctrl+Shift+Z)');
+  NSKY.editor.TUNE.need(UNDO.btn, () => UNDO.back.length > 0); NSKY.editor.TUNE.need(UNDO.rbtn, () => UNDO.fwd.length > 0);
   const w = bar.querySelector('select'); bar.insertBefore(box, w ? w.nextSibling : bar.firstChild); undoButtons();
 })();
 
@@ -75991,12 +76052,12 @@ function objSelText() {
 // what the OBJECTS tab shows besides the picked one's own (strFill, vehFill): what's picked, the spawn's prefab when nothing is
 function objSync() {
   const U = OBJ.ui; if (!U) return;
-  U.sel.textContent = objSelText(); if (U.none) U.none.hidden = U.sel.textContent !== 'NONE';
+  U.sel.textContent = objSelText();
   for (const t in U.tabs) U.tabs[t].spawn.textContent = '';
   const B = U.oBox; B.textContent = '';
   const el = U.el, sea = seaNames();
   // several picked: the list, nothing to edit till one is pressed
-  const P = objPicked(), multi = P.length > 1; U.many.hidden = !multi; U.grid2.hidden = multi; U.many.textContent = '';
+  const P = objPicked(), multi = P.length > 1; U.many.textContent = '';
   if (multi) { U.many.appendChild(el('span', 'olab', 'PRESS ONE TO EDIT IT:')); for (const [nm, f] of P) { const b = el('button', '', nm); b.title = f ? 'Edit this one alone' : 'Picked'; b.disabled = !f; if (f) b.onclick = f; U.many.appendChild(b); } return; }
   // what's picked that isn't a structure or a vehicle: its own, in SELECTED
   if (HPE.sel.length && hplFill(B, el)) return;   // (a plant placed by hand: its own - 50-zzzz-hand-plants.js)
@@ -76014,13 +76075,6 @@ const OBJ_CSS = `
 #skyEd .ocat.on select { border-color: #ffb347 !important; box-shadow: 0 0 0 1px #ffb347; }
 #skyEd .cvbar .osel { color: #ffb347; min-width: 110px; }
 #skyEd .cvbar .olab { color: #7a8294; }
-#skyEd .opane { display: flex; gap: 10px; align-items: flex-start; }
-#skyEd .opane > .osec { flex: 1 1 0; min-width: 0; }
-#skyEd .osec .cvbar { flex-wrap: wrap; row-gap: 4px; }
-#skyEd .osec { border: 1px solid #3a4a68; border-radius: 8px; padding: 6px 10px 8px; margin: 0; background: rgba(255,255,255,0.02); }
-#skyEd .osec > h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; color: #ffb347; font-weight: bold; }
-#skyEd .osec > h3 .olab { color: #9aa3b8; }
-#skyEd .osec .tabnote[hidden] { display: none; }
 `;
 // PICK MORE: one switch, shown on both tabs
 const multiBtns = [];
@@ -76042,6 +76096,7 @@ function objSelSec(el) {
   const none = el('div', 'tabnote', 'Nothing picked: click something in the world.');
   const grid2 = el('div', 'cats'); grid2.append(sBox, vBox, oBox);
   s.append(many, none, grid2);
+  { const T = NSKY.editor.TUNE; T.when(many, () => objPicked().length > 1); T.when(grid2, () => objPicked().length < 2); T.when(none, () => objSelText() === 'NONE'); }   // (the panel's one system - sky/90-editor.js)
   return { sSel: s, sel, sBox, vBox, oBox, many, grid2, none };
 }
 for (const t of OBJ_TAB_NAMES) NSKY.editor.TUNE.pane(t, (pane, el) => {
@@ -76086,8 +76141,6 @@ function grpSync() {
   const U = GRP.ui; if (!U) return;
   const P = grpPicked(), gs = new Set(P.map(m => m.R && m.R.g).filter(g => g != null));
   // (user Nov 2 20:30: GROUP only with more than one thing picked, UNGROUP only with a group picked - greyed out otherwise)
-  U.gb.disabled = new Set(P.filter(m => m.R).map(m => m.R)).size < 2;
-  U.ub.disabled = !gs.size;
   grpList(P);
   if (performance.now() < GRP.until) return;
   U.msg.textContent = !P.length ? 'CLICK ANYTHING TO PICK ITS GROUP' : P.length + ' PICKED' + (gs.size ? ', ' + gs.size + (gs.size > 1 ? ' GROUPS' : ' GROUP') : ', NO GROUP');
@@ -76113,11 +76166,9 @@ function grpList(P) {
     if (hue != null) { const c = strRGB(hue); sw.style.background = `rgb(${c[0]},${c[1]},${c[2]})`; } else sw.classList.add('none');
     d.append(sw, U.el('span', '', lab)); d.title = lab; U.list.appendChild(d);
   }
-  U.list.hidden = !rows.length;
 }
 const GRP_CSS = `
 #skyEd .glist { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-width: 420px; max-height: 160px; overflow-y: auto; padding-right: 6px; font-size: 11px; letter-spacing: .04em; color: #d8dce8; scrollbar-width: thin; scrollbar-color: #4a5468 transparent; }
-#skyEd .glist[hidden] { display: none; }
 #skyEd .glist .grow { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #skyEd .glist .gsw { flex: 0 0 10px; height: 10px; border-radius: 2px; }
 #skyEd .glist .gsw.none { border: 1px solid #4a5468; }
@@ -76132,6 +76183,8 @@ NSKY.editor.TUNE.pane('GROUPING', (pane, el) => {
   const list = el('div', 'glist'); list.hidden = true;
   pane.append(top, list);
   GRP.ui = { msg, gb, ub, list, el, listKey: null };
+  { const T = NSKY.editor.TUNE, P = () => grpPicked();   // (the panel's one system: GROUP with more than one thing picked, UNGROUP with a group picked - user Nov 2 20:30)
+    T.need(gb, () => new Set(P().filter(m => m.R).map(m => m.R)).size >= 2); T.need(ub, () => P().some(m => m.R && m.R.g != null)); T.when(list, () => list.childElementCount > 0); }
   new MutationObserver(() => { if (!pane.hidden) grpSync(); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
   grpSync();
 });
@@ -76234,7 +76287,7 @@ function styFill(el) {
       const L = (t, tip) => { const l = el('label', '', t); help(l, tip); return l; };
       r2.append(L('HOME', 'Where they live'), S([[0, 'NOWHERE'], ...STRS.map(q => [q.id, strName(q)])], o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
       r2.append(L('NEEDS', 'A good they need from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
-      if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), L('A DAY, WITHOUT IT', 'Days they last once there is none'), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
+      if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), (() => { const t = el('span', '', 'A DAY, WITHOUT IT'); help(t, 'Days they last once there is none'); return t; })(), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
       c.appendChild(r2); famRow(o);
       // (user Nov 19 21:05-21:10) the coins they start with, and where they work - a job is what their WORK place is short of (PRIORITIES)
       const r4 = el('div', 'row'); r4.style.cssText = r2.style.cssText;
@@ -76596,7 +76649,7 @@ function wedAfter(moved) {
   const T = NSKY.editor.TUNE; if (!T.world()) return;
   let k = WED.claim;
   if (!k && moved && TERRAIN_ED.sel && JSON.stringify(TERRAIN_ED.sel) !== WED.lineSig) k = 'line';   // (a box drawn round pieces of line)
-  if (!k) { if (!WED.shift && !moved) { for (const id in WK) WK[id].clear(); edScrollHome(); } }
+  if (!k) { if (!WED.shift && !moved) for (const id in WK) WK[id].clear(); }
   else if (k !== 'none') {
     if (!WED.shift) for (const id in WK) if (id !== k) WK[id].clear();
     const K = WK[k], tab = K ? K.tab : WK_TAB[k];
@@ -76610,14 +76663,7 @@ function wedAfter(moved) {
   }
   wedSync();
 }
-// (user Nov 20 10:33: "If I select the terrain shape and then I deselect, the create terrain section completely disappears. I need to change to
-// another tab to have it show up again") a pick scrolls the panel to its sections (cat.scrollIntoView above) - TERRAIN's below TERRAIN SHAPES;
-// nothing picked any more: the panel back at its top, where the tab's own tools are
-function edScrollHome() {
-  if (wedPicked().length) return;
-  const R = document.getElementById('skyEd'); if (!R) return;
-  for (const el of R.querySelectorAll('*')) if (el.scrollTop > 0 && el.offsetParent !== null) el.scrollTop = 0;
-}
+NSKY.editor.TUNE.picked = () => wedPicked().length > 0;   // (nothing picked any more: the panel back at its top - TUNE.sync, sky/90-editor.js)
 // ---- DELETE: everything picked
 function wedPicked() { const L = []; for (const id in WK) for (const it of WK[id].items()) L.push(it); return L; }
 // (user Nov 3 08:40: "delete button on the keyboard doesnt seem to match the Delete button in the editor") the keyboard's Delete (and
@@ -76643,15 +76689,19 @@ function vehSpotEmpty(v) {
 function wedSync() {
   const b = WED.btn, T = NSKY.editor.TUNE;
   if (!T.open) return;
+  T.sync();   // (the panel's sections and buttons as the pick is now, the top bar's names with them - wedNames; sky/90-editor.js)
+}
+// the top bar's names from the pick (TUNE.onSync): SAVE CHANGES lit, DUPLICATE / DELETE (what), PLAY as (what) - whether each can act: its need
+function wedNames() {
+  const b = WED.btn;
   if (WED.sbtn) WED.sbtn.classList.toggle('on', sceneDirty());   // (SAVE CHANGES lit while there's something unsaved - 00-world-journal.js)
   if (typeof dupSync === 'function') dupSync();             // (DUPLICATE named as DELETE is - 50-zzzz-zdup.js)
-  if (WED.pbtn) { const K = edPlayKey(); btnSet(WED.pbtn, K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY', !K); }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
-  if (!b) return;
-  btnSet(b, null, null, !T.world()); for (const x of [WED.dbtn, WED.mbtn]) if (x) x.hidden = b.hidden; if (b.hidden) return;   // (DUPLICATE, PICK MORE: with DELETE, on WORLD EDITOR)
+  if (WED.pbtn) { const K = edPlayKey(); btnSet(WED.pbtn, K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY'); }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
+  if (!b || !NSKY.editor.TUNE.world()) return;
   const D = wedPicked().filter(i => i.del);
   // (user Nov 1, 12:59: "Delete (Dock)" - what's picked in brackets, not in capitals, so it reads apart from the button's word)
   const nm = btnVar;
-  btnSet(b, !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);
+  btnSet(b, !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')');
 }
 (function wedPlace() {
   const T = NSKY.editor.TUNE, bar = T.root && T.root.querySelector('.bar.top');
@@ -76667,6 +76717,10 @@ function wedSync() {
   const redo = typeof UNDO !== 'undefined' && UNDO.rbtn; if (redo) redo.after(sv); else bar.insertBefore(sv, bar.firstChild);
   const close = [...bar.querySelectorAll('button')].find(q => q.textContent === 'CLOSE');
   const pb = document.createElement('button'); pb.textContent = 'PLAY'; pb.title = 'Play as the picked vehicle'; pb.disabled = true; pb.onclick = edPlay;
+  { const T = NSKY.editor.TUNE, onW = () => T.world();   // (the panel's one system - sky/90-editor.js: DELETE, DUPLICATE, PICK MORE on WORLD EDITOR; each greyed till it can act)
+    T.when(b, onW); T.when(dup, onW); T.when(pm, onW);
+    T.need(b, () => wedPicked().some(i => i.del)); T.need(dup, () => dupKinds().some(k => WK[k].items().length)); T.need(pb, () => !!edPlayKey());
+    T.onSync(wedNames); }
   bar.insertBefore(pb, close || null); WED.pbtn = pb;
   // (user Nov 2: the game's WORLD panel in the editor - Nov 3 08:46: "we dont want the WORLD button in the Editor, what I meant was having
   // the actual WORLD UI button (the same we use in the game) in the top left corner": the game's own gear there - 18-top-ui-perf.js)
@@ -78007,7 +78061,6 @@ function mkListSync() {
     for (const r of L) { const o = document.createElement('option'); o.value = r.id; o.textContent = mkName(r); U.s.appendChild(o); }
     if (L.some(r => r.id === cur)) U.s.value = cur;
   }
-  U.s.disabled = U.b.disabled = !L.length;
 }
 (function mkPlace() {
   const T = NSKY.editor.TUNE, bar = T.root && T.root.querySelector('.bar.top');
@@ -78020,6 +78073,7 @@ function mkListSync() {
   s.addEventListener('pointerdown', e => e.stopPropagation());   // (not the start of the bar's resize drag)
   b.onclick = () => mkGo(+s.value);
   disp.after(s, b); MKE.bar = { s, b, key: null };
+  NSKY.editor.TUNE.need(s, () => MARKS.length > 0); NSKY.editor.TUNE.need(b, () => MARKS.length > 0);   // (the panel's one system - sky/90-editor.js)
   mkListSync();
 })();
 
@@ -79098,7 +79152,7 @@ function wedDuplicate() {
 function dupSync() {
   const b = WED.dbtn; if (!b) return;   // (the top bar's, beside DELETE - 50-zzz-world-ed.js)
   const ks = dupKinds(), D = ks.flatMap(k => WK[k].items());
-  btnSet(b, !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);   // (only when it changes - btnSet, 50-zzz-world-ed.js)
+  btnSet(b, !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')');   // (only when it changes - btnSet, 50-zzz-world-ed.js)
 }
 // (Ctrl+D / Cmd+D on WORLD EDITOR too, not while typing in a field)
 window.addEventListener('keydown', e => {
@@ -79158,12 +79212,12 @@ function landNameSync() {
   U.inp.placeholder = R ? 'UNNAMED' : '';
 }
 { const clear = ['CLEAR NAME', 'The picked land has no name', () => { const R = landPicked(); if (!R) return; delete R.name; islChanged(); landNameSync(); strSync(); }];
-  clear[2].init = secOf('land', b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.landName) return; const row = document.createElement('div'); row.className = 'row';
+  clear[2].init = b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.landName) return; const row = document.createElement('div'); row.className = 'row';
     const l = document.createElement('label'); l.textContent = 'NAME'; l.title = 'The land\'s name: its services are named by it (PORTUGAL POLICE STATION)';
     const inp = document.createElement('input'); inp.type = 'text'; inp.style.cssText = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;width:160px'; inp.title = l.title;
     inp.onchange = () => { const R = landPicked(); if (!R) return; const v = inp.value.trim().toUpperCase(); if (v) R.name = v; else delete R.name; islChanged(); landNameSync(); strSync(); };
-    row.append(l, inp); cat.insertBefore(row, b); TERRAIN_ED.landName = { inp }; landNameSync(); }, 0); });
-  NSKY.editor.TUNE.buttons('TERRAIN', 'LAND', [clear]); }
+    row.append(l, inp); cat.insertBefore(row, b); TERRAIN_ED.landName = { inp }; landNameSync(); }, 0); };
+  NSKY.editor.TUNE.buttons('TERRAIN', 'LAND', [clear], { when: terrLand }); }
 
 //@src 50-zzzzz-story-death.js:1
 /* ================================================================
