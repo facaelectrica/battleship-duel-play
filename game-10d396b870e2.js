@@ -12966,8 +12966,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1196;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 14:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1197;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 14:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -76349,20 +76349,23 @@ function styFill(el) {
       del.onclick = () => { STY.open = null; for (const q of famList(o)) famDrop(o.id, q.id); OWNERS = OWNERS.filter(q => q !== o); for (const q of STRS) if (q.own === id) delete q.own; for (const q of PLACED) if (q.own === id) delete q.own; ownersSave(); strSave(); storyTabSync(); };
       r.append(i, del); c.appendChild(r);
       // (user Nov 19: "we can set any entity as sick") where they live, and what they need a day from its stock (50-zzzzz-story-stock.js)
-      const r2 = el('div', 'row'); r2.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
+      const rowCss = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding-left:14px';
       const S = (opts, val, set, w, tip) => { const s = el('select'); s.style.cssText = css + ';width:' + w + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val ?? ''); s.onchange = () => { set(s.value); ownersSave(); storyTabSync(); }; return s; };
       const N = (val, set, tip, step) => { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = step; n.value = String(val ?? 0); n.style.cssText = css + ';width:56px'; n.title = tip; n.onchange = () => { set(Math.max(0, +n.value || 0)); ownersSave(); }; return n; };
       const L = (t, tip) => { const l = el('label', '', t); help(l, tip); return l; };
-      r2.append(L('HOME', 'Where they live'), S(placeOpts(strIsRes, o.home, [0, 'NOWHERE'], 'A RESIDENCE'), o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
-      r2.append(L('NEEDS', 'A good they need from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
-      if (o.needs) r2.append(N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'), (() => { const t = el('span', '', 'A DAY, WITHOUT IT'); help(t, 'Days they last once there is none'); return t; })(), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'), L('DAYS', 'Then they are gone'));
-      c.appendChild(r2); famRow(o);
+      // (user Nov 20 13:18: "This line is very confusing. They need one Medicine a day? what is that last 0 for?") one property a row (rules.md section 6)
+      const prow = (...kids) => { const r = el('div', 'row'); r.style.cssText = rowCss; r.append(...kids); c.appendChild(r); return r; };
+      prow(L('HOME', 'Where they live'), S(placeOpts(strIsRes, o.home, [0, 'NOWHERE'], 'A RESIDENCE'), o.home || 0, v => { if (+v) o.home = +v; else delete o.home; }, 130, 'Where they live'));
+      prow(L('NEEDS', 'A good they use up from their home\'s stock'), S([['', 'NOTHING'], ...CARGO.map(C => [C.k, C.name])], (o.needs || {}).k || '', v => { if (v) o.needs = Object.assign({ per: 1, grace: 0 }, o.needs, { k: v }); else delete o.needs; }, 100, 'What they need'));
+      if (o.needs) {
+        prow(L('USES A DAY', 'How many they use a day (0.2: one lasts 5 days)'), N(o.needs.per, v => { o.needs.per = v; }, 'How many a day', '0.1'));
+        prow(L('DAYS WITHOUT IT', 'Days they last with none at home, then gone'), N(o.needs.grace, v => { o.needs.grace = v; }, 'Days they last with none', '0.5'));
+      }
+      famRow(o);
       // (user Nov 19 21:05-21:10) the coins they start with, and where they work - a job is what their WORK place is short of (PRIORITIES)
-      const r4 = el('div', 'row'); r4.style.cssText = r2.style.cssText;
-      r4.append(L('COINS', 'Coins they start with'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Coins they start with', '1'),
-        L('WORK', 'Where they work: its design\'s WORK is their day'), S(placeOpts(strWork, o.work, [0, 'NOWHERE'], 'A WORKPLACE'), o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'),
-        L('VEHICLE', 'Their own vehicle: at their home, again the morning after it\'s lost'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh || '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Their own vehicle'));
-      c.appendChild(r4);
+      prow(L('COINS', 'Coins they start with'), N(o.coins, v => { if (v) o.coins = Math.floor(v); else delete o.coins; }, 'Coins they start with', '1'));
+      prow(L('WORK', 'Where they work: its design\'s WORK is their day'), S(placeOpts(strWork, o.work, [0, 'NOWHERE'], 'A WORKPLACE'), o.work || 0, v => { if (+v) o.work = +v; else delete o.work; }, 130, 'Where they work'));
+      prow(L('VEHICLE', 'Their own vehicle: at their home, again the morning after it\'s lost'), S([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh || '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Their own vehicle'));
       // (their ROUTINE: their WORK place's since Nov 20 - STRUCTURES > SELECTED > WORK, 50-zzzzz-story-work.js)
     }
     const add = el('button', '', 'ADD CHARACTER'); add.title = 'A new character';
