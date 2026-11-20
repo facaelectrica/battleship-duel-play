@@ -5829,7 +5829,7 @@ const ONEVIEW = () => HUMANS() <= 1;                          // one screen (you
 // goods - 50-zz-placed.js, 50-zz-cargo.js)
 // (the STORY's own vehicles - 50-story*.js, 50-zz-story-swap.js, 50-zzzz-veh-deal.js: its spot now (berth / spot), its fuel, lost and
 // mended by the day, renewed; its engine's heat (heatT, hot, stillT))
-const STORY_REC = ['num: story heli plane sub boat car berth spot fuel lostDay lostT fixDay fixT heatT hot stillT wk cv', 'val: wfor'];   // (wk: a work vehicle's workplace, cv: a character's own, wfor: whose - 50-zzzzz-story-work.js)
+const STORY_REC = ['num: story heli plane sub boat car berth spot fuel lostDay lostT fixDay fixT heatT hot stillT wk cv bay bayT bayOut', 'val: wfor'];   // (bay: the place it's in through its vehicle door, bayT / bayOut when it went in / its job done - 50-zzzzz-place-door.js)   // (wk: a work vehicle's workplace, cv: a character's own, wfor: whose - 50-zzzzz-story-work.js)
 const CIV_REC = ['num: driven cin placed sid own py _off _lifted downK _rv _sa _sk hookA hookT spd dropFrom dkT _smX _smY _smAcc _msPy hb hs fac susV susY noseT enterK washT', 'txt: sv', 'val: loiter carried marks deck dk goods', 'obj: _smS _smCh'];
 // (Nov 11, tables) a vehicle family's record table from its own lists and the shared ones: a name met again is the first list's
 const vehRec = (...L) => { const seen = new Set(); return ColTable.rec(...L.map(s => { const [k, f] = s.split(':'); return k + ': ' + f.trim().split(/\s+/).filter(n => n && !seen.has(n) && seen.add(n)).join(' '); })); };
@@ -12968,8 +12968,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1233;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 18:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1234;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 19:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23530,7 +23530,7 @@ function physics(dt) {
   // (LAND TEST: the sea in the middle and a country each side - their tanks, helicopters, lakes)
   { if (LAND) stepLandUnits(dt); stepLandWorld(dt); }
   ut = uLap('uLand', ut);   // (BATTLE too: the ground's own - what rests on it, the plants, a plane's wreck burning - 50-land-units)
-  if (LAND) { let uo = performance.now(); stepTraffic(dt); uo = uLap('o:stepTraffic', uo); stepBalloons(dt); uo = uLap('o:stepBalloons', uo); stepCivHelis(dt); uo = uLap('o:stepCivHelis', uo); stepHose(dt); uo = uLap('o:stepHose', uo); stepCivDrivers(); uo = uLap('o:stepCivDrivers', uo); stepAirports(dt); uo = uLap('o:stepAirports', uo); armyWreckHits(); uo = uLap('o:armyWreckHits', uo); stepSpace(dt); uo = uLap('o:stepSpace', uo); stepSeaplanes(dt); uo = uLap('o:stepSeaplanes', uo); stepBlimps(dt); uo = uLap('o:stepBlimps', uo); stepCranes(dt); uo = uLap('o:stepCranes', uo); stepCivMagnets(dt); uo = uLap('o:stepCivMagnets', uo); stepShipCranes(dt); uo = uLap('o:stepShipCranes', uo); krTick(dt); uo = uLap('o:krTick', uo); }
+  if (LAND) { let uo = performance.now(); stepTraffic(dt); uo = uLap('o:stepTraffic', uo); stepBalloons(dt); uo = uLap('o:stepBalloons', uo); stepCivHelis(dt); uo = uLap('o:stepCivHelis', uo); stepHose(dt); uo = uLap('o:stepHose', uo); stepCivDrivers(); uo = uLap('o:stepCivDrivers', uo); stepAirports(dt); uo = uLap('o:stepAirports', uo); armyWreckHits(); uo = uLap('o:armyWreckHits', uo); stepSpace(dt); uo = uLap('o:stepSpace', uo); stepSeaplanes(dt); uo = uLap('o:stepSeaplanes', uo); stepBlimps(dt); uo = uLap('o:stepBlimps', uo); stepCranes(dt); uo = uLap('o:stepCranes', uo); stepCivMagnets(dt); uo = uLap('o:stepCivMagnets', uo); stepShipCranes(dt); uo = uLap('o:stepShipCranes', uo); stepDoors(); uo = uLap('o:stepDoors', uo); krTick(dt); uo = uLap('o:krTick', uo); }
   uLap('uOpenWorld', ut);
   time += dt;
 }
@@ -47790,7 +47790,7 @@ const cranes = new ColTable(ColTable.rec('num: out sea0 off offMax legs tx hy t 
    magnet's (50-land-magnet.js); from - the stack it was taken from (beside the row). The stacks, the cargo, the magnets hold a box as
    its row's handle (04-zz-coltable.js handle: the same object for the same box, saved as { row: ['containers', id] }) */
 const containers = new ColTable({ sq: 'id', ci: 'u8', dead: 'u8', where: 'str', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', a: 'f64', va: 'f64', on: 'ref', deck: 'obj',
-  inWater: 'u8', knocked: 'u8', carried: 'opt', hookA: 'opt', hookT: 'f64', spd: 'f64', from: 'obj', gk: 'str', gn: 'f64', sz: 'u8' });   // (gk / gn: the good it holds and how many - 50-zzzzz-ship-crane.js; sz 1: a 20-ft box - contW)
+  inWater: 'u8', knocked: 'u8', carried: 'opt', hookA: 'opt', hookT: 'f64', spd: 'f64', from: 'obj', gk: 'str', gn: 'f64', sz: 'u8', rs: 'f64', rt: 'f64', rd: 'f64' });   // (gk / gn: the good it holds and how many - 50-zzzzz-ship-crane.js; sz 1: a 20-ft box - contW)
 let craneArt = null;
 /* (engine stage 3) the cranes' and the boxes' own random source, and their tables. A box's colour is its own copy of its
    CONT_COLS entry (so a loaded one, merged into a live box, never writes into the shared list). A crane's dock (d), and what its
@@ -48390,6 +48390,7 @@ const contSeen = (x, x0, x1) => x + CONT_R > x0 && x - CONT_R < x1;
 function drawLooseContainers(x0, x1, under) {
   const own = thingsOwn();
   for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || (k.where === 'hook' && !under)) && (k.where === 'hook' || !!k.inWater === under) && contSeen(k.x, x0, x1)) drawContainerAt(k.x, k.y, k.a, k);
+  if (!under) drawRolling(x0, x1);                                 // (through a place's door on its rollers - 50-zzzzz-place-door.js)
   if (own) thingsEnd();
 }
 // a crane's picture P (its frame, its trolley) as scaled() drew it at X, Y on the screen, s screen pixels a texel - its parts (W wide as composed: each a
@@ -72985,7 +72986,7 @@ function strLook(p) {
   if (L !== undefined) return L;
   if (!K.art) return undefined;
   const art = p.k === 'dock' ? p.spr || K.art : p.art || K.art, P = tropPic(art); if (!P) return null;
-  const gate = !!K.enclosed && !!(P._gate || P._door);
+  const gate = (!!K.enclosed && !!(P._gate || P._door)) || !!P._gate;
   return {
     P, door: gate,
     draw(g, open) {
@@ -74130,7 +74131,7 @@ const STR_INSIDE = [30, 24, 26];
 function gateCut(D) { const [x0, y0, x1, y1] = D; return [x0, y0, x1 - x0, y1 - y0]; }
 // an enclosed structure's painted gate, in the world: { x0, x1, top, foot } (null: none)
 function strGateBox(o, B) {
-  if (!B.P || !B.P._gate || !STR_KINDS[o.k].enclosed) return null;
+  if (!B.P || !B.P._gate) return null;   // (a picture with a vehicle door marked - an enclosed kind's, or a workplace's: the cargo terminal's)
   const D = B.P._door, kx = (B.x1 - B.x0) / B.P.width, ky = (B.foot - B.top) / B.P.height;
   const x0 = o.flip ? B.x1 - D[2] * kx : B.x0 + D[0] * kx;
   return { x0, x1: x0 + (D[2] - D[0]) * kx, top: B.top + D[1] * ky, foot: B.top + D[3] * ky };
@@ -74141,7 +74142,7 @@ function strGateBox(o, B) {
 function strMaskBox(v, half) {
   if (!LAND) return null;
   for (const o of strsUsed()) {
-    if (o.id !== v.hb && o.id !== v.berth) continue;
+    if (o.id !== v.hb && o.id !== v.berth && o.id !== v.bay) continue;   // (or in through its door for a job - 50-zzzzz-place-door.js)
     const B = strBox(o); if (v.x + half <= B.x0 || v.x - half >= B.x1) continue;
     const G = strGateBox(o, B); if (!G) continue;
     return [Math.round(PX(B.x0)), Math.round(PX(B.x1)), Math.round(PX(G.x0)), Math.round(PX(G.x1)), Math.round(PY(G.top))];
@@ -74700,7 +74701,7 @@ function drawStructs(x0, x1, isl = false, lay = 0) {
     thgOrderMark(o);                                       // (its number in what's in front: its lights given later - a LIGHTHOUSE's lamp, 47-zz-light-pass.js - hidden by what's drawn after it)
   }
   drawStoryCars(x0, x1, cars);                           // (STORY's cars on dry ground - 50-story-cars.js; wet ones go with the water they're in)
-  for (const o of L) if (STR_KINDS[o.k].enclosed) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
+  for (const o of L) if (STR_KINDS[o.k].enclosed || (strBox(o).P || {})._gate) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
   for (const o of L) { const B = strBox(o); if (B.P && !offView(B.x0, B.x1, x0, x1) && strDrawn(o, B)) strFrontDraw(o, B); }   // (and their front layers - user Nov 2)
   if (own) thingsEnd();
 }
@@ -75242,7 +75243,8 @@ window.__strRunway = { place: (id, x) => { const o = STRS.find(q => q.id === id)
    screen's own look (o._gate, never saved). ---- */
 function drawStrGate(o, x0, x1) {
   const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) return;
-  const near = typeof storyVehs === 'function' && STORY && storyVehs().some(v => !v.plane && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && Math.abs(v.vDrive || 0) > 1);
+  const near = (typeof storyVehs === 'function' && STORY && storyVehs().some(v => !v.plane && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && (Math.abs(v.vDrive || 0) > 1 || Math.abs(v.npcV || 0) > 1))) || (STORY && doorBusy(o));   // (a character's too; a container through it, a car coming out - 50-zzzzz-place-door.js)
+  if (STORY && placeRolls(o)) { const D = placeDoor(o); if (D) drawRollers(o, D); }
   o._gate = clamp((o._gate || 0) + (near ? 1 : -0.7) * frameDt, 0, 1);
   const open = o._gate, G = strGateBox(o, B);
   if (G) {                                                   // its painted gate: the door's bottom rows, rolled up into the lintel (a part of its picture)
@@ -79621,6 +79623,108 @@ window.addEventListener('keydown', e => {
   e.preventDefault(); e.stopImmediatePropagation(); wedDuplicate();
 }, { capture: true });
 
+//@src 50-zzzzz-place-door.js:1
+/* ================================================================
+   A PLACE'S VEHICLE DOOR: ROLLERS AND DRIVING IN (user Nov 20 17:36-17:55: "the cargo terminal should have a door that opens and the truck goes in, it
+   closes, the truck fills with the cargo, the door opens and they leave"; "how do the containers get inside the cargo terminal? Is it like a sliding
+   conveyor belt thing?" - asked, the rollers: "Yeah rollers work").
+   One rule for every structure whose picture has a vehicle door marked (prep.py DOORS 'gate' - placeDoor) and that stores goods (strStores):
+   - ITS ROLLERS: a bed of rollers in front of the door. A goods container (gk / gn - 50-land-crane.js) set down on them, of a good the place keeps,
+     rolls in through the door - its goods are the place's stock (stAdd). Going the other way, a filled container rolls out onto them for a ship
+     waiting with its crane (rollWants): a ship with a crane and room in its hold, stopped within its jib's reach of the door, its magnet empty -
+     the good the place has most of, PER CONTAINER of it or what's left. One container on the rollers at a time.
+   - DRIVING IN: a car COLLECTing or DELIVERing there whose height goes under the door drives up to it, goes in (seen only through the door - strMaskBox -
+     the gate rolling down behind it), is loaded or unloaded inside, the gate rolls up and it drives off (folkBay, 50-zzzzz-story-folk.js).
+   The gate rolls up while a container's rolling through it or a car's coming out (drawStrGate). ---- */
+const ROLL_T = 2.5;                                            // (s a container takes through the door)
+const BAY_T = 3;                                               // (s a car stays in, being loaded or unloaded)
+// the art a structure is drawn with, and its vehicle door in the world: { x0, x1, cx, w, top, foot } (null: none marked)
+const strArtOf = o => o.art || (STR_KINDS[o.k] || {}).art || null;
+function placeDoor(o) {
+  const n = o && strArtOf(o), t = n && TROP[n]; if (!t || !t.gate || !t.door) return null;
+  const B = strBox(o), kx = (B.x1 - B.x0) / t.w, ky = (B.foot - B.top) / t.h, D = t.door;
+  const x0 = o.flip ? B.x1 - D[2] * kx : B.x0 + D[0] * kx, w = (D[2] - D[0]) * kx;
+  return { x0, x1: x0 + w, cx: x0 + w / 2, w, top: B.top + D[1] * ky, foot: B.top + D[3] * ky };
+}
+const placeRolls = o => !!placeDoor(o) && strStores(o);        // (rollers: a door and a stock behind it)
+// a container on o's rollers (resting on them, or rolling through its door)
+function rollOn(o, D) {
+  for (const k of containers) {
+    if (k.where === 'roll' && k.rs === o.id) return k;
+    if (k.where === 'rest' && !k.inWater && Math.abs(k.x - D.cx) < D.w / 2 + contW(k) / 2 && Math.abs(k.y + CONT_H / 2 - D.foot) < 1.5 * UPM) return k;
+  }
+  return null;
+}
+// a ship waiting at o's door with its crane: [the boat] (null: none)
+function rollWants(o, D) {
+  for (const j of jetboats) {
+    const K = typeof boatCrane === 'function' ? boatCrane(j) : null, Hd = K && picBoat(j).hold; if (!Hd || j.state !== 'run') continue;
+    if (Math.abs(j.npcV || 0) > 2 || Math.abs(j.vDrive || 0) > 0.5 || (j.mag && j.mag.obj)) continue;   // (stopped, its magnet empty)
+    if (vehBoxes(j) >= Hd.n) continue;                                                               // (its hold full)
+    const f = boatPt(j, K.post[0], K.post[1]); if (Math.abs(f[0] - D.cx) > K.jib * UPM) continue;    // (the door in its jib's reach)
+    return j;
+  }
+  return null;
+}
+function stepDoors() {
+  if (!STORY || !containers) return;
+  for (const o of strsUsed()) {
+    if (!placeRolls(o)) continue;
+    const D = placeDoor(o); let k = rollOn(o, D);
+    // set down on the rollers: in through the door, if it's a good this place keeps (anything else stays there)
+    if (k && k.where === 'rest' && k.gk && k.gn > 0 && strKeeps(o, k.gk)) { Object.assign(k, { where: 'roll', rs: o.id, rt: time, rd: 1, x: D.cx, y: D.foot - CONT_H / 2, a: 0, vx: 0, vy: 0, va: 0, on: null }); sound('anchorWinch', D.cx, 1); }
+    if (k && k.where === 'roll') {
+      const u = (time - k.rt) / ROLL_T;
+      if (u >= 1 && k.rd > 0) { stAdd(o, k.gk, k.gn); folkLog({ t: 'job', who: -1, verb: 'ROLLED IN', k: k.gk, n: k.gn, at: slPlaceName(o) }); const i = containers.indexOf(k); if (i >= 0) containers.cut(i); }
+      else if (u >= 1) { k.where = 'rest'; k.y = D.foot - CONT_H / 2; }
+      continue;
+    }
+    if (k) continue;
+    // empty rollers and a ship waiting: a filled container out - the good it has most of (one that goes in a container)
+    if (!rollWants(o, D)) continue;
+    let g = null, gn = 0; for (const [q] of CARGO_KINDS) if (!cargoLiq(q) && stN(o, q) > gn) { g = q; gn = stN(o, q); }
+    if (!g) continue;
+    const n = Math.min(cargoPer(g), gn); stAdd(o, g, -n);
+    k = newCont(); Object.assign(k, { ci: cargoBoxCol(g), gk: g, gn: n, sz: 1, where: 'roll', rs: o.id, rt: time, rd: -1, x: D.cx, y: D.foot - CONT_H / 2, a: 0, vx: 0, vy: 0, va: 0 });
+    folkLog({ t: 'job', who: -1, verb: 'ROLLED OUT', k: g, n, at: slPlaceName(o) }); sound('anchorWinch', D.cx, 1);
+  }
+}
+// ---- drawn (drawStrGate, before its gate): the rollers' bed, and a container rolling through the door - going in it darkens and draws back into the
+// dark of the door, coming out the other way
+function drawRollers(o, D) {
+  const M = thgCur(), X0 = Math.round(PX(D.x0 - 0.6 * UPM)), X1 = Math.round(PX(D.x1 + 0.6 * UPM)), Y = Math.round(PY(D.foot)), h = Math.max(2, Math.round(PY(D.foot) - PY(D.foot - 0.3 * UPM)));
+  strBlock(M, X0, Y - h, X1 - X0, h, 70, 72, 78);
+  const st = Math.max(3, Math.round(PX(D.x0 + 0.5 * UPM) - PX(D.x0))), r = Math.max(1, Math.round(h / 2));
+  for (let X = X0 + (st >> 1); X < X1 - 1; X += st) strBlock(M, X, Y - h, Math.max(1, r), r, 150, 154, 160);
+}
+function drawRolling(x0, x1) {
+  const own = thingsOwn();
+  for (const k of containers) {
+    if (k.where !== 'roll' || !contSeen(k.x, x0, x1)) continue;
+    const u = clamp((time - k.rt) / ROLL_T, 0, 1), d = k.rd > 0 ? u : 1 - u;   // (d: how far in - 0 on the rollers, 1 inside)
+    const s = 1 - 0.3 * d, W = Math.round(contW(k) * SV * s), H = Math.round(CONT_H * SV * s), col = (CONT_COLS[k.ci] || CONT_NOCOL).map(v => v * (1 - 0.75 * d));
+    CONT_M = thgMat(); drawContainerPx(Math.round(PX(k.x) - W / 2), Math.round(PY(k.y + CONT_H / 2) - H - (1 - s) * 0.3 * H), W, H, col, false);
+  }
+  if (own) thingsEnd();
+}
+// (drawStrGate) the gate rolls up while a container's rolling through it or a car's coming out of it
+const doorBusy = o => [...containers].some(k => k.where === 'roll' && k.rs === o.id) || (typeof storyVehs === 'function' && storyVehs().some(v => v.bay === o.id && v.bayOut));
+// (folkPlan) character c's vehicle v for COLLECT / DELIVER job J at T.o: a place with a vehicle door it goes under - to the door, in (the gate rolls down
+// behind it), BAY_T there, the job done (2: folkJob now), the gate up and out (the next job). 0: not this way - beside it as before; 1: under way
+function folkBay(c, S, v, J, T) {
+  if (folkBoat(v) || !T.o || (J.do !== 'collect' && J.do !== 'deliver')) return 0;
+  const D = placeDoor(T.o); if (!D || storyBoatSize(v)[1] > D.foot - D.top) return 0;   // (too tall for its door: beside it)
+  if (v.bay === T.o.id) {
+    if (!v.bayOut) { if (time - v.bayT < BAY_T) return 1; v.bayOut = time; return 2; }
+    if (time - v.bayOut < 1.5) return 1;                         // (the gate rolling up)
+    v.bay = 0; v.bayOut = 0; S.j++; return 1;
+  }
+  if (Math.abs(v.x - D.cx) > 1.5 * UPM) { if (folkReach(v, v.x, D.cx)) { folkGo(v, D.cx, null); return 1; } return 0; }
+  v.bay = T.o.id; v.bayT = time; v.bayOut = 0;
+  folkLog({ t: 'job', who: c.id, verb: 'IN THROUGH THE DOOR', k: '', n: 0, at: slPlaceName(T.o) });
+  return 1;
+}
+
 //@src 50-zzzzz-ship-crane.js:1
 /* ================================================================
    A SHIP'S OWN CRANE (user Nov 20 17:28-17:34: "the small cargo ship that I'm based on actually had its own crane, but I took it out so you could make
@@ -80261,6 +80365,7 @@ const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; retu
 function folkGo(v, x, park, fish) {
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
   if (v.berth != null) { v.berth = null; v.spot = null; }
+  v.bay = 0; v.bayOut = 0;                                                  // (out of a place's door - 50-zzzzz-place-door.js)
   FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v))) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 };
 }
 // tied up: where it was going, as the player's would be (storyPark)
@@ -80410,6 +80515,11 @@ function folkTowPlan(c, S, v, J) {
   if (Math.abs(v.x - u.x) < 14 * UPM) { FOLK.tow = Object.assign({}, FOLK.tow, { [v.sid]: u.sid }); folkLog({ t: 'tow', who: c.id, at: folkWhere(u.x) }); return true; }
   folkGo(v, u.x, null); return true;
 }
+// a COLLECT / DELIVER done from vehicle v at its place (beside it, or inside it through its door)
+function folkJob(c, S, v, J, T) {
+  if (J.do === 'collect') { let n = Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
+  else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { const pay = J.pay > 0 ? folkSellPay(T.o, J.k, n) : stPays(T.o, J.k, n, c.id); cargoAdd(v, J.k, -n); stHand(T.o, J.k, n); S.k = (S.k || 0) + pay; }   /* (paid as the player is: a SELL at its price, a delivery of what the place takes - stPays) */ folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
+}
 // one decision for character c: what they do next, from where they are (they act only between trips)
 function folkPlan(c, S) {
   const jobs = folkJobs(c), J = S.j >= 0 && S.j < jobs.length ? jobs[S.j] : null, T = folkTarget(c, J);
@@ -80427,10 +80537,9 @@ function folkPlan(c, S) {
     if (J && J.do === 'hunt') { if (cargoN(v, J.k || 'fish') >= folkN(J, NETP.HOLD)) { S.j++; return; } if (can(v)) { folkGo(v, T.x, null, true); FOLK.v[v.sid].n = folkN(J, NETP.HOLD); return; } }   // (the hold full: the catch is done)
     // COLLECT / DELIVER from the vehicle stopped beside the place (as a market's sellers - it needn't be put away there)
     if (J && T.o && !foot) {
+      { const D = folkBay(c, S, v, J, T); if (D === 1) return; if (D === 2) { folkJob(c, S, v, J, T); return; } }   // (a place with a vehicle door it fits through: in, loaded, out - 50-zzzzz-place-door.js)
       if (folkBeside(v, T.o)) {
-        if (J.do === 'collect') { let n = Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
-        else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { const pay = J.pay > 0 ? folkSellPay(T.o, J.k, n) : stPays(T.o, J.k, n, c.id); cargoAdd(v, J.k, -n); stHand(T.o, J.k, n); S.k = (S.k || 0) + pay; }   /* (paid as the player is: a SELL at its price, a delivery of what the place takes - stPays) */ folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
-        S.j++; return;
+        folkJob(c, S, v, J, T); S.j++; return;
       }
       if (can(v)) { folkGo(v, T.x, null); return; }
     }
