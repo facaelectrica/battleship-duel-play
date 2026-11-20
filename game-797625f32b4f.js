@@ -12951,8 +12951,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1140;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 19 21:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1141;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 19 21:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -37899,6 +37899,7 @@ function renderObjects() {
   guardDraw('drawPierPosts', () => drawPierPosts(x0, x1));   // (every dock's pillars: before the ground they go into, so it covers their feet - 50-zz-structh.js, user Nov 2)
   guardDraw('drawIslands', () => drawIslands(x0, x1));   // (the island lines' islands: behind the water, the boats and the floor in front - 50-land-islands)
   guardDraw('drawIslStructs', () => drawIslStructs(x0, x1));   // (what stands on an island at sea, drawn with it: its light and tint - 50-zz-struct.js, user Nov 2)
+  guardDraw('drawIslFront', () => drawIslFront(x0, x1));     // (its DECK 0 in front of what stands on it - 50-land-islands.js)
   ot = ema('obIslands', ot);
   drawSeaLife();
   ot = ema('obLife', ot);
@@ -49439,7 +49440,7 @@ function drawIslChunks(x0, x1, inLand) {
   // from the grid on the GPU (50-land-zz-grid.js), as the ground in front is: its skins, stones, smooth edge, rims in the sun, the hour's light
   ggDraw(islSlices(x0, x1).filter(k => !seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) === inLand), 1);   // (a slice in a country: the land's pass)
   C.imageSmoothingEnabled = ga;
-  if (!inLand) { drawLandProps(x0, x1, 'sea', 'plants'); VEG_PASS = 'front'; drawLandProps(x0, x1, 'sea', 'plants'); VEG_PASS = null; }   // (an island at sea: its plants here, behind the water - decks 1-2, then deck 0)
+  if (!inLand) drawLandProps(x0, x1, 'sea', 'plants');   // (an island at sea: its plants here, behind the water - decks 1-2; its DECK 0 after what stands on it - drawIslFront)
   // each layer of islands in front of them, back to front, in their plane: its ground; its plants with it as an island's (the sea's pass) - what stands
   // on it in the land's pass, as on an island (renderLandObjects0)
   for (const L of LI) {
@@ -49449,6 +49450,9 @@ function drawIslChunks(x0, x1, inLand) {
   }
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
+// (user Nov 19 20:16: "House bushes, House, BG vegetation") an island at sea's DECK 0 - in front of what stands on it, as on the land (renderLandObjects0:
+// DECK 1, the structures, DECK 0): drawn right after drawIslStructs. It was drawn with the island, before its structures - a house's own bushes behind it
+function drawIslFront(x0, x1) { if (!land.cell || !(land.islRuns && land.islRuns.length)) return; VEG_PASS = 'front'; try { drawLandProps(x0, x1, 'sea', 'plants'); } finally { VEG_PASS = null; } }
 // the slices holding island columns in [x0, x1], each once, in the island lines' order
 function islSlices(x0, x1) {
   const out = [], done = new Set();
@@ -76708,7 +76712,9 @@ function hplLay(L = hplAll()) {
   const runs = land.islRuns || [];
   for (const r of L) {
     const P = VEG_PREFABS[r.p]; if (!P || plOut(r.x)) continue;
-    const lay = layOn() ? r.lay | 0 : 0, d = clamp(r.d | 0, 0, 3), isl = !lay && runs.some(([a, b]) => r.x > a && r.x < b) && landTop(r.x, 0) < frontTop(r.x) - 2;   // (lay: the terrain layer it's put on - drawn and standing on it, as the layers' own plants)
+    // (isl: drawn with an island's ground - an island at sea in the sea's pass, as what stands on it is: strOnIsl, the structures' rule. Nov 19: a house's
+    // garden on the Story town's island was laid as the land's - drawn in the land's pass, in front of the house and the island's own plants)
+    const lay = layOn() ? r.lay | 0 : 0, d = clamp(r.d | 0, 0, 3), isl = !lay && (strOnIsl(r) || (runs.some(([a, b]) => r.x > a && r.x < b) && landTop(r.x, 0) < frontTop(r.x) - 2));   // (lay: the terrain layer it's put on - drawn and standing on it, as the layers' own plants)
     const ve = { plantMin: r.s ?? 1, plantMax: r.s ?? 1, sizeMin: r.leaf ?? 1, sizeMax: r.leaf ?? 1, tint: r.tint ?? VTUNE.tree.tint };
     land.props.push(Object.assign({ x: r.x, pick: (hplSeed(r) * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, lay ? { lay } : {}, P.make));
   }
