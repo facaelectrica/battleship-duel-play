@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1275;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1276;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69214,7 +69214,12 @@ function landBody(o, dt, B, roll = true) {
   o.a = a; o.av = av; o.x = cx - (B.cu * ca - B.cv * sa); o.y = cy - (B.cu * sa + B.cv * ca);
   let on = false, drv = false; for (let k = 0; k < n; k++) if (ok[k] && gap[k] <= 1.5) { on = true; if (P[3 * k + 2]) drv = true; }
   o.gnd = drv && ca > 0 ? 1 : 0;
-  LB.hit = hit; LB.on = on; LB.crash = crash; LB.land = land; LB.roof = on && ca < 0 && Math.abs(av) < 0.5 && Math.abs(o.vy) < 20;
+  // (user Nov 21, bug-20261121-161814-v1275: a tank climbing out of a hole reared up just past upright onto its tail, and at the top of that swing -
+  // turning slowly for a moment - it was taken as lying on its roof and lost; its wreck fell back onto its tracks) on its roof is lying ON it: upside
+  // down, at rest, and its roof - the upper half of its body (B.h) - bearing most of its weight this step (JN, what each point's ground pushed back).
+  // Stood on an end, or rocking over past upright, it's borne by its end and tracks: not on its roof
+  let up = 0, all = 0; for (let k = 0; k < n; k++) if (JN[k] > 0) { all += JN[k]; if (P[3 * k + 1] <= -B.h / 2) up += JN[k]; }
+  LB.hit = hit; LB.on = on; LB.crash = crash; LB.land = land; LB.roof = on && ca < 0 && Math.abs(av) < 0.5 && Math.abs(o.vy) < 20 && all > 0 && up > all / 2;
 }
 /* TERRAIN LAYERS (user Nov 18 20:59-21:15, a lighthouse's hill with a road in front of it down to a dock - terrain-layers-plan-nov18.md): what drives or
    stands is on a layer (o.lay: 0 the back - today's ground; 1, 2 ... each in front of the one it was added to). It meets its own layer's ground and every
@@ -69314,7 +69319,7 @@ const layForkOf = p => { const D = layDriven(p); return D ? layForkAhead(D[0], D
 // a body's make from its outline: pts [[u, v, drives]], where its weight sits along it (cu), its size for its turning weight (a box L x H), its gravity
 // and climb. It turns about its base's line under its weight (cv 0: held up there, nothing sideways stops its feet - a middle of mass above them
 // would slide them back as it tips; and side-on, how high its weight sits only matters on slopes steeper than anything drives up)
-function bodyMake(pts, cu, L, H, g, step) { return { p: Float64Array.from(pts.flat()), cu, cv: 0, I: (L * L + H * H) / 12, g, step }; }
+function bodyMake(pts, cu, L, H, g, step) { return { p: Float64Array.from(pts.flat()), cu, cv: 0, I: (L * L + H * H) / 12, g, step, h: H }; }   // (h: its height over its foot - its roof the upper half: landBody's LB.roof)
 // a car's (and every Story / civilian vehicle on wheels): her wheels' feet (CAR_WHEELS - they drive: the drive's own make says which are driven),
 // her two ends at a third of her height, her roof; her weight where her make has it along her (CAR_SPEC: forward of her axles' middle)
 const CAR_BODY = new Map();
