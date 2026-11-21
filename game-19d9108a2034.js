@@ -11864,6 +11864,18 @@ function surfLayerCol(L, c, r, k) {
   if (M.grit && hash(c * 3.1 + r * 0.73) < 0.18) col = hash(c * 0.37 + r * 5.1) < 0.5 ? P[0] : P[2];
   return k > 0 ? mix3(col, P[2], Math.min(1, k) * 0.35) : col;
 }
+// (stability chat, Nov 21 - planting the world filled every column's cells, ~450 a column, each asking every layer of its biome) how deep any biome's
+// layers can reach under the ground's top: [their thickest sum, whether one runs down to the water]. surfLayerAt is null for any dy at least
+// sum + (to water ? the water's depth under the top : 0) whatever the wobble (surfWob is -1..1: a layer is never thicker than its MIN / MAX at the
+// wobble's ends) - ltMatAt skips the layers there
+function surfDeepest() {
+  let d = 0, wl = false;
+  for (const k in BIOME_SURF) { const LS = BIOME_SURF[k]; if (!Array.isArray(LS)) continue; let s = 0;
+    for (const L of LS) { const w = Math.abs(L.w != null ? L.w : 1), a = +L.a, b = +L.b; if (!isFinite(a) || !isFinite(b) || !isFinite(w)) return [Infinity, true];
+      s += Math.max(a + (b - a) * (0.5 - 0.5 * w), a + (b - a) * (0.5 + 0.5 * w), 0); if (L.wl) wl = true; }
+    if (s > d) d = s; }
+  return [d, wl];
+}
 // which of the biome's layers a point dy under the ground's top is in (top: the top's world y, x the column's): { i, L, k } or null
 function surfLayerAt(bn, x, top, dy) {
   const LS = BIOME_SURF[bn]; if (!LS || !LS.length) return null;
@@ -13084,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1273;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 16:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1274;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -55581,13 +55593,27 @@ function tunWidthAt(I, j) {
 // / highest of a long list, one at a time
 const lowOf = A => { let m = Infinity; for (let i = 0; i < A.length; i++) if (A[i] < m) m = A[i]; return m; };
 const highOf = A => { let m = -Infinity; for (let i = 0; i < A.length; i++) if (A[i] > m) m = A[i]; return m; };
+// (stability chat, Nov 21 - user: "Can planting be made cheaper?") is a shape's outline as it was when its curve was last made: its points, item by item
+// (numbers, null or a skin's letter - ptOk), against the copy kept then (_polyQ), and a cave's own tube. Was the whole point list written out as text
+// on every ask - asked ~150,000 times in a Story world's build (its plants, each cell's skin), a sixth of the build
+function shpPolySame(I) {
+  const Q = I._polyQ, P = I.p; if (!Q || !P || Q.length !== P.length) return false;
+  for (let k = 0; k < P.length; k++) { const a = P[k], b = Q[k]; if (!Array.isArray(a) || a.length !== b.length) return false; for (let j = 0; j < a.length; j++) if (a[j] !== b[j]) return false; }
+  return I._polyH === (shpK(I) === 'H' ? '|H' + (I.t ? JSON.stringify(I.rs || TUN_RS0) : '') : '');
+}
+function shpPolyKeep(I, poly, sig) {
+  Object.defineProperty(I, '_poly', { value: poly, writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(I, '_polyQ', { value: I.p.map(q => Array.isArray(q) ? q.slice() : q), writable: true, configurable: true, enumerable: false });
+  Object.defineProperty(I, '_polyH', { value: shpK(I) === 'H' ? '|H' + (I.t ? JSON.stringify(I.rs || TUN_RS0) : '') : '', writable: true, configurable: true, enumerable: false });
+}
 function shpPoly(I) {
+  if (I._poly && shpPolySame(I)) return I._poly;
   const sig = JSON.stringify(I.p) + (shpK(I) === 'H' ? '|H' + (I.t ? JSON.stringify(I.rs || TUN_RS0) : '') : '');
-  if (I._poly && I._polySig === sig) return I._poly;
+  if (I._poly && I._polySig === sig) { shpPolyKeep(I, I._poly, sig); return I._poly; }
   if (shpK(I) === 'H' && typeof CAVE !== 'undefined' && CAVE.crCurve) {
     const O = shpCavePoly(I), poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: lowOf(O.X), x1: highOf(O.X), y0: lowOf(O.Y), y1: highOf(O.Y), tube: O.tube || null };
-    Object.defineProperty(I, '_poly', { value: poly, writable: true, configurable: true, enumerable: false });
-    Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
+    shpPolyKeep(I, poly, sig);
     return poly;
   }
   // (user Nov 7, the TODO list: "one closed curve for every shape" - S-curves and overhangs; "a slider from sharp to curved for that
@@ -55634,8 +55660,7 @@ function shpPoly(I) {
   for (let i = 0; i < X.length; i++) { const j = O.X.length - 1; if (j >= 0 && Math.abs(O.X[j] - X[i]) < 1e-9 && Math.abs(O.Y[j] - Y[i]) < 1e-6) { O.E[j] = E[i]; continue; }   /* (the edge from it is the next run's) */ O.X.push(X[i]); O.Y.push(Y[i]); O.E.push(E[i]); }
   if (O.X.length > 1 && Math.abs(O.X[0] - O.X[O.X.length - 1]) < 1e-9 && Math.abs(O.Y[0] - O.Y[O.Y.length - 1]) < 1e-6) { O.X.pop(); O.Y.pop(); O.E.pop(); }
   const poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: lowOf(O.X), x1: highOf(O.X), y0: lowOf(O.Y), y1: highOf(O.Y) };
-  Object.defineProperty(I, '_poly', { value: poly, writable: true, configurable: true, enumerable: false });
-  Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
+  shpPolyKeep(I, poly, sig);
   return poly;
 }
 // the y spans inside a shape at world x: [top, bottom, top, bottom, ...] (even-odd), and the loop's piece at each top
@@ -57497,11 +57522,14 @@ function ltColP(c, x, top, R) {
   return { x, sandy, rockD: 270 + 30 * (0.5 + 0.5 * Math.sin(x / 140 + R[2])) + 9 * Math.sin(x / 37 + R[1]),   // (deep, under the view: the picture shows earth all the way down)
     sandDepth: sandy * (24 + 11 * surfWob(x + R[3] * 97, 1)),   // (sand in the low valley: its depth a natural wobble, not a sine - user Nov 7 12:51)
     rocky: land.sea[c] && top < WATER_Y ? 1 : 0, apron: onApronGround(x),   // (a piece marked SEA standing out of the water: the coast's bare rock, no grass - user Oct 28, 17:12)
-    TSL: land.trop[c] ? surfLayer('tropical', 'sand') : null, BN: typeof colBiome === 'function' ? colBiome(c) : null };   // (BEACH: its sand layer; its biome's layers - surfLayerAt)
+    TSL: land.trop[c] ? surfLayer('tropical', 'sand') : null, BN: typeof colBiome === 'function' ? colBiome(c) : null,   // (BEACH: its sand layer; its biome's layers - surfLayerAt)
+    deep: surfDeepest() };   // (under this much - and the water's depth, with a layer down to it - no biome's layer reaches: rock there, ltMatAt)
 }
 let LT_LAY = 0;
 function ltMatAt(c, r, y, tp, P) {
   LT_LAY = 0; const x = P.x;
+  // (deep under the rock's line and past every layer any biome could lay: rock, whatever this cell's terrain type - the same answer as the whole rule below)
+  if (y >= tp + P.rockD && y - tp >= P.deep[0] + (P.deep[1] ? Math.max(0, WATER_Y - 6 - tp) : 0)) return M_ROCK;
   let m; const ct = ltTC(c, r), TSLc = ct === c ? P.TSL : land.trop[ct] ? surfLayer('tropical', 'sand') : null;   // (this cell's terrain type - ltTC: where two meet, the line wanders)
   if (land.mtn[ct] || y >= tp + P.rockD || (P.rocky > 0.5 && y < tp + 60 + 40 * P.rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
   else if (P.apron && y < tp + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
@@ -77544,6 +77572,7 @@ function bugState() {
     // (Nov 11, the iPad's "TypeError: Type error": the simulation worker as it is, and if it failed, where - the error, the place in the source
     // (file:line:col and function), what it was doing, its tick and its stack, put back as the source files' - 00-sw-boot.js swPlace)
     // (user Nov 11 09:34: the loading screens' lifts - each one's frame, when it was asked and lifted, and the last frame each part waited in - 00-world.js COVER)
+    build: BUILD_T.map(q => q.join(' ')).join(', '),   // (the last world build's steps and their ms - btMark: where a long 'Building world' went)
     cover: { up: coverUp(), line: coverLine(), asked: COVER.off.size ? Math.round(COVER.asked) : null, waiting: COVER.off.size ? COVER.waited : null, now: Math.round(performance.now()), last: COVER.last, lifts: COVER.lifts.slice() },   // (line: what the screen says now; waiting: the frame each part last held it in since it was asked off)
     sw: typeof SW === 'undefined' ? null : { want: SW_WANT, ready: SW.ready, live: SW.live, fail: SW.fail, where: SW.where || null, bootMs: Math.round(SW.bootMs), snaps: SW.got },
   };
