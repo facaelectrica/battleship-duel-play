@@ -12071,7 +12071,9 @@ function biomeDelete(id) {
 function biomesSaved() { if (typeof vegDecksSave === 'function') vegDecksSave(); if (typeof biomeSurfSave === 'function') biomeSurfSave(); }
 // the ground's GPU table's biomes, in order: the built-ins as it always had them, then the new
 const GG_BIO_NAMES0 = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic', 'sea'];
-const ggBioNames = () => GG_BIO_NAMES0.concat(BIOMES_NEW.map(B => B.id));
+// (asked per ground column as it's laid: made again only when the list changes - a biome's id never changes, NEW and DELETE change its length)
+const GG_BN = { src: null, n: -1, L: GG_BIO_NAMES0 };
+const ggBioNames = () => { const C = GG_BN; if (C.src !== BIOMES_NEW || C.n !== BIOMES_NEW.length) { C.src = BIOMES_NEW; C.n = BIOMES_NEW.length; C.L = GG_BIO_NAMES0.concat(BIOMES_NEW.map(B => B.id)); } return C.L; };
 
 //@src 10-tower-sub-constants.js:1
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
@@ -13071,8 +13073,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1265;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 13:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1266;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 14:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53928,11 +53930,11 @@ const BIOME_OF_SKIN = { F: 'forest', D: 'desert', T: 'tropical', M: 'mountain', 
 // (lay: a terrain layer's own ground - its shape's skin, else the ground's at x)
 function biomeAtX(x, isl, lay) {
   if (lay) { const sk = islSkinAt(x, lay); return sk ? BIOME_OF_SKIN[sk] || null : biomeAtX(x); }
-  if (isl) { const sk0 = islSkinAt(x); if (sk0 && SKIN_BASE[sk0]) return BIOME_OF_SKIN[sk0];   // (a new biome's own - before its base's tests: 09-zzz-biome-list.js)
-    if (islTropAt(x)) return 'tropical'; const sk = islSkinAt(x); return sk ? BIOME_OF_SKIN[sk] || null : biomeAtX(x); }   // (the beach as islTropAt always read it)
-  const sk = typeof landSkinAt === 'function' ? landSkinAt(x) : null;
-  if (sk && SKIN_BASE[sk]) return BIOME_OF_SKIN[sk];   // (a new biome's own)
+  if (isl) { const sk0 = BIOMES_NEW.length ? islSkinAt(x) : undefined; if (sk0 && SKIN_BASE[sk0]) return BIOME_OF_SKIN[sk0];   // (a new biome's own - before its base's tests: 09-zzz-biome-list.js; none made - the beach's quick answer first, as ever)
+    if (islTropAt(x)) return 'tropical'; const sk = sk0 !== undefined ? sk0 : islSkinAt(x); return sk ? BIOME_OF_SKIN[sk] || null : biomeAtX(x); }   // (the beach as islTropAt always read it)
+  const bN = land.bioN ? land.bioN[clamp(ltCol(x), 0, land.cols - 1)] : 0; if (bN) return ISK_BIO[bN] || 'forest';   // (a new biome's column, as landColsBuild marked it - read as cheaply as landTrop)
   if (landTrop(x)) return 'tropical';
+  const sk = typeof landSkinAt === 'function' ? landSkinAt(x) : null;
   return sk ? BIOME_OF_SKIN[sk] || null : lookD(x) ? 'desert' : 'forest';
 }
 
@@ -82409,10 +82411,15 @@ const whoOf = c => c === PLAYER_C ? 'player' : c.id;
    land's shape id (your home's own car cv 1) */
 const CV_ISLE = 10;
 const isleCarOf = v => v && v.cv >= CV_ISLE ? v.cv - CV_ISLE : null;   // (the land - its shape id - an island's car is kept on; null: not one)
-function playerIsles() {   // [land shape, the parking its car is kept at] - each land with a dock, your home's left out
-  const H = storyHome(), home = H ? strLand(H) : null, out = new Map();
-  for (const d of strsUsed().filter(o => o.k === 'dock').sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => Math.abs(b.x - d.x) < Math.abs(a.x - d.x) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
-  return [...out];
+// [land shape, the parking its car is kept at] - each land with a dock, your home's left out. Asked every step (keptVehStep), worked out again only when
+// the world, your home, your car or a dock's lot changes (finding each lot's land is ~2 ms - Nov 21, the frame check)
+const PISLES = { key: null, L: [] };
+function playerIsles() {
+  const H = storyHome(), D = strsUsed().filter(o => o.k === 'dock'), key = [STR_GEN, ISL_VER, H ? H.id : 0, PLAYER_C.veh || '', ...D.map(d => d.id + ':' + (d.lot ? d.lot.car : ''))].join();
+  if (PISLES.key === key) return PISLES.L;
+  const home = H ? strLand(H) : null, out = new Map();
+  for (const d of D.sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => Math.abs(b.x - d.x) < Math.abs(a.x - d.x) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
+  PISLES.key = key; PISLES.L = [...out]; return PISLES.L;
 }
 function keptVehStep() {
   for (const c of charsAll()) {
