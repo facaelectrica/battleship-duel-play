@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1279;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1280;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14594,14 +14594,22 @@ function edModeEnter() {
    in the editor") the editor's fresh world without what the world sends out on its own - the big ships, the planes and
    helicopters in the air, the boats, yachts and seaplanes, the balloons and blimps, the minisubs, what's in orbit: only what
    was placed stays (the structures and what stands at them - story vehicles, the docks, towers, wrecks, the kraken). CLOSE
-   builds the world again and puts the game back (edGameBack): nothing of the game is lost */
-const ED_UNPLACED = ['civShips', 'traffic', 'jetboats', 'sailboats', 'seaplanes', 'civHelis', 'balloons', 'blimps', 'minisubs', 'orbiters', 'spaceJunk'];
+   builds the world again and puts the game back (edGameBack): nothing of the game is lost.
+   (user Nov 21 16:37, bug-20261121-163710-v1277: the CAPTAIN's cargo ship twice at PIER, deleting it no change, back after SAVE CHANGES) What
+   the Story makes for its people as it starts (keptVehStep, 50-zzzzz-story-work.js) isn't placed either: a character's own vehicle (cv), the
+   island's car (cv 10+), a workplace's WORK VEHICLE (wk). The editor shows those only as its start plan's pictures with their people's names
+   (assignEdDraw) - set by a character's VEHICLE and a design's WORK VEHICLE, not picked or deleted in the scene. (Since 7dd3f88, Nov 21 13:51, a
+   new story's start makes them at once - the editor's fresh world too: the real one stood beside its picture, pickable, and DELETE took out
+   something no SAVE CHANGES keeps.) */
+const ED_UNPLACED = ['civShips', 'traffic', 'jetboats', 'storyCars', 'sailboats', 'seaplanes', 'civHelis', 'balloons', 'blimps', 'minisubs', 'orbiters', 'spaceJunk'];
 // (Nov 1, structures-everywhere step 6: the armies start at their structures now - the battleship and sub berthed in their
 // harbour, the warplane, army helicopter and tank in their AIRCRAFT HANGAR: the editor shows them where they start, no longer
 // moved out of its world - the editor chat; the hangars' spots are listed on them, strEdDraw)
+// what the editor's world holds: what was placed or stands at a structure's spot (story, sid) - not the Story's people's vehicles (wk, cv)
+const edPlaced = o => !!o && (o.story || o.sid != null) && o.wk == null && o.cv == null;
 // anything sent out on its own still there (edModeSync's check, every frame: a look at each list's length and first ones)
 function edUnplacedLeft() {
-  for (const n of ED_UNPLACED) { const T = TABLES[n], L = T && T.list(); if (Array.isArray(L)) for (const o of L) if (!(o && (o.story || o.sid != null))) return true; }
+  for (const n of ED_UNPLACED) { const T = TABLES[n], L = T && T.list(); if (Array.isArray(L)) for (const o of L) if (!edPlaced(o)) return true; }
   return false;
 }
 // everything sent out on its own taken out - by its table's own way (T.take: a record table's row cut from its columns - part 8); keep: one thing, or a
@@ -14613,7 +14621,7 @@ function edPlacedOnly(keep) {
   for (const n of ED_UNPLACED) {
     const T = TABLES[n]; if (!T) continue;
     const L = T.list(); if (!Array.isArray(L)) continue;
-    for (const o of L.slice().reverse()) if (!(o && (o.story || o.sid != null)) && !K.has(o)) T.take(o);
+    for (const o of L.slice().reverse()) if (!edPlaced(o) && !K.has(o)) T.take(o);
   }
 }
 function edModeExit() {
@@ -81919,12 +81927,13 @@ function smapIcon(c, n, x, fy, r, col) {
    - The wheel zooms about the pointer; the middle button (or the right) drags it; a press picks the dot or place under it (its details at the
      foot), and the map follows what's picked, in the middle; a press on nothing lets go - then it stays where it is.
    - SPEED at the foot (x1 x2 x4 x8 x16): the whole game stepped that many times a frame (story.rate - frameBody), the clock with it.
-   Read only: it changes nothing but the speed. ---- */
+   Read only: it changes nothing but the speed - in the GAME EDITOR, the weather areas and the air's layers, seen best this far out, are edited on it
+   (user Nov 21 16:33 - 50-zzzzzz-map-edit.js). ---- */
 const SMAP = { on: false, cx: 0, cy: 0, z: 6, sel: null, hot: [], a: 0, zIn: 0, list: 0, ls: 0, ptr: new Map(), pinch: null, cv: null };   // (z: world units a CSS pixel; a: how far it's faded in; zIn: the view's own scale as it opened - zooming in past it, back to the view; sel: { v: sid } or { o: place id }; ls: the list's scroll in px)
 const SMAP_RATES = [1, 2, 4, 8, 16];
 // (user Nov 20 20:15: "the game editor is the same thing, you zoom in and you zoom out the same way. When you're playing the game, you're seeing things in the
 // editor. It also allows you to see the scale of the game, but editing is just the way we do it") open in Story play and in the GAME EDITOR (photo mode) alike -
-// read only in both; ENTER / GO THERE / SPEED only while playing
+// read only in both (the editor's weather areas and air layers apart - 50-zzzzzz-map-edit.js); ENTER / GO THERE / SPEED only while playing
 const smapWhere = () => (STORY && !ui.title) || (PHOTO.on && !!PHOTO.ed);
 const smapPlay = () => STORY && !ui.title && !PHOTO.on;
 const smapVehs = () => smapPlay() ? storyVehs() : vehAll().filter(e => e.v && Number.isFinite(e.v.x)).map(e => (e.v.__smapN = vehName(e), e.v));   // (the GAME EDITOR: every vehicle it lists, named as it names them - its own vehAll / vehName, 50-zz-editor-vehicles.js)
@@ -82065,6 +82074,8 @@ function drawStoryMap() {
     for (const I of S.filter(I => shpK(I) !== 'H').sort((a, b) => shpLay(a) - shpLay(b))) fillShape(I);
     g.fillStyle = SMAP_C.cave; for (const I of S) if (shpK(I) === 'H') { path(I); g.fill(); } }
   g.fillStyle = SMAP_C.line; for (const e of [0, WORLD_W]) { const sx = X(e); if (sx > 0 && sx < MW) g.fillRect(Math.round(sx), 0, 1, mh); }   // (the world's ends)
+  // (user Nov 21: in the GAME EDITOR the weather areas and the air's layers are seen and edited here - 50-zzzzzz-map-edit.js)
+  const EV = { g, X, Y, MW, mh, text }; smapEdDraw(EV);
   // every place: a box in its kind's colour; its name over it where there's room (names never drawn over each other - the picked one first), its stock closer in
   const labs = [], free = (x0, y0, x1, y1) => !labs.some(r => x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]);
   const places = strsUsed().map(o => { const B = strBox(o); return { o, x0: X(B.x0), x1: X(B.x1), y0: Y(B.top), y1: Y(B.foot) }; }).filter(P => P.x1 > -60 && P.x0 < MW + 60);
@@ -82096,6 +82107,7 @@ function drawStoryMap() {
     if (on) text(smapVehLine(v, who != null ? charOf(who) : null), vx, vy - 20, SMAP_C.sel, 13, 'center', true, true);
     if (smapKey(v) != null) SMAP.hot.push({ v: smapKey(v), x0: vx - 16, x1: vx + 16, y0: vy - 16, y1: vy + 16, dot: 1 });
   }
+  smapEdDrawTop(EV);
   g.restore();
   // the head: MAP and how it works
   text(trText('MAP'), 16, 22, SMAP_C.ink, 20, 'left', true, true);
@@ -82150,6 +82162,7 @@ function smapWire(c) {
   c.addEventListener('pointerdown', e => {
     stop(e); if (!SMAP.on) return; try { c.setPointerCapture(e.pointerId); } catch (x) { }
     const [x, y] = pt(e), B = SMAP.listBox, inList = !!(B && x >= B[0] && y >= B[1]);
+    if (!inList && SMAP.ptr.size === 0 && smapEdDown(e, x, y)) { SMAP.ptr.set(e.pointerId, { x, y, x0: x, y0: y, moved: true, ed: true, cx: SMAP.cx, cy: SMAP.cy, ls: SMAP.ls }); return; }   // (a weather area's strip or handle, an air layer's line: edited here - 50-zzzzzz-map-edit.js)
     SMAP.ptr.set(e.pointerId, { x, y, x0: x, y0: y, moved: false, inList, pan: e.pointerType === 'mouse' && e.button !== 0, cx: SMAP.cx, cy: SMAP.cy, ls: SMAP.ls });
     if (SMAP.ptr.size === 2) { const [a, b] = [...SMAP.ptr.values()]; SMAP.pinch = { d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), z0: SMAP.z }; smapRegrab(); }
   });
@@ -82157,6 +82170,7 @@ function smapWire(c) {
     const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e);
     const [x, y] = pt(e); p.x = x; p.y = y;
     if (!SMAP.on) { smapHandMove(); return; }
+    if (p.ed) { smapEdMove(e, x, y); return; }
     if (SMAP.pinch && SMAP.ptr.size >= 2) { const [a, b] = [...SMAP.ptr.values()], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; smapZoomTo(SMAP.pinch.z0 * SMAP.pinch.d0 / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), mx, my); return; }
     if (!p.moved && Math.hypot(x - p.x0, y - p.y0) > 8) { p.moved = true; p.x0 = x; p.y0 = y; p.cx = SMAP.cx; p.cy = SMAP.cy; p.ls = SMAP.ls; if (!p.inList) SMAP.sel = null; }   // (a drag: what's picked let go - the map stays where it is and moves with the finger)
     if (!p.moved) return;
@@ -82164,7 +82178,7 @@ function smapWire(c) {
     else { SMAP.cx = p.cx - (x - p.x0) * SMAP.z; SMAP.cy = p.cy - (y - p.y0) * SMAP.z; }
   });
   const up = e => {
-    const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e); SMAP.ptr.delete(e.pointerId); if (!SMAP.on) { if (SMAP.ptr.size < 2) SMAP.hand = null; return; }
+    const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e); SMAP.ptr.delete(e.pointerId); if (p.ed) { smapEdUp(e); return; } if (!SMAP.on) { if (SMAP.ptr.size < 2) SMAP.hand = null; return; }
     if (SMAP.ptr.size < 2 && SMAP.pinch) { SMAP.pinch = null; smapRegrab(); }   // (user 21:46: lifting one finger of a pinch snapped the map to where the other first touched)
     if (e.type === 'pointerup' && !p.moved && !p.pan && SMAP.on) smapTap(p.x, p.y);
   };
@@ -82193,7 +82207,7 @@ function smapTap(x, y) {
   if (h && h.enter != null) { act(0, 'storyBecome', h.enter); menuClick(); SMAP.on = false; return; }   // (you are them: the map closes on you)
   if (h && h.v != null) { SMAP.sel = { v: h.v }; menuClick(); return; }
   if (h && h.o != null) { SMAP.sel = { o: h.o }; menuClick(); return; }
-  if (!(h && h.row)) SMAP.sel = null;
+  if (!(h && h.row)) { SMAP.sel = null; smapEdTap(x, y); }   // (nothing of the map's: a weather area there picked, on WEATHER AREAS - 50-zzzzzz-map-edit.js)
 }
 // the zoom set to z (world units a CSS pixel) about the screen point x, y (none: the map's middle); zoomed in past the view's own scale, back to the view
 // the window's middle (cx, cy) that puts world point p at the map's own middle (left of the lists, above the foot)
@@ -83736,6 +83750,209 @@ const VM_ROW = worldRow({ ch: [() => wjson(vmDiff()), v => vmApply(wunjson(v))] 
 defTable('vmarks', () => [VM_ROW], { make: () => VM_ROW });
 ACTS.vmarks = (p, ch) => vmApply(ch);
 ACTS.vehnew = (p, L) => { const cur = vmDiff(); vnewSet(Array.isArray(L) ? L : []); vmApply(cur); };
+
+//@src 50-zzzzzz-issues.js:1
+/* ---- ISSUES: everything in the world that's still wrong, in a list at the WORLD EDITOR's top left (user Nov 21 16:33: "In the world editor, I should
+   have a list of all the things that are still invalid on the top left. So locations that are missing workers or parking, etc. And I should be able to
+   click on them and it takes me there so I can quickly fix issues").
+   One rule: what the editor shows red is an issue, with the same reason it shows - a structure's strPlaceBad (OFF THE GROUND, NEEDS WATER / DRY LAND,
+   NEEDS PARKING / DOCK, NEEDS A PLACE TO ..., SPOTS SHORT, a second service on a land) or, a workplace with nobody working there, NO WORKERS
+   (peopleEdDraw's red); a vehicle's vehPlaceBad (where it stands; in the Story world TEST ONLY and what it needs - placedNotParked). A press on a row
+   picks it (as any pick: its tab opens) and puts the view on it, the map closed first if it's open. The list is in the GAME EDITOR's panel (#skyEd -
+   its look, its presses never the world's: onEdUI) though it sits at the screen's top left, under the WORLD gear (and under its sliders while
+   they're open); it shows on WORLD EDITOR only (TUNE.when). Written from the state in TUNE.onSync - after every press and every 0.2 s. ---- */
+const ISS = { ui: null, key: '' };
+// every issue now: [{ t: its name, why, s: a structure's id | v: a vehicle's entry, x, y }] - structures first, by name
+function edIssues() {
+  const L = [];
+  for (const o of STRS) {
+    let why = ''; try { why = strPlaceBad(o) || (STORY_WORLD && typeof strWork === 'function' && strWork(o) && !workers(o).length ? 'NO WORKERS' : ''); } catch (e) { }
+    if (!why) continue;
+    const B = strBox(o); L.push({ t: strName(o).toUpperCase(), why, s: o.id, x: (B.x0 + B.x1) / 2, y: (B.top + B.foot) / 2 });
+  }
+  L.sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : a.x - b.x);
+  const V = [];
+  for (const e of vehAll()) {
+    let why = ''; try { why = vehPlaceBad(e); } catch (x) { }
+    if (!why) continue;
+    const [x, y] = vehPos(e); V.push({ t: vehName(e), why, v: e, x, y });
+  }
+  V.sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : a.x - b.x);
+  return L.concat(V);
+}
+// a row pressed: it alone picked (its tab opens), the view on it - the middle of the part of the screen above the editor's panel, the zoom as it is (the
+// markers' GO TO: mkGo); from the map, back into the editor first
+function edIssueGo(I) {
+  if (typeof SMAP !== 'undefined' && SMAP.on) smapToggle();
+  for (const k in WK) WK[k].clear();
+  if (I.s != null) { if (!strById(I.s)) return; SE.sel = [I.s]; strSync(); }
+  else { const e = vehAll().find(q => q.v === I.v.v); if (!e) return; VE.sel = e; VE.more = []; vehSync(); }
+  const T = NSKY.editor.TUNE, K = WK[I.s != null ? 'struct' : 'vehicle'];   // (its tab, as a press on it opens it - wedAfter)
+  if (!grpOpen()) { T.show(K.tab); if (K.show) K.show(); }
+  const ed = document.getElementById('skyEd'), hp = ed && !ed.hidden ? ed.getBoundingClientRect().height * dpr / PIXW : 0;
+  PHOTO.x = clamp(I.x, 0, WORLD_W); PHOTO.y = I.y + hp / 2 / (S * PHOTO.z);
+  wedSync();
+}
+// is this row the one picked now
+const edIssueOn = I => I.s != null ? SE.sel.length === 1 && SE.sel[0] === I.s : !!(VE.sel && VE.sel.v === I.v.v && !VE.more.length);
+function edIssuesSync() {
+  const U = ISS.ui; if (!U) return;
+  const T = NSKY.editor.TUNE; if (!T.open || !T.world()) return;
+  // its place: under the WORLD gear - under its sliders while they're open (topLayout's units to the page's)
+  { const L = topLayout(), k = innerHeight / ubh, y = ui.settings ? L.panel.y + SLIDERS.length * L.panel.rowH + 8 : L.gear[1] + 50, top = Math.round(y * k) + 'px', left = Math.round(L.gear[0] * k) + 'px';
+    if (U.box.style.top !== top) U.box.style.top = top; if (U.box.style.left !== left) U.box.style.left = left; }
+  const A = edIssues(), key = JSON.stringify(A.map(I => [I.t, I.why, I.s != null ? I.s : vehName(I.v), edIssueOn(I)]));
+  if (key === ISS.key) { U.rows.forEach((r, i) => { if (A[i]) r._I = A[i]; }); return; }   // (the same list: each row's place kept fresh for its press)
+  ISS.key = key; U.n.textContent = A.length ? String(A.length) : '';
+  U.list.textContent = ''; U.rows = [];
+  if (!A.length) { const r = document.createElement('div'); r.className = 'issNone'; r.textContent = 'NONE'; U.list.appendChild(r); return; }
+  for (const I of A) {
+    const r = document.createElement('div'); r.className = 'issRow' + (edIssueOn(I) ? ' on' : ''); r._I = I;
+    const a = document.createElement('span'); a.className = 'issT'; a.textContent = I.t;
+    const b = document.createElement('span'); b.className = 'issW'; b.textContent = I.why;
+    r.title = I.t + ' - ' + I.why + ' (go to it)'; r.append(a, b); r.onclick = () => { edIssueGo(r._I); ISS.key = ''; edIssuesSync(); };   // (a row, not a button: the help line shows its title alone - sky/90-editor.js)
+    U.list.appendChild(r); U.rows.push(r);
+  }
+}
+(function issPlace() {
+  const T = NSKY.editor.TUNE, root = T.root;
+  if (!root || !root.querySelector('.bar.top')) { setTimeout(issPlace, 500); return; }
+  if (!document.getElementById('issCss')) {
+    const st = document.createElement('style'); st.id = 'issCss';
+    st.textContent = `#issBox { position: fixed; z-index: 51; width: 280px; max-height: 38vh; display: flex; flex-direction: column; background: #0f1420f2; border: 1px solid #2c3850; border-radius: 6px; padding: 6px 0 4px; box-sizing: border-box; }
+#issBox h4 { margin: 0 10px 4px; font-size: 12px; letter-spacing: .08em; display: flex; gap: 8px; }
+#issBox h4 .issN { color: #ff7a6e; }
+#issBox .issList { overflow-y: auto; flex: 1 1 auto; }
+#issBox .issRow { display: flex; flex-direction: column; align-items: flex-start; box-sizing: border-box; width: 100%; color: #d8dce8; border-top: 1px solid #1c2538; padding: 4px 10px; cursor: pointer; }
+#issBox .issRow:hover { background: #1a2234; }
+#issBox .issRow.on { background: #24304a; }
+#issBox .issT { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#issBox .issW { color: #ff7a6e; font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#issBox .issNone { color: #7a8294; padding: 2px 10px; }`;
+    document.head.appendChild(st);
+  }
+  const box = document.createElement('div'); box.id = 'issBox';
+  const h = document.createElement('h4'), t = document.createElement('span'), n = document.createElement('span'); t.textContent = 'ISSUES'; n.className = 'issN';
+  h.title = 'Everything shown red in the world: press one to go to it'; h.append(t, n);
+  const list = document.createElement('div'); list.className = 'issList';
+  box.append(h, list); root.appendChild(box);
+  ISS.ui = { box, n, list, rows: [] };
+  T.when(box, () => T.open && T.world());
+  T.onSync(edIssuesSync); edIssuesSync();
+})();
+
+//@src 50-zzzzzz-map-edit.js:1
+/* ---- THE MAP EDITS WHAT'S SEEN ZOOMED OUT: THE WEATHER AREAS AND THE AIR'S LAYERS (user Nov 21 16:33: "when I zoom out, I should be able to see the
+   weather zones and edit them there in the zoomed out simplified map. Same with the stratosphere, atmosphere areas. Since we zoom out to see them
+   clearly"). In the GAME EDITOR the map (50-zzzzz-story-map.js) shows them as the view does, the same when and the same presses, drawn in the map's
+   own look:
+   - the air's layers (STRATOSPHERE, UPPER ATMOSPHERE, OUTER SPACE - the SKY EDITOR's sliders; on WORLD EDITOR, as atmoMarksDraw): a dashed line across
+     the map at its height, its name and metres at its right end; a press near one drags it up or down - through its slider (atmoSet, 50-zz-atmo-marks.js).
+   - the weather areas (on WEATHER AREAS, as wxaEdDraw): each a band the map's height in its colour, its name in a strip at the top; the picked one
+     white edged with a handle under its strip at each edge. A press on a strip picks the area and drags it along (let go over another: into the free
+     space nearest - wxaFit), on a handle stretches it to its neighbour (wxaLimit); a tap in a band where there's no place or vehicle picks it, between
+     the bands EVERYWHERE ELSE - the panel's SELECTED shows it (wxaSync), the sky the picked weather (wxaPreview). Each change saved and in UNDO.
+   Everything else on the map stays read only (user Nov 20 20:15). ---- */
+const SMED = { drag: null };
+const smedOn = () => !smapPlay() && PHOTO.on && !!PHOTO.ed && NSKY.editor.TUNE.world();
+const SMED_STRIP = { t: 40, h: 20 };                                  // (CSS px: the weather strip's top, under the map's head, and its height)
+const SMED_HY = () => SMED_STRIP.t + SMED_STRIP.h + 16, SMED_HR = 9;   // (the picked area's edge handles: their middle's y, their radius)
+// drawn on the map (drawStoryMap, inside its clip - under the places and vehicles): V = { g, X, Y, MW, mh, text }
+function smapEdDraw(V) {
+  if (!smedOn()) return;
+  const { g, X, MW, mh } = V;
+  if (wxaOpen()) {
+    for (const a of WXA.areas) {
+      const x0 = X(a.x0), x1 = X(a.x1); if (x1 < -20 || x0 > MW + 20) continue;
+      const pk = a.id === WXE.sel;
+      g.fillStyle = a.col; g.globalAlpha = pk ? 0.2 : 0.12; g.fillRect(x0, 0, x1 - x0, mh); g.globalAlpha = 1;
+      g.save(); g.setLineDash([8, 7]); g.lineWidth = pk ? 2 : 1; g.strokeStyle = pk ? SMAP_C.sel : a.col;
+      for (const x of [x0, x1]) { g.beginPath(); g.moveTo(Math.round(x) + 0.5, 0); g.lineTo(Math.round(x) + 0.5, mh); g.stroke(); }
+      g.restore();
+    }
+  }
+  // the air's layers: a dashed line across, its name and height at the right end
+  for (const [k, lab, c] of ATMO_MARKS) {
+    const y = V.Y(atmoY(k)); if (y < -10 || y > mh + 10) continue;
+    const on = SMED.drag && SMED.drag.k === k, col = `rgb(${c[0]},${c[1]},${c[2]})`;
+    g.save(); g.setLineDash([12, 10]); g.lineWidth = 4; g.strokeStyle = 'rgba(20,20,20,0.6)'; g.beginPath(); g.moveTo(0, y); g.lineTo(MW, y); g.stroke();
+    g.lineWidth = on ? 3 : 2; g.strokeStyle = on ? SMAP_C.sel : col; g.beginPath(); g.moveTo(0, y); g.lineTo(MW, y); g.stroke(); g.restore();
+    V.text(lab + '  ' + Math.round(NSKY.P[k]) + ' M', MW - 14, y - 11, on ? SMAP_C.sel : col, 13, 'right', true, true);
+  }
+}
+// over everything on the map (after the places and vehicles, still in its clip): the weather areas' strips and the picked one's handles
+function smapEdDrawTop(V) {
+  if (!smedOn() || !wxaOpen()) return;
+  const { g, X, MW } = V, T = SMED_STRIP.t, H = SMED_STRIP.h;
+  for (const a of WXA.areas) {
+    const x0 = Math.max(0, X(a.x0)), x1 = Math.min(MW, X(a.x1)); if (x1 - x0 < 2) continue;
+    const pk = a.id === WXE.sel, [r, gg, b] = wxaRGB(a.col);
+    g.fillStyle = 'rgba(30,30,30,0.9)'; g.fillRect(x0, T, x1 - x0, H); g.fillStyle = `rgba(${r},${gg},${b},0.3)`; g.fillRect(x0, T, x1 - x0, H);
+    g.lineWidth = pk ? 2 : 1; g.strokeStyle = pk ? SMAP_C.sel : a.col; g.strokeRect(x0 + 0.5, T + 0.5, x1 - x0 - 1, H - 1);
+    const nm = a.name || 'AREA'; g.font = '600 12px ' + SMAP_FONT; if (g.measureText(nm).width + 12 <= x1 - x0) V.text(nm, (x0 + x1) / 2, T + H / 2, pk ? SMAP_C.sel : a.col, 12, 'center', true);
+  }
+  const A = wxaSel(); if (!A || A === WXA.base) return;
+  for (const s of [-1, 1]) {                                     // (the World Plan's handles - orange, a white ring, a white <->)
+    const x = X(s < 0 ? A.x0 : A.x1), y = SMED_HY(), R = SMED_HR; if (x < -R || x > MW + R) continue;
+    g.fillStyle = '#ff9a2e'; g.fillRect(x - 1, T + H, 2, y - R - T - H);
+    g.beginPath(); g.arc(x, y, R + 1.5, 0, Math.PI * 2); g.fillStyle = '#ffffff'; g.fill(); g.beginPath(); g.arc(x, y, R - 1, 0, Math.PI * 2); g.fillStyle = '#ff9a2e'; g.fill();
+    g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x - 5, y); g.lineTo(x + 5, y); g.moveTo(x - 2.5, y - 2.5); g.lineTo(x - 5, y); g.lineTo(x - 2.5, y + 2.5); g.moveTo(x + 2.5, y - 2.5); g.lineTo(x + 5, y); g.lineTo(x + 2.5, y + 2.5); g.stroke();
+  }
+}
+// a screen point on the map in the world
+const smedWorld = (x, y) => [SMAP.cx + (x - innerWidth / 2) * SMAP.z, SMAP.cy + (y - innerHeight / 2) * SMAP.z];
+// what of these is under a press at x, y (CSS px on the map): a handle, a strip, a layer's line - or null
+function smedHit(x, y) {
+  if (!smedOn()) return null;
+  const L = smapLayout(); if (x >= L.MW || y >= L.footY) return null;
+  const X = wx => innerWidth / 2 + (wx - SMAP.cx) / SMAP.z, Y = wy => innerHeight / 2 + (wy - SMAP.cy) / SMAP.z;
+  if (wxaOpen()) {
+    const A = wxaSel();
+    if (A && A !== WXA.base && Math.abs(y - SMED_HY()) < SMED_HR * 2) for (const s of [-1, 1]) if (Math.abs(x - X(s < 0 ? A.x0 : A.x1)) < SMED_HR * 1.8) return { k: 'edge', a: A, s };
+    if (y >= SMED_STRIP.t - 3 && y <= SMED_STRIP.t + SMED_STRIP.h + 3) { const a = wxaIn(smedWorld(x, y)[0]); if (a) return { k: 'strip', a }; }
+  }
+  let best = null, bd = 9;
+  for (const [k] of ATMO_MARKS) { const d = Math.abs(y - Y(atmoY(k))); if (d < bd) { bd = d; best = k; } }
+  return best ? { k: 'atmo', at: best } : null;
+}
+// a press (smapWire's pointerdown, before its own): true when it's taken here
+function smapEdDown(e, x, y) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return false;
+  const H = smedHit(x, y); if (!H) return false;
+  const [wx, wy] = smedWorld(x, y);
+  if (H.k === 'atmo') SMED.drag = { id: e.pointerId, k: H.at, dy: atmoY(H.at) - wy };
+  else {
+    smedPick(H.a.id);
+    SMED.drag = H.k === 'edge' ? { id: e.pointerId, a: H.a, s: H.s, lim: wxaLimit(H.a, H.s) } : { id: e.pointerId, a: H.a, off: wx - H.a.x0, x0: H.a.x0, x1: H.a.x1 };
+  }
+  return true;
+}
+function smapEdMove(e, x, y) {
+  const d = SMED.drag; if (!d || d.id !== e.pointerId) return false;
+  const [wx, wy] = smedWorld(x, y);
+  if (d.k) { atmoSet(d.k, (WATER_Y - (wy + d.dy)) / UPM); return true; }
+  const A = d.a, mn = WXA_MIN * UPM;
+  if (d.s < 0) A.x0 = Math.round(clamp(wx, d.lim, A.x1 - mn));
+  else if (d.s > 0) A.x1 = Math.round(clamp(wx, A.x0 + mn, d.lim));
+  else { const w = A.x1 - A.x0; A.x0 = Math.round(clamp(wx - d.off, 0, WORLD_W - w)); A.x1 = A.x0 + w; }
+  skyEdRefresh();
+  return true;
+}
+function smapEdUp(e) {
+  const d = SMED.drag; if (!d || d.id !== e.pointerId) return false;
+  SMED.drag = null;
+  if (d.a) { if (!d.s && !wxaFit(d.a)) { d.a.x0 = d.x0; d.a.x1 = d.x1; } wxaChanged(); setTimeout(undoCommit, 0); }
+  return true;
+}
+// a tap on the map that picked nothing of its own (smapTap): on WEATHER AREAS, the area under it - between them EVERYWHERE ELSE
+function smapEdTap(x, y) {
+  if (!smedOn() || !wxaOpen()) return false;
+  const L = smapLayout(); if (x >= L.MW || y >= L.footY) return false;
+  const a = wxaIn(smedWorld(x, y)[0]); smedPick(a ? a.id : 'base');
+  return true;
+}
+// an area picked from the map: the one selection, as a press on it in the view (wedAfter) - what else was picked let go
+function smedPick(id) { for (const k in WK) if (k !== 'wxarea') WK[k].clear(); WXE.sel = id; wxaSync(); wxaPreview(); wedSync(); }
 
 //@src 51-audio-kraken.js:1
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
