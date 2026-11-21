@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1276;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1277;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -80948,9 +80948,8 @@ function famDrop(a, b) { const A = charOf(a), B = charOf(b); for (const [X, y] o
      they say so, it's your objective, and a character of their family drops whatever they were doing;
    - WORK: once a day, in their WORK place's HOURS (not the sick - those with NEEDS) - its day (50-zzzzz-story-work.js): its ROUTINE; with none, what it's short
      of (a market out of something it sells, a maker short of an ingredient - fetched from a place that has it), else on duty; with no WORK place, earning.
-   Getting what's needed is worked out from where things are, never written (famSteps): BUY it where it's sold and in stock and DELIVER it
-   home; short of coins, earn first - the quickest way they have, today FISH with a fishing boat they can use (their own or their family's)
-   and SELL the catch at a market. The player's objective is the first of the same steps (slWantOf). ---- */
+   Getting what's needed is worked out from where things are, never written: the one planner (famSteps -> planGood, 50-zzzzz-story-plan.js) -
+   the ways to get a good and to get coins, in STORY > GOALS > WAYS' order; the player's chain and objective are the same planner's (goalChain). ---- */
 // [key, name, what it is (the editor's help line), its tooltip (one short line)]
 const PRI_KINDS = [['danger', 'FAMILY IN DANGER', 'Family member at or under WARN AT days before ON EMPTY: DEATH', 'Family need at or under WARN AT days'], ['work', 'WORK', 'Workplace day once a day (HOURS, ROUTINE); no workplace: earning', 'Workplace day; else earning']];
 // what NOW's answer depends on, written out: a change to any of it makes the answer old (STORY > PRIORITIES)
@@ -80988,21 +80987,7 @@ function famReaches(who, v) {
 // a vehicle who may use: their own, or a free one of their family's
 function famCanUse(who, v) { if (v.wk != null) return v.wfor === who; const o = vehOwnerVal(v); if (o === who) return true;   // (a work vehicle: only its worker's)
   return o != null && o !== -1 && famOf(who, o) && v.driven == null && !folkTrip(v) && !(FOLK.st[v.sid] && who !== 'player'); }
-// the steps to keep member m's home stocked, for character who with these coins, carrying so many of the good and so many fish; null: no way
-function famSteps(who, F, coins, carry, fish, x) {
-  const { k, n, H } = F, out = [];
-  if (carry >= 1) return [{ do: 'deliver', k, at: H.id }];
-  const M = famMarket(k, H.x); if (!M) return null;
-  const p = cargoBuyPrice(k);
-  if (coins + cargoCoins('fish', fish) < p) {
-    const E = famEarn(who, x); if (!E) return null;
-    const want = Math.min(NETP.HOLD, Math.ceil((p - coins) / Math.max(1e-6, cargoPrice('fish'))));   // (enough for one: bought, the rest after - as soon as they can)
-    if (fish < want && coins + cargoCoins('fish', fish) < p) out.push({ do: 'hunt', k: 'fish', n: want, at: E.a.id, sv: E.v.sv });
-    out.push({ do: 'sell', k: 'fish', at: E.M.id });
-  } else if (coins < p) { const E = famEarn(who, x), S = E ? E.M : strsUsed().filter(o => buysHere(o, 'fish')).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]; if (!S) return null; out.push({ do: 'sell', k: 'fish', at: S.id }); }
-  out.push({ do: 'collect', k, n, at: M.id }, { do: 'deliver', k, at: H.id });   // (COLLECT where it's sold: paid for - folkList)
-  return out;
-}
+// the steps to keep member m's home stocked: famSteps - the one planner (50-zzzzz-story-plan.js)
 // (a character) what they'll do next, by the order - { pri, why, jobs, start, work } or null: nothing now
 function famDecide(c, S) {
   const home = stHome(c), x = home ? home.x : 0, W0 = workOf(c), day = env.time >= placeH(W0)[0];   // (from the hour their workplace's day starts)
@@ -81010,7 +80995,7 @@ function famDecide(c, S) {
     if (kind === 'danger') {
       for (const F of famShorts(c)) {
         if (OWNERS.some(q => q !== c && FOLK.c[q.id] && FOLK.c[q.id].g && FOLK.c[q.id].g.for === F.m.id)) continue;   // (someone else of the family already on it)
-        const J = famSteps(c.id, F, S.k || 0, 0, 0, x); if (!J) continue;
+        const J = famSteps(c.id, F, S.k || 0, 0, 0, x, S.at, ''); if (!J) continue;
         return { pri: kind, for: F.m.id, why: 'URGENT: ' + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J };
       }
       continue;
@@ -81045,7 +81030,7 @@ function famPreview() {
     storyReset(); env.time = Math.max(STORY_CFG.startH, 8); W.day = 1;
     for (const v of [...storyCars, ...jetboats]) if (v.story && v.state === 'run' && folkOwner(v)) placedPutAway(v);
     const F = famShorts(PLAYER_C)[0];
-    const P = F && famSteps('player', F, story.coins, slCarry(F.k), slCarry('fish'), (storyHome() || { x: 0 }).x);
+    const X = planXPlayer(), P = F && famSteps('player', F, X.coins, slCarry(F.k), slCarry('fish'), X.x, X.at, X.inSv);
     out.push({ who: 'YOU', why: F ? String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name + ' (' + 'FAMILY IN DANGER' + ') - YOUR OBJECTIVE IS THE FIRST' : 'NO FAMILY NEED - NO OBJECTIVE OF ITS OWN', steps: P ? P.map(famStepTxt) : [] });
     for (const c of OWNERS) {
       if (stGone(c.id)) continue;
@@ -81302,7 +81287,7 @@ function folkStep(dt) {
       S.g = G; S.j = G.start || 0; if (G.work) S.day = W.day; folkLog({ t: 'leave', who: c.id, why: G.why });
     } else if (S.g && S.g.pri !== 'danger' && !(S.in && FOLK.v[S.in]) && !S.carry) {
       const F = famShorts(c).find(q => !OWNERS.some(o => o !== c && FOLK.c[o.id] && FOLK.c[o.id].g && FOLK.c[o.id].g.for === q.m.id));
-      const v = S.in ? folkSid(S.in) : null, J = F && famSteps(c.id, F, S.k || 0, v ? cargoN(v, F.k) : 0, v ? cargoN(v, 'fish') : 0, v ? v.x : (slStr(S.at) || {}).x || 0);
+      const v = S.in ? folkSid(S.in) : null, J = F && famSteps(c.id, F, S.k || 0, v ? cargoN(v, F.k) : 0, v ? cargoN(v, 'fish') : 0, v ? v.x : (slStr(S.at) || {}).x || 0, v ? 0 : S.at, v ? v.sv : '');
       if (J) { S.g = { pri: 'danger', for: F.m.id, why: 'URGENT: ' + String(CARGO_LAB[F.k] || F.k).toUpperCase() + ' FOR ' + F.m.name, jobs: J }; S.j = 0; folkLog({ t: 'leave', who: c.id, why: S.g.why }); }
     }
     if ((S.wait || S.stuck || S.duty) && S.nx > time) continue;                                  // (waiting: a look a second; on duty: a look every few)
@@ -81360,6 +81345,8 @@ window.__folk = { state: FOLK, plan: id => { const c = OWNERS.find(q => q.id ===
    One chain for every FAMILY member whose NEEDS end in DEATH, each link a rule of the game checked against the state, top down:
      KEEP <WHO> ALIVE  ->  <WHO> NEEDS <GOOD> (days left; urgent at WARN AT or fewer)  ->  you carry it: GIVE IT
      ->  BUY IT where it's sold  ->  its PRICE in coins  ->  coins from your WORK (its ROUTINE: hunt, sell)
+   - the links below the need are the one planner's answer (planGood / planCoins, 50-zzzzz-story-plan.js): the WAYS to get a good and to get coins,
+     in STORY > GOALS > WAYS' order - every character plans the same way (user 16:25: "three planners doing overlapping jobs")
    The first link not met that you can act on is your objective (the top bar), followed as things change (slObjFollow). Not urgent (user 15:54: "Earn for
    the next dose"): ready when you carry one or have its price; else work. Out of stock: THE SUPPLY PATH - the market and, upstream, each place it gets the
    good from (a worker of it COLLECTs there, or someone DELIVERs to it - their ROUTINE: goalSrc), till a place that has it or that nobody brings it to;
@@ -81380,7 +81367,10 @@ const GOAL_PH_DEF = [
   ['nosell', 'NOBODY SELLS', 'Said and chain: no market sells it', 'NOBODY SELLS {GOOD}.'],
   ['coins', 'COINS', 'Said and chain: short of its price', 'YOU NEED {PRICE} COINS TO BUY {GOOD}.'],
   ['work', 'WORK', 'Said and chain: your WORK and its steps', 'TO MAKE COINS, DO YOUR JOB AT {WORK}: {JOB}.'],
-  ['nojob', 'NO JOB', 'Said and chain: you have no WORK', 'YOU NEED A JOB TO MAKE COINS.'],
+  ['sellCatch', 'SELL YOUR CATCH', 'Said and chain: what you carry pays for it', 'TO MAKE COINS, SELL YOUR {GOOD} AT {PLACE}.'],
+  ['fishWay', 'GO FISHING', 'Said and chain: a fishing boat you can use', 'TO MAKE COINS, HUNT {GOOD} IN YOUR {VEHICLE} AND SELL IT AT {PLACE}.'],
+  ['nojob', 'NO JOB', 'Said and chain: no WORK, no other way', 'YOU NEED A JOB TO MAKE COINS.'],
+  ['noway', 'NO WAY TO EARN', 'Said and chain: no way to make coins', 'YOU HAVE NO WAY TO MAKE COINS.'],
   ['thanks', 'THANKS', 'Said when it\'s handed to them', 'THANK YOU.'],
   ['fromUs', 'WE FETCH IT FROM', 'Said at a place out of it: its own worker fetches it', 'WE HAVE NO {GOOD} LEFT. WE GET IT FROM {SOURCE}.'],
   ['from', 'SOMEONE BRINGS IT FROM', 'Said at a place out of it: someone else brings it', 'WE HAVE NO {GOOD} LEFT. THE {CARRIER} BRINGS IT FROM {SOURCE}.'],
@@ -81396,7 +81386,7 @@ const GOAL_PH_DEF = [
   ['collect', 'STEP - COLLECT', 'A step of {JOB}', 'COLLECT {GOOD} AT {PLACE}'],
   ['deliver', 'STEP - DELIVER', 'A step of {JOB}', 'DELIVER {GOOD} TO {PLACE}'],
 ];
-const GOAL_TOKENS = [['WHO', 'The family member'], ['GOOD', 'The good'], ['DAYS LEFT', 'Their days left'], ['PRICE', 'Its buy price'], ['MARKET', 'Where it\'s bought'], ['WORK', 'Your WORK place'], ['JOB', 'Your WORK\'s steps'], ['CARRIER', 'Who brings it'], ['SOURCE', 'Where it comes from'], ['STOCK', 'Units there'], ['MAKES', 'What the place makes'], ['PLACE', 'A step\'s place']];
+const GOAL_TOKENS = [['WHO', 'The family member'], ['GOOD', 'The good'], ['DAYS LEFT', 'Their days left'], ['PRICE', 'Its buy price'], ['MARKET', 'Where it\'s bought'], ['WORK', 'Your WORK place'], ['JOB', 'Your WORK\'s steps'], ['CARRIER', 'Who brings it'], ['SOURCE', 'Where it comes from'], ['STOCK', 'Units there'], ['VEHICLE', 'The way\'s vehicle'], ['MAKES', 'What the place makes'], ['PLACE', 'A step\'s place']];
 let GOAL_PH = {};
 worldLoad(() => {
   let o = null; try { o = JSON.parse(localStorage.getItem('bd_goals') || 'null'); } catch (e) { }
@@ -81448,52 +81438,49 @@ function goalPlaceLine(o, k) {
   return { key: 'g:place:' + o.id + ':' + k + ':' + ph + (s.from ? s.from.id : ''), ph, T };
 }
 const goalTold = (o, k) => Object.keys(story.said || {}).some(id => id.startsWith('g:place:' + o.id + ':' + k + ':'));
-// ---- EARN: making p coins - your WORK's ROUTINE as any worker's (its HUNT, and SELL the catch where it says), there from wherever you are. [] - no way
-function goalEarnPlan(p) {
-  const W0 = workOf(PLAYER_C); if (!W0) return [];
-  const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : W0.x) : W0.x, R = folkList(workRt(W0)), H = R.find(J => J.do === 'hunt');
-  const there = !!cur && storyPlace(cur).includes(W0); if (!H) return there ? [] : [{ do: 'go', k: '', at: W0.id }];
-  const E = famEarn('player', x), k = H.k || 'fish'; if (!E) return there ? [] : [{ do: 'go', k: '', at: W0.id }];
-  const S = R.find(J => J.do === 'sell' && J.k === k), sellAt = S && slStr(S.at) ? S.at : E.M.id;
-  const c = story.coins || 0, f = slCarry(k), n = Math.max(1, Math.min(NETP.HOLD, Math.ceil((p - c) / Math.max(1e-6, cargoPrice(k)))));
-  const sell = { do: 'sell', k, at: sellAt }, hunt = { do: 'hunt', k, n, sv: E.v.sv, at: H.at };
-  if (f >= n || f > 0 && c + cargoCoins(k, f) >= p) return [sell];
-  const inBoat = !!cur && !!cur.v && cur.v.sv === E.v.sv;
-  return !there && !inBoat && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell];
-}
-// your job's steps in words (the ROUTINE's, as the plan has them: HUNT FISH, THEN SELL FISH AT KEAWE FISH LANDING)
+// your job's steps in words (the plan's own: HUNT FISH, THEN SELL FISH AT KEAWE FISH LANDING)
 const goalJobTxt = P => P.filter(J => J.do !== 'go' && GOAL_PH[J.do] != null).map(J => goalPh(J.do, { GOOD: goalGood(J.k), PLACE: wantPlaceName(J.at) })).join(GOAL_PH.jobStep ?? ', THEN ');
 const wantPlaceName = id => { const o = id != null ? slStr(id) : null; return o ? slPlaceName(o) : ''; };
-// ---- THE CHAIN for family member c: { c, k, days, urgent, links: [{ id, txt, ok, says }], act (the step that's your objective, or null), path }
+// ---- THE CHAIN for family member c - the one planner's answer for you (planGood / planCoins, 50-zzzzz-story-plan.js) in words:
+// { c, k, days, urgent, links: [{ id, txt, ok, says }], act (the step that's your objective, or null), path, plan (the planner's node) }
 function goalChain(c) {
   const N = stNeeds(c), H = stHome(c); if (!N || !H || stGone(c.id) || String(N.out || 'death') !== 'death') return null;
-  const k = N.k, days = stDays(c), urgent = days <= STORY_CFG.warnD + 1e-9, price = cargoBuyPrice(k);
+  const k = N.k, days = stDays(c), urgent = days <= STORY_CFG.warnD + 1e-9, price = cargoBuyPrice(k), X = planXPlayer();
   const T = { WHO: goalName(c), GOOD: goalGood(k), 'DAYS LEFT': goalDays(days), PRICE: price, WORK: workOf(PLAYER_C) ? slPlaceName(workOf(PLAYER_C)) : '' };
   const L = [], link = (id, ok, says, extra) => { const TT = Object.assign({}, T, extra || {}); L.push({ id, txt: goalPh(id === 'need' || id === 'have' ? 'needC' : id, TT), ok, says: says ? goalPh(id, TT) : '' }); };
-  const G = { c, k, days, urgent, links: L, act: null, path: null };
+  const G = { c, k, days, urgent, links: L, act: null, path: null, plan: null };
   L.push({ id: 'alive', txt: goalPh('alive', T), ok: true, says: '' });
   link(urgent ? 'need' : 'have', !urgent, true);
-  if (slCarry(k) >= 1) { if (urgent) { link('give', false, false); G.act = { do: 'deliver', k, at: H.id }; } else link('ready', true, false); return G; }
-  const sell = strsUsed().filter(o => strMarket(o) && marketSells(o).includes(k));
-  if (!sell.length) { link('nosell', false, true); return G; }
-  const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : H.x) : H.x, near = A => A.slice().sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
-  const M = near(sell.filter(o => stN(o, k) > 0)) || near(sell);
-  T.MARKET = slPlaceName(M);
-  link('buy', false, (story.coins || 0) >= price);
-  if ((story.coins || 0) < price) {
+  // coins, in words: what's short and the way the planner found (or why none)
+  const coinLinks = C => {
+    if (!C || C.way === 'have') return;
     link('coins', false, true);
-    if (!workOf(PLAYER_C)) { link('nojob', false, true); return G; }
-    const P = goalEarnPlan(price); link('work', false, true, { JOB: goalJobTxt(P) }); G.act = P[0] || null; return G;
+    if (!C.ok) { link(C.why === 'nojob' ? 'nojob' : 'noway', false, true); return; }
+    const sell = C.steps.find(J => J.do === 'sell'), hunt = C.steps.find(J => J.do === 'hunt');
+    const E = { JOB: goalJobTxt(C.steps), PLACE: sell ? wantPlaceName(sell.at) : '', VEHICLE: hunt && hunt.sv ? slVehName(hunt.sv) : '', CATCH: goalGood(C.k) };
+    link(C.way === 'work' ? 'work' : C.way === 'sell' ? 'sellCatch' : 'fishWay', false, true, Object.assign(E, { GOOD: goalGood(C.k) }));
+  };
+  if (!urgent) {   // (user 15:55: "Earn for the next dose") ready when you carry one or have its price; else the planner's way to the price
+    if (X.carry(k) >= 1) { link('ready', true, false); return G; }
+    const C = G.plan = planCoins(X, price); if (C.ok && C.way === 'have') { link('ready', true, false); return G; }
+    coinLinks(C); G.act = C.ok ? C.steps[0] || null : null; return G;
   }
-  if (!urgent) { L[L.length - 1] = { id: 'ready', txt: goalPh('ready', T), ok: true, says: '' }; return G; }
-  if (stN(M, k) >= 1) { G.act = { do: 'collect', k, at: M.id }; return G; }
-  // out of stock: the supply path - the first place on it that hasn't told you its part
-  const P = G.path = goalPath(M, k);
-  for (let i = 0; i < P.length; i++) {
-    const o = P[i], told = goalTold(o, k), pl = goalPlaceLine(o, k);
-    L.push({ id: 'path', txt: slPlaceName(o) + (told && pl ? ': ' + goalPh(pl.ph, pl.T) : ''), ok: told, says: '' });
-    if (!told) { G.act = i === 0 ? { do: 'collect', k, at: o.id } : { do: 'go', k: '', at: o.id }; break; }
+  const P = G.plan = planGood(X, k, 1, H);
+  if (P.way === 'carry') { link('give', false, false); G.act = P.steps[0]; return G; }
+  if (P.why === 'nosell') { link('nosell', false, true); return G; }
+  T.MARKET = P.M ? slPlaceName(P.M) : '';
+  link('buy', false, !P.sub || P.sub.way === 'have' || P.why === 'nostock');
+  if (P.why === 'nostock') {   // out of stock: the supply path - the first place on it that hasn't told you its part
+    const Pth = G.path = goalPath(P.M, k);
+    for (let i = 0; i < Pth.length; i++) {
+      const o = Pth[i], told = goalTold(o, k), pl = goalPlaceLine(o, k);
+      L.push({ id: 'path', txt: slPlaceName(o) + (told && pl ? ': ' + goalPh(pl.ph, pl.T) : ''), ok: told, says: '' });
+      if (!told) { G.act = i === 0 ? { do: 'collect', k, at: o.id } : { do: 'go', k: '', at: o.id }; break; }
+    }
+    return G;
   }
+  coinLinks(P.sub);
+  G.act = P.ok ? P.steps[0] : null;
   return G;
 }
 // (the objective words for a step - as the chain names it: BUY where it's paid for)
@@ -81565,6 +81552,28 @@ function goalsDraw(U) {
       if (G.path.length) { s.appendChild(el('h4', '', 'SUPPLY PATH')); G.path.forEach((t, i) => line(s, (i + 1) + '. ' + t, '#d8dce8')); }
     }
     line(s, 'MOMENT: STORY > OBJECTIVES', '#7a8294'); }
+  // WAYS: the planner's ways to get a good and to get coins - their order (tried top down) and which are on (STORY_CFG.ways / waysOff)
+  { const s = sec('WAYS');
+    for (const g of ['good', 'coins']) {
+      s.appendChild(el('h4', '', g === 'good' ? 'GET A GOOD' : 'GET COINS'));
+      const W = planWays(g), L = W.order, off = new Set((STORY_CFG.waysOff && STORY_CFG.waysOff[g]) || []);
+      L.forEach((w, i) => {
+        const D = PLAN_WAYS[g].find(q => q[0] === w), r = el('div', 'row'); r.style.cssText = 'display:flex;gap:6px;align-items:center';
+        const n = el('label', '', (i + 1) + '. ' + D[1]); n.title = D[2]; n.dataset.help = D[2]; n.style.flex = '1';
+        const t = T.toggle(off.has(w) ? 0 : 1); t.title = 'Tried, or skipped';
+        t.addEventListener('input', () => { const O = Object.assign({}, STORY_CFG.waysOff); const S = new Set(O[g] || []); if (+t.value) S.delete(w); else S.add(w); O[g] = [...S]; STORY_CFG.waysOff = O; storyCfgSave(); goalsSync(); });
+        const up = el('button', '', '↑'), dn = el('button', '', '↓'); up.title = 'Tried before the one above'; dn.title = 'Tried after the one below';
+        const mv = d => { const j = i + d; if (j < 0 || j >= L.length) return; const M = L.slice(); [M[i], M[j]] = [M[j], M[i]]; STORY_CFG.ways = Object.assign({}, STORY_CFG.ways, { [g]: M }); storyCfgSave(); goalsSync(); };
+        up.onclick = () => mv(-1); dn.onclick = () => mv(1);
+        if (i === 0) up.title = 'First already'; if (i === L.length - 1) dn.title = 'Last already';
+        T.need(up, () => i > 0); T.need(dn, () => i < L.length - 1);
+        r.append(n, t, up, dn); s.appendChild(r);
+      });
+    }
+    const def = el('button', '', 'REVERT TO DEFAULT'), same = !STORY_CFG.ways && !STORY_CFG.waysOff;
+    def.title = same ? 'Same as the default' : 'The game\'s order, all on'; T.need(def, () => !same);
+    def.onclick = () => { delete STORY_CFG.ways; delete STORY_CFG.waysOff; storyCfgSave(); goalsSync(); };
+    s.appendChild(def); }
   // PHRASES: one a link
   { const s = sec('PHRASES'), tk = el('div', ''); tk.style.cssText = 'font-size:11px;color:#7a8294;padding-bottom:4px'; tk.textContent = GOAL_TOKENS.map(q => '{' + q[0] + '}').join(' '); tk.title = GOAL_TOKENS.map(q => '{' + q[0] + '}: ' + q[1]).join('\n'); s.appendChild(tk);
     for (const [id, name, tip, def] of GOAL_PH_DEF) {
@@ -82246,6 +82255,87 @@ function playerTravelStep() {
     const u = S.in ? folkSid(S.in) : null;
     if (u) { delete FOLK.v[u.sid]; storyEnterVeh(0, u); } else if (S.at) storyGo(0, S.at, true, true);
   }
+}
+
+//@src 50-zzzzz-story-plan.js:1
+/* ================================================================
+   THE PLANNER - one for every character, the player too (user Nov 21 16:25: "There are now three planners doing overlapping jobs. Can you fix
+   this?" / "The order of the chain is hard-wired: Do you have a solution?"). One question: how does this character get X?
+   - A GOOD to someone's home (planGood): the WAYS to get a good, tried in their order - CARRIED (you have it: DELIVER it), BUY (where it's sold and
+     in stock: needs its price in COINS, then COLLECT there and DELIVER).
+   - COINS (planCoins): the WAYS to get coins - HAVE THEM, SELL YOUR CATCH (what you carry is worth enough), YOUR JOB (your WORK's ROUTINE - its HUNT,
+     and SELL the catch where it says; GO TO it first if you aren't there or out in its boat), GO FISHING (a fishing boat you can use, the nearest fish
+     area, where fish is bought - famEarn).
+   Each way can need another goal (BUY needs COINS) - the planner follows it down. The answer is a node: the way taken, its steps (the jobs a
+   character does - folkList's), what it needed (sub), or why there's none (why: nosell, nostock, nojob, noway). The ways' order and which are on
+   are STORY > GOALS > WAYS (STORY_CFG.ways / waysOff, bd_story_cfg). A new way to get something is a row here and its function - nothing else.
+   Used by: the characters' FAMILY IN DANGER (famSteps -> famDecide, 50-zzzzz-story-family.js), the player's chain and objective (goalChain,
+   50-zzzzz-story-goals.js), PRIORITIES' NOW.
+   ================================================================ */
+const PLAN_WAYS = {
+  good: [['carry', 'CARRIED', 'You carry it: deliver it'], ['buy', 'BUY', 'Where it\'s sold and in stock: its price in coins']],
+  coins: [['have', 'HAVE THEM', 'Enough coins already'], ['sell', 'SELL YOUR CATCH', 'What you carry is worth enough: sell it'], ['work', 'YOUR JOB', 'Your WORK\'s ROUTINE: hunt, sell the catch'], ['fish', 'GO FISHING', 'A fishing boat you can use: hunt, sell the catch']],
+};
+// a goal's ways in their order, the ones on
+function planWays(g) {
+  const all = PLAN_WAYS[g].map(q => q[0]), saved = STORY_CFG.ways && Array.isArray(STORY_CFG.ways[g]) ? STORY_CFG.ways[g].filter(w => all.includes(w)) : [];
+  for (const w of all) if (!saved.includes(w)) saved.push(w);   // (a way not in a saved order: at the end)
+  const off = (STORY_CFG.waysOff && STORY_CFG.waysOff[g]) || [];
+  return { order: saved, on: saved.filter(w => !off.includes(w)) };
+}
+// X: the one planning - { who, coins, carry(k), x (where they are), at (the place they're at, or 0), inSv (the kind of vehicle they're in, or '') }
+function planX(who, coins, carry, x, at, inSv) { return { who, coins: coins || 0, carry: typeof carry === 'function' ? carry : (() => 0), x: x || 0, at: at || 0, inSv: inSv || '' }; }
+// (the player, now)
+function planXPlayer() { const cur = storyCur(), H = stHome(PLAYER_C); return planX('player', story.coins, slCarry, cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : 0) : H ? H.x : 0, cur && cur.o ? cur.o.id : 0, cur && cur.v ? cur.v.sv : ''); }
+// ---- a good k (n of it) to home H
+function planGood(X, k, n, H) {
+  const tries = [];
+  for (const way of planWays('good').on) {
+    if (way === 'carry') { if (X.carry(k) >= 1) return { goal: 'good', k, n, H, way, ok: true, steps: [{ do: 'deliver', k, at: H.id }] }; continue; }
+    if (way === 'buy') {
+      const sells = strsUsed().filter(o => strMarket(o) && marketSells(o).includes(k));
+      if (!sells.length) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: 'nosell' }); continue; }
+      const M = famMarket(k, H.x), near = sells.slice().sort((a, b) => Math.abs(a.x - H.x) - Math.abs(b.x - H.x))[0];
+      if (!M) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: 'nostock', M: near }); continue; }
+      const C = planCoins(X, cargoBuyPrice(k));
+      if (!C.ok) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: C.why, M, sub: C }); continue; }
+      return { goal: 'good', k, n, H, way, ok: true, M, sub: C, steps: [...C.steps, { do: 'collect', k, n, at: M.id }, { do: 'deliver', k, at: H.id }] };   // (COLLECT where it's sold: paid for - folkList)
+    }
+  }
+  return tries.sort((a, b) => planWhyRank(b) - planWhyRank(a))[0] || { goal: 'good', k, n, H, way: null, ok: false, why: 'noway' };   // (the one that got furthest)
+}
+const planWhyRank = N => N.sub ? 3 : N.why === 'nostock' ? 2 : 1;
+// ---- p coins
+function planCoins(X, p) {
+  const fish = X.carry('fish'), W0 = workOf(charOf(X.who)), tries = [];
+  const want = (k, c) => Math.max(1, Math.min(NETP.HOLD, Math.ceil((p - c) / Math.max(1e-6, cargoPrice(k)))));
+  for (const way of planWays('coins').on) {
+    if (way === 'have') { if (X.coins >= p) return { goal: 'coins', p, way, ok: true, steps: [] }; continue; }
+    if (way === 'sell') {
+      if (fish > 0 && X.coins + cargoCoins('fish', fish) >= p) { const S = strsUsed().filter(o => buysHere(o, 'fish')).sort((a, b) => Math.abs(a.x - X.x) - Math.abs(b.x - X.x))[0];
+        if (S) return { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'sell', k: 'fish', at: S.id }] }; }
+      continue;
+    }
+    if (way === 'work') {
+      if (!W0) continue;
+      const R = folkList(workRt(W0)), Hn = R.find(J => J.do === 'hunt'); if (!Hn) { tries.push({ goal: 'coins', p, way, ok: false, why: 'noway', W0 }); continue; }
+      const k = Hn.k || 'fish', E = famEarn(X.who, X.x); if (!E) { tries.push({ goal: 'coins', p, way, ok: false, why: 'noway', W0 }); continue; }
+      const Sl = R.find(J => J.do === 'sell' && J.k === k), at = Sl && slStr(Sl.at) ? Sl.at : E.M.id, f = X.carry(k), n = want(k, X.coins);   // (n: the catch to carry for the price)
+      const sell = { do: 'sell', k, at }, hunt = { do: 'hunt', k, n, sv: E.v.sv, at: Hn.at };
+      const there = X.at === W0.id || X.inSv === E.v.sv;
+      return { goal: 'coins', p, way, ok: true, k, W0, steps: !there && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell] };
+    }
+    if (way === 'fish') {
+      const E = famEarn(X.who, X.x); if (!E) continue;
+      return { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'hunt', k: 'fish', n: want('fish', X.coins), at: E.a.id, sv: E.v.sv }, { do: 'sell', k: 'fish', at: E.M.id }] };
+    }
+  }
+  return tries[0] || { goal: 'coins', p, way: null, ok: false, why: W0 ? 'noway' : 'nojob' };
+}
+// (family) the steps to keep member F.m's home stocked, for character who with these coins, carrying so many of the good and so many fish, at x; null: no way
+function famSteps(who, F, coins, carry, fish, x, at, inSv) {
+  const N = planGood(planX(who, coins, q => q === F.k ? carry : q === 'fish' ? fish : 0, x, at, inSv), F.k, F.n, F.H);
+  return N.ok ? N.steps : null;
 }
 
 //@src 50-zzzzz-story-signup.js:1
