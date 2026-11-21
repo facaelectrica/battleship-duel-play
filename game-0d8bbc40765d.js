@@ -12419,6 +12419,10 @@ function scopeZoom(p) {
   return ZOOM_LEVELS[lv - 1];
 }
 function setScope(p, lv) { if (NET.remote) return; scopes[p].level = clamp(lv, 1, ZN); cam.zt[p] = scopeZoom(p); }
+// a zoom step by hand, d levels (minus: out) - every way to zoom by steps (the keys, a pad, the wheel) goes through it: in Story, a step out from the farthest
+// level Story allows opens the STORY MAP (smapStoryLv, 50-zzzzz-story-map.js). (user Nov 20 23:05, v1249: "When you are playing the game and zoom out, it
+// stops at the level before the blue print map appears" - the keys' zoom stepped on its own and never opened it; Story pulled it back to its farthest)
+function scopeStep(p, d) { if (STORY && d < 0 && scopes[p].level <= smapStoryLv()) { smapZoomOut(); return; } setScope(p, scopes[p].level + d); }
 // (Oct 24 night each vehicle remembered its own zoom; user Oct 27: "When you turn on any vehicle it should not be
 // zooming in or out. It's ok to pan." - the zoom is the player's, kept across switches)
 
@@ -12971,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1252;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 00:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1253;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 00:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15873,8 +15877,7 @@ function wheelZoom(p, d) {
   const n = Math.trunc(wheelAcc[p] / WHEEL_STEP); if (!n) return;
   wheelAcc[p] -= n * WHEEL_STEP;
   if (crew[p]) crew[p].zoomOwn = true;
-  if (STORY && n < 0 && scopes[p].level <= smapStoryLv()) { smapZoomOut(); return; }   // (past the farthest: the STORY MAP, smoothly - 50-zzzzz-story-map.js)
-  setScope(p, scopes[p].level + clamp(n, -2, 2));
+  scopeStep(p, clamp(n, -2, 2));   // (past the farthest: the STORY MAP, smoothly - 50-zzzzz-story-map.js)
 }
 
 //@src 21-input-keys-pads.js:1
@@ -16257,7 +16260,7 @@ function pollPads(dt) {
         // the D-pad zooms, a step at a time while held
         const z = (btn(12) || btn(15) ? 1 : 0) - (btn(13) || btn(14) ? 1 : 0);
         if (!z || modal) st.zT = 0;
-        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; if (STORY && z < 0 && scopes[p].level <= smapStoryLv()) smapZoomOut(); else setScope(p, scopes[p].level + z); st.zT = 0.28; }   // (past the farthest: the STORY MAP)
+        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; scopeStep(p, z); st.zT = 0.28; }
         // the right stick: angle (left / right) and power (up / down), smoothly, in every vehicle (user Oct 29); in the tower the left stick as
         // well (user Oct 24: it has nothing else to do there)
         const rx = ax(2) || (m === 'tower' ? lx : 0), ry = ax(3) || (m === 'tower' ? ly : 0);
@@ -16329,7 +16332,7 @@ function heldFor(p, dt, k) {
   }
   // zoom out and in, one step at a time while held
   const zd = k.zin ? 1 : k.zout ? -1 : 0;
-  if (zd) { scopeHold[p] = (scopeHold[p] || 0) - dt; if (scopeHold[p] <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; setScope(p, scopes[p].level + zd); scopeHold[p] = 0.28; } }
+  if (zd) { scopeHold[p] = (scopeHold[p] || 0) - dt; if (scopeHold[p] <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; scopeStep(p, zd); scopeHold[p] = 0.28; } }
   else scopeHold[p] = 0;
   // left / right row the lifeboat while held
   if (!runCtl[p].drag && crew[p].mode === 'boat') runCtl[p].v = clamp(runCtl[p].v + ax * dt * 1.6, -1, 1);
@@ -69057,6 +69060,27 @@ function layStep(o, on, landed, half, dir, stick) {
     o.lay = J ? (J.lay === L ? J.play : J.lay) : Math.max(0, layFrontAt(o.x, o.y, L - 1));
   }
 }
+/* (user Nov 20 23:05, v1249: "I just saw a NPC drive all the way to the lighthouse. I assume they are unable to correctly pick the right road?" - the
+   FISHERMAN going home-to-work to the fishery's parking on the low road under the lighthouse kept the layer he started on and climbed the hill to the
+   lighthouse over it) THE ROAD TO WHERE YOU'RE GOING: a driver with somewhere to be (a character's trip - FOLK.v, its `lay` the layer of the structure it
+   ends at) takes, at a junction, the road whose layer leads on to that layer before it gets there - the player's own UP / DOWN held for them. One rule for
+   the real car (layStep's stick) and the node out of view (folkDrive) */
+// can a driver on layer L at x, going on toward tx (dir its way), be on layer tl by tx - through the joins between them (L itself, or a chain of joins)
+function layLeads(L, x, dir, tx, tl) {
+  if (L === tl) return true;
+  const J = layerJoins().filter(q => (q.x - x) * dir > 0.5 && (tx - q.x) * dir >= 0), seen = new Set([L]), Q = [L];
+  while (Q.length) { const k = Q.shift(); for (const q of J) { const o = q.lay === k ? q.play : q.play === k ? q.lay : null; if (o == null || seen.has(o)) continue; if (o === tl) return true; seen.add(o); Q.push(o); } }
+  return false;
+}
+// at join J between the layer it's on (L) and the other: which to be on going to tx on layer tl - L unless only the other leads there
+function layPickAt(J, L, dir, tx, tl) { const o = J.lay === L ? J.play : J.lay; return !layLeads(L, J.x, dir, tx, tl) && layLeads(o, J.x, dir, tx, tl) ? o : L; }
+// the up / down a driver going to trip T holds at a fork (-1 the higher road, 1 the lower, 0 none)
+function layRoadStick(o, half, dir, T) {
+  if (!T || T.lay == null || !o.gnd || !layOn()) return 0;
+  const F = layFork(o, half, dir); if (!F) return 0;
+  const k = layPickAt(F.J, o.lay || 0, dir, T.x, T.lay);
+  return k === (o.lay || 0) ? 0 : k === F.hi ? -1 : k === F.lo ? 1 : 0;
+}
 // what's put down at (x, y) - placed, dropped in the editor, set down - rests on: the first open top under y (where y is in a layer's ground, a top of a
 // layer in front of it) and the frontmost layer whose top that is - { y, lay }; y not given: from the sky down
 function layRest(x, y) {
@@ -69162,7 +69186,7 @@ function storyCarBody(c, dt) {
   if (deep) { c.vy *= Math.exp(-dt * 3 * deep); c.av = (c.av || 0) * Math.exp(-dt * 3 * deep); }
   const was = c.gnd;
   landBody(c, dt, carBodyOf(c, L, H));
-  layStep(c, c.gnd, !was && !!c.gnd, L * 0.5, c.dir || 1, run && c.driven != null ? civStick(c.driven) : 0);   // (its terrain layer - at a junction, by its driver's up / down)
+  layStep(c, c.gnd, !was && !!c.gnd, L * 0.5, c.dir || 1, run && c.driven != null ? civStick(c.driven) : run ? layRoadStick(c, L * 0.5, c.dir || 1, folkTrip(c)) : 0);   // (its terrain layer - at a junction, by its driver's up / down; a character's, the road to where they're going)
   if (!was && LB.on && LB.hit > 30) { susKick(c, LB.hit * 0.6); if (!(SIM_ONLY || c.quiet)) { const gy = c.y, s = carSurf(c.x, gy, c.lay); if (s) for (let i = 0; i < 4; i++) carThrow(c, c.x + carRnd(-half, half), gy, s, 1); } }   // (down on her wheels: her springs take it)
   if (LB.roof && run && !(c.hp <= 0)) carRoofed(c);
   else if (LB.crash > (VTUNE.car.crash ?? 8) * UPM && run && !(c.hp <= 0)) carWreck(c, LB.cx, LB.cy, null);   // (struck the ground hard with her body, not her wheels: destroyed)
@@ -69814,10 +69838,10 @@ function picBoatFx(j, dt) {
     // her funnel's size: a stream that rises steadily and slants back behind her as she goes
     j.fsm = (j.fsm || 0) - dt;
     if (j.fsm <= 0 && B.funnel) {
-      const W = 0.6 * UPM, RISE = 3.2,   /* (user 11:29: heavier - a slow lift; 11:42: "its exiting" - it leaves the funnel fast (EXIT, m/s) and slows over its first half second) */ EXIT = 4.5 * UPM, r0 = 0.35 * W, r1 = 5 * W, life = 8 + storyR() * 1.5,   /* (user 11:04: hers fades in half the time and swells as it goes - her concept picture; Nov 3 18:58: "too dark ... brighter and start fading a bit sooner ... it looks like it's polluting too much" - 8 s, was 11) */ [x, y] = at(B.funnel), vs = dir * sp;
+      const W = 0.6 * UPM, RISE = 3.2,   /* (user 11:29: heavier - a slow lift; 11:42: "its exiting" - it leaves the funnel fast (EXIT, m/s) and slows over its first half second) */ EXIT = 4.5 * UPM, r0 = 0.35 * W, r1 = 5 * W, life = 4 + storyR() * 0.75,   /* (user 11:04: hers fades in half the time and swells as it goes - her concept picture; Nov 3 18:58: "too dark ... brighter and start fading a bit sooner ... it looks like it's polluting too much" - 8 s, was 11; Nov 20 23:05, v1249: "The fishing boat has to do less smoke, maybe half of it. and it must be brighter" - half as long in the air, 4 s, and light grey as a home's chimney (mist) - every picture boat's funnel) */ [x, y] = at(B.funnel), vs = dir * sp;
       j.fsm = funnelEvery(W, sp) / thr;
       spawnSmoke(x + (storyR() - 0.5) * 0.2 * W, y + 0.3 * r0, {   // (at the funnel's mouth - 10:50: there was a gap)
- kind: 'funnel', rise: true, r: r0, grow: (r1 - r0) / (life * 0.5), rmax: r1, lift: 2.2 * RISE, steady: true, trailV: vs, vx: vs + (storyR() - 0.5) * 4, jet: 0.6, vy: -EXIT * (0.85 + storyR() * 0.3), life, fadeFrom: 0.05, alpha: 0.6, dark: 0.12, buoy: 0.15, drift: 4, lumpy: true, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(j, 0), link: 3 * r1 });
+ kind: 'funnel', rise: true, r: r0, grow: (r1 - r0) / (life * 0.5), rmax: r1, lift: 2.2 * RISE, steady: true, trailV: vs, vx: vs + (storyR() - 0.5) * 4, jet: 0.6, vy: -EXIT * (0.85 + storyR() * 0.3), life, fadeFrom: 0.05, alpha: 0.6, mist: true, buoy: 0.15, drift: 4, lumpy: true, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(j, 0), link: 3 * r1 });
     }
     j.fbb = (j.fbb || 0) + dt * (4 + 30 * go);
     while (j.fbb >= 1) { j.fbb -= 1; const [x, y] = at(B.screw); addBubble(x - dir * (0.4 + storyR() * 1.2) * UPM, y + storyR() * 4 - 2, -dir * (10 + 20 * storyR()), -(10 + 25 * storyR()), 0.6 + storyR() * 1.4); }
@@ -80041,7 +80065,7 @@ function folkBay(c, S, v, J, T) {
     if (time - v.bayOut < 1.5) return 1;                         // (the gate rolling up)
     v.bay = 0; v.bayOut = 0; S.j++; return 1;
   }
-  if (Math.abs(v.x - D.cx) > 1.5 * UPM) { if (folkReach(v, v.x, D.cx)) { folkGo(v, D.cx, null); return 1; } return 0; }
+  if (Math.abs(v.x - D.cx) > 1.5 * UPM) { if (folkReach(v, v.x, D.cx)) { folkGo(v, D.cx, null, false, T.o); return 1; } return 0; }
   v.bay = T.o.id; v.bayT = time; v.bayOut = 0;
   folkLog({ t: 'job', who: c.id, verb: 'IN THROUGH THE DOOR', k: '', n: 0, at: slPlaceName(T.o) });
   return 1;
@@ -80750,12 +80774,12 @@ function folkHops(A, B) {
 const folkAtPlace = (P, T) => !!T.o && folkHops(P, T.o);
 // stopped by a place: within STORY_PARK_M of it (a market's sellers' rule)
 const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
-// send vehicle v off to x, to tie up at structure park (or to a fish area)
-function folkGo(v, x, park, fish) {
+// send vehicle v off to x, to tie up at structure park (or to a fish area; or to stop beside structure at) - its trip's lay the layer it ends on (layRoadStick)
+function folkGo(v, x, park, fish, at) {
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
   if (v.berth != null) { v.berth = null; v.spot = null; }
   v.bay = 0; v.bayOut = 0;                                                  // (out of a place's door - 50-zzzzz-place-door.js)
-  FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 };
+  const to = park || at; FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
@@ -80817,7 +80841,7 @@ function folkPlan(c, S) {
       if (folkBeside(v, T.o)) {
         folkJob(c, S, v, J, T); S.j++; return;
       }
-      if (can(v)) { folkGo(v, T.x, null); return; }
+      if (can(v)) { folkGo(v, T.x, null, false, T.o); return; }
     }
     // home (or the workplace, on foot): put away where it's taken nearest it, then a hop
     if (foot) {
@@ -80854,7 +80878,8 @@ function folkDrive(v, T, dt) {
   if (!near) {
     T.away = 1; v.npcV = 0; v.vDrive = 0;
     if (T.fish && Math.abs(T.x - v.x) < spd * dt + 1) { v.x = T.x; T.c = (T.c || 0) + (STORY_CFG.fishM ?? 10) * dt / 60; const want = T.n || NETP.HOLD, n = Math.min(want - cargoN(v, 'fish'), Math.floor(T.c)); if (n > 0) { cargoAdd(v, 'fish', n); T.c -= n; } if (cargoN(v, 'fish') >= want) { delete FOLK.v[v.sid]; folkLog({ t: 'job', who: folkWho(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); } return; }
-    const d = T.x - v.x, s = Math.min(Math.abs(d), spd * dt); v.x += Math.sign(d) * s; v.dir = Math.sign(d) || v.dir;
+    const d = T.x - v.x, s = Math.min(Math.abs(d), spd * dt), x0 = v.x; v.x += Math.sign(d) * s; v.dir = Math.sign(d) || v.dir;
+    if (!folkBoat(v) && T.lay != null && layOn()) for (const J of layerJoins()) { const L = v.lay || 0; if ((J.lay === L || J.play === L) && (J.x - x0) * v.dir > 0 && (v.x - J.x) * v.dir >= 0) v.lay = layPickAt(J, L, v.dir, T.x, T.lay); }   // (a join passed on its way: the road to where it's going - layRoadStick's rule)
     if (folkBoat(v)) v.y = surfaceY(v.x); else { const g = landTop(v.x, v.lay || 0); if (Number.isFinite(g)) v.y = g; }
     if (Math.abs(T.x - v.x) < 1) { if (T.park) folkTie(v, T); else { delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } }
     return;
