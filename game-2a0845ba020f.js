@@ -12971,8 +12971,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1251;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 23:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1252;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 00:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -80571,7 +80571,7 @@ const famMarket = (k, x) => strsUsed().filter(o => strMarket(o) && marketSells(o
 // to sell at; null: no way to earn
 function famEarn(who, x) {
   const boats = jetboats.filter(v => v.story && v.state === 'run' && !(v.hp <= 0) && v.kind === 'fish' && famCanUse(who, v) && famReaches(who, v));
-  const areas = NATURE.filter(a => a.k === 'fish'), mk = strsUsed().filter(o => strMarket(o) && marketBuys(o).includes('fish'));   // (where fish is bought - a FISHERY)
+  const areas = NATURE.filter(a => a.k === 'fish'), mk = strsUsed().filter(o => buysHere(o, 'fish'));   // (where fish is bought - a market, or a FISHERY whose routine HUNTs it: buysHere)
   let best = null;
   for (const v of boats) for (const a of areas) { const ax = (a.x0 + a.x1) / 2, d = Math.abs(v.x - x) + Math.abs(ax - v.x); if (!best || d < best.d) best = { d, v, a, ax }; }
   if (!best || !mk.length) return null;
@@ -80599,7 +80599,7 @@ function famSteps(who, F, coins, carry, fish, x) {
     const want = Math.min(NETP.HOLD, Math.ceil((p - coins) / Math.max(1e-6, cargoPrice('fish'))));   // (enough for one: bought, the rest after - as soon as they can)
     if (fish < want && coins + cargoCoins('fish', fish) < p) out.push({ do: 'hunt', k: 'fish', n: want, at: E.a.id, sv: E.v.sv });
     out.push({ do: 'sell', k: 'fish', at: E.M.id });
-  } else if (coins < p) { const E = famEarn(who, x), S = E ? E.M : strsUsed().filter(o => strMarket(o) && marketBuys(o).includes('fish')).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]; if (!S) return null; out.push({ do: 'sell', k: 'fish', at: S.id }); }
+  } else if (coins < p) { const E = famEarn(who, x), S = E ? E.M : strsUsed().filter(o => buysHere(o, 'fish')).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]; if (!S) return null; out.push({ do: 'sell', k: 'fish', at: S.id }); }
   out.push({ do: 'collect', k, n, at: M.id }, { do: 'deliver', k, at: H.id });   // (COLLECT where it's sold: paid for - folkList)
   return out;
 }
@@ -80705,7 +80705,7 @@ const folkVehs = c => { const S = FOLK.c[c.id] || {}; return [...storyCars, ...j
 // a job's verb as the routine does it (the one list - VERBS): BUY is COLLECT from a market's stock, SELL is DELIVER into it (a character's
 // coins aren't kept yet)
 // a SELL pays as the player's does: at a market that BUYS it (marketBuys, 50-zz-cargo.js)
-const folkSellPay = (o, k, n) => (strMarket(o) && marketBuys(o).includes(k)) || workBuysOwn(o, k) ? cargoCoins(k, n) : 0;   // (or its own routine SELLs it: it buys it from its workers - 50-zzzzz-story-work.js)
+const folkSellPay = (o, k, n) => buysHere(o, k) ? cargoCoins(k, n) : 0;   // (or its own routine SELLs it: it buys it from its workers - 50-zzzzz-story-work.js)
 const folkDo = J => J.do === 'buy' ? 'collect' : J.do === 'fish' ? 'hunt' : J.do === 'sell' ? 'deliver' : J.do;   // (BUY, FISH: an older save's words - COLLECT, HUNT)
 // what they're doing now: the goal the PRIORITIES set (S.g - its jobs: a ROUTINE, a family member's medicine...) - famDecide; their ROUTINE as
 // written (folkRoutine). BUY / SELL pay (pay -1 / 1): their coins (S.k)
@@ -81916,6 +81916,7 @@ function stTakes(o, who = 'player', paid) {
   for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id) && c.id !== who && !(paid && famOf(who, c.id))) K.add(c.needs.k);
   // (user Nov 20 21:16: "every delivery, you get paid") what a workplace's routine DELIVERs here: the task's pay, whoever brings it - a worker, the player
   for (const W of strsUsed()) if (strWork(W) && !strDown(W)) for (const J of workJobs(W)) if (J.k && cargoKind(J.k) && ((J.do === 'deliver' && J.at === o.id) || (J.do === 'collect' && W === o && !(strMarket(slStr(J.at)) && marketSells(slStr(J.at)).includes(J.k))))) K.add(J.k);   // (and what its own routine COLLECTs - brought back to it; not what it buys at a market)
+  for (const k of CARGO_KINDS.map(q => q[0])) if (!K.has(k) && strWork(o) && !strDown(o) && workBuysOwn(o, k)) K.add(k);   // (what its own routine HUNTs / SELLs here: it buys it from whoever brings it - buysHere, folkSellPay)
   return [...K];
 }
 // who at place o takes good k for themselves: the one living there who needs it, the soonest out first (null: the place's own stock takes it)
@@ -82150,6 +82151,9 @@ const strWork = o => !!(STR_KINDS[o.k] || {}).work && strProp(o, 'work', K => !!
 // (user Nov 20 14:06: "WHat does this mean 'not bought here'??") a workplace whose routine SELLs a good here buys it from its workers at its price - no MARKET
 // needed (a fisherman's catch at the fishery, paid per fish); and keeps it
 const workBuysOwn = (X, k) => !!X && Array.isArray(X.rt) && X.rt.some(q => q && (q.do === 'sell' || q.do === 'hunt') && q.k === k);   // (a HUNT's catch too)
+// (user Nov 20 23:10: "why does STORY Objectives still say 'You have no way to earn the coins'? I have a job at the fishery") where good k is bought - one test for
+// whoever sells there, a worker or you, and for working out how to earn (famEarn): a market that buys it, or a workplace whose own routine HUNTs / SELLs it
+const buysHere = (o, k) => !!o && ((strMarket(o) && marketBuys(o).includes(k)) || (strWork(o) && !strDown(o) && workBuysOwn(o, k)));
 function keepWhy(X, K, k) {
   if (Array.isArray(X.rt) && X.rt.some(q => q && q.do === 'hunt' && q.k === k)) return 'its workers hunt it';
   if (workBuysOwn(X, k)) return 'its workers sell it here';
