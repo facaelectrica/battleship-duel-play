@@ -13084,8 +13084,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1269;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 14:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1270;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 14:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70652,6 +70652,7 @@ function storyStart() {
   story.opened = { home: o ? o.k : null, n: (story.opened ? story.opened.n : 0) + 1 };   // (for the tools: what it opened on)
   civUI[0] = true;
   story.cp = o ? o.id : 0; storyCpKeep();
+  if (typeof keptVehStep === 'function') keptVehStep();   // (everyone's vehicles at their places first - what's said on arriving counts them: a fishing boat of yours is a way to earn - Nov 21)
   if (o) storyGo(0, o.id); else cutTo(0);
   story.saveN++;                                         // (a new story is saved at once, in its slot: its first checkpoint)
 }
@@ -79035,6 +79036,11 @@ function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edV
    eases to Story's own framing of the structure over MOVE s - the automatic zoom's slow ease (zoomSlow, 39-camera.js), the shot's offset going
    with it. A press, a key or a pad's button while the name is up takes it away quickly and is only that (as waking from sleep - storyWakePress);
    zooming by hand, picking something or leaving the structure ends the shot there.
+   SETTLED FIRST (user Nov 21 13:38: "even if we load things a bit longer, the moment the player can control anything, it should be smooth"): the
+   name's clock waits, held on the screen, till the game has run smoothly for SETTLE s - every frame of this screen under SETTLE_FR s apart, the
+   simulation worker never falling behind (SW.behind - nothing dropped), the story's first save done (storySavedN); whatever a new world still
+   lays the first time (the light's layout, the buildings' ground, the first snapshot, the save) is done under it, not under your hands. At most
+   SETTLE_MAX s (a slow machine plays on).
    This screen's own presentation, run as it's drawn (as storyZoom): nothing of it is the simulation's.
    THE NEW HOME'S SHOT (user Nov 21 10:53: "every time you enter a lighthouse to make it your new home, let's have a flare that shoots out into the sky
    and lights up the night. The camera zooms out and you understand that this is now your new home"; 11:02: "the camera zooms out slightly so we see the
@@ -79042,13 +79048,13 @@ function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edV
    while its rocket goes up and bursts (homeRocket), then eased back; started when story.homeN goes up (storyGo). It zooms out even when the
    zoom is the player's: his own level is put back after (lv0); zooming by hand meanwhile ends it there.
    ================================================================ */
-const STOPEN = { HOLD: 1, FADE: 2, HOME: 4.5, HOME_UP: 46, HOME_FOOT: 0.9, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
+const STOPEN = { HOLD: 1, FADE: 2, SETTLE: 1, SETTLE_FR: 0.12, SETTLE_MAX: 20, HOME: 4.5, HOME_UP: 46, HOME_FOOT: 0.9, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
   BOX: { cx: 0.613, cy: 0.467, w: 0.5438 * 0.78, h: 0.7049 * 0.78 }, PAD: 8, GAP: 0.04 };   // (BOX: the name's box, in the screen's fractions - the mockup's made 0.78 the size and its middle a little left and down: user Nov 13 16:05, his picture of it in the game, "a bit too big" and touching the lighthouse; PAD: the picture's margin round it; GAP: the least room between the structure's right side and the name, of the screen's width)
-const STORY_OPEN = { on: false, t: 0, skip: false, home: false, lv0: null, seen: null };   // (home: the new home's shot; lv0: the player's own zoom level to put back; seen: story.homeN as last seen)
+const STORY_OPEN = { on: false, t: 0, skip: false, home: false, lv0: null, seen: null, calm: 0, wait: 0, ok: false, at: 0, beh: -1 };   // (calm / wait / ok: settling - how long it's run smoothly, how long it's waited, settled; at, beh: the last frame's time and the worker's count of dropped steps)   // (home: the new home's shot; lv0: the player's own zoom level to put back; seen: story.homeN as last seen)
 // a story opened from its slots: the shot, from the loading screen's lift
-function storyOpenAsk() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: false, lv0: null, seen: null }); }
+function storyOpenAsk() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: false, lv0: null, seen: null, calm: 0, wait: 0, ok: false, at: 0, beh: -1 }); }
 // a lighthouse made your home: its shot (its rocket going up)
-function storyHomeShot() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: true, lv0: STORY_ZOOM.manual ? scopes[0].level : null }); }
+function storyHomeShot() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: true, ok: true, lv0: STORY_ZOOM.manual ? scopes[0].level : null }); }   // (in play: nothing to settle)
 function storyOpenEnd() {
   const O = STORY_OPEN; if (!O.on) return; O.on = false;
   if (O.home && O.lv0 != null && STORY) { zoomSlow(0); setScope(0, O.lv0); STORY_ZOOM.lv = O.lv0; }   // (the player's own zoom back)
@@ -79066,12 +79072,21 @@ function stopenO() {
 // how much of the shot's framing is left: 1 till the name's gone, then down to 0 over MOVE
 const stopenK = () => 1 - smooth01(clamp((STORY_OPEN.t - stopenTitleT()) / STOPEN.MOVE, 0, 1));
 // each frame (storyFrameStep): the clock - only once the loading screen is gone; the ends
+// settling, each frame: true once settled (frames close together, the worker dropping nothing, the first save in its slot) for SETTLE s, or SETTLE_MAX s gone
+function stopenSettle(O) {
+  const now = performance.now(), fr = O.at ? (now - O.at) / 1000 : 0, beh = typeof SW !== 'undefined' && SW.live ? SW.behind : 0; O.at = now;
+  const calm = fr < STOPEN.SETTLE_FR && (O.beh < 0 || beh === O.beh) && !storySaving && (storySlot == null || storySavedN === story.saveN) && worldLive();
+  O.beh = beh; O.wait += fr; O.calm = calm ? O.calm + fr : 0;
+  if (O.calm >= STOPEN.SETTLE || O.wait >= STOPEN.SETTLE_MAX) { O.ok = true; O.settled = Math.round(O.wait * 10) / 10; }   // (settled: how long it took - for the tools)
+  return O.ok;
+}
 function storyOpenStep(dt) {
   const O = STORY_OPEN, n = STORY ? story.homeN || 0 : 0;
   if (O.seen == null || n < O.seen) O.seen = n; else if (n > O.seen) { O.seen = n; if (!ui.title && !coverUp()) storyHomeShot(); }   // (a new home: its shot)
   if (!O.on) return;
   if (!STORY) { O.on = false; return; }
   if (coverUp()) return;
+  if (!O.ok && !stopenSettle(O)) return;                 // (the name held till the game runs smoothly)
   if ((STORY_ZOOM.manual && !O.home) || storySel || crew[0].mode !== 'dock') { storyOpenEnd(); return; }
   O.t += dt * (O.skip && O.t < stopenTitleT() ? STOPEN.SKIP : 1);
   if (O.t >= stopenTitleT() + (O.home && O.lv0 != null ? 0 : STOPEN.MOVE)) storyOpenEnd();   // (the player's own zoom: eased straight back to it)
@@ -80623,10 +80638,10 @@ function benchOn(M, fn) {
     return fn(c, o);
   } finally { tablesLoad(saved); STORY = was.STORY; time = was.time; sound = was.sound; cam.glide = was.glide; storySel = was.sel; Object.assign(MKT, was.mkt); }
 }
-// (the player) what's said, one after another, as each is read: [[who, text]]
+// (the player) what's said - all of a place's at once, then what follows once they're read: [[who, text]]
 function benchSay(start) {
   const L = []; if (start) start();
-  for (let i = 0; i < 6 && story.say && story.say.open; i++) { L.push([story.say.who, story.say.txt]); ACTS.storySaid(0); }
+  for (let i = 0; i < 6 && story.say && story.say.open; i++) { for (const l of sayLines(story.say)) L.push([l.who, l.txt]); ACTS.storySaid(0); }
   return L;
 }
 // the moment the copy is in now: where you are, coins, what you carry, everyone's days left
@@ -81309,10 +81324,13 @@ window.__folk = { state: FOLK, plan: id => { const c = OWNERS.find(q => q.id ===
    are - their HOME or their WORK place; your FAMILY's wants are your objectives (slAutoObj). The game sees the objective done (a
    purchase, a sale, cargo aboard, a GIVE pressed, being there) and the next comes from the state again.
    - Said: arriving at a place (storyGo), pressing its TALK arrow, or pressing a market's arrow there. A FRESH want (never said, or
-     setting an objective you don't have yet - slineFresh) comes before one already said; on arriving only a fresh one plays; after
-     one is read the place is checked again.
+     setting an objective you don't have yet - slineFresh) comes before one already said. (user Nov 21 13:48: "when we have a couple of messages
+     for the player, like ... when the game starts ... They should all appear at the same time, and they stay on the screen until you press A")
+     Arriving: every fresh want there and at what it's joined to, all on the screen at once, each under its speaker's name, held till A; the
+     objective the most pressing one that sets one (slineArrive). After they're read the place is checked again for anything new.
    - Kept (the story's table - STORY_ROW, saved and sent): story.obj { to, do, k, line } - the objective; story.said { id: times };
-     story.say { id, txt, who, n } - the sentence on screen, as it was made when it was said.
+     story.say { id, txt, who, n, L: [{ id, txt, who }] } - what's on screen, as it was made when it was said (L: every sentence of it; id /
+     txt / who: its first).
    - Drawn (this screen's): the black story screen - the text in the middle, its keywords in their colours (a destination orange,
      a good green, a number of days purple); A / a tap - the rest fades and the destination and its objective fly up to their
      places at the top (SAY). The DESTINATION / OBJECTIVE pair top centre, an arrow beside it the way to go (drawStoryObj).
@@ -81423,20 +81441,31 @@ function slAutoObj() {
   for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id)) for (const w of slWantOf(c)) if (w.to && (!best || w.d < best.d)) best = w;
   if (best) { story.obj = { to: best.to, do: best.do, k: best.k, n: best.n || 0, line: best.id }; OBJFLY.t = -9; }
 }
-// (the simulation) a want said: on screen, counted, its objective set
-function slineSay(l, o) {
-  story.said = Object.assign({}, story.said, { [l.id]: ((story.said || {})[l.id] || 0) + 1 });
-  if (l.to) story.obj = { to: l.to, do: l.do, k: l.k || '', n: l.n || 0, line: l.id };
-  story.say = { id: l.id, txt: l.txt, who: l.who, at: o.id, n: ((story.say && story.say.n) || 0) + 1, open: 1 };
+// (the simulation) wants said together: on screen, each counted, the objective the most pressing one that sets one
+function slineSay(l, o) { slineSayAll([l], o); }
+function slineSayAll(W, o) {
+  if (!W.length) return;
+  for (const l of W) story.said = Object.assign({}, story.said, { [l.id]: ((story.said || {})[l.id] || 0) + 1 });
+  const g = W.filter(l => l.to).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9))[0];
+  if (g) story.obj = { to: g.to, do: g.do, k: g.k || '', n: g.n || 0, line: g.id };
+  const L = W.map(l => ({ id: l.id, txt: l.txt, who: l.who }));
+  story.say = { id: L[0].id, txt: L[0].txt, who: L[0].who, L, at: o.id, n: ((story.say && story.say.n) || 0) + 1, open: 1 };
 }
 // a place's line, if it has one to say (fresh: only one it hasn't said, or a new objective)
 function slinePlay(o, fresh) { if (!STORY || !o || (story.say && story.say.open) || edTesting()) return false;   // (the editor's PLAY, a test: no lines - 50-zzz-world-ed.js edTesting)
  const l = slineFor(o, fresh); if (!l) return false; slineSay(l, o); return true; }
-// arriving somewhere: the place and the ones it connects to
-function slineArrive(o) { if (!o) return; for (const q of [o, ...storyLinks(o)]) if (slinePlay(q, true)) return; }
+// arriving somewhere: every fresh want of the place and of the ones it connects to, at once (but: those just read - not again straight away)
+function slineArrive(o, but) {
+  if (!o || !STORY || (story.say && story.say.open) || edTesting()) return;
+  const seen = new Set(but || []), W = [];
+  for (const q of [o, ...storyLinks(o)]) for (const l of slWantsAt(q)) if (!seen.has(l.id) && slineFresh(l)) { seen.add(l.id); W.push(l); }
+  slineSayAll(W, o);
+}
 ACTS.storyTalk = (p, id) => { if (p === 0) slinePlay(slStr(+id), false); };
 // the line read (A): off the screen; then whatever the place has next
-ACTS.storySaid = p => { if (p !== 0 || !story.say || !story.say.open) return; const at = slStr(story.say.at); story.say = Object.assign({}, story.say, { open: 0 }); if (at) slineArrive(at); };
+ACTS.storySaid = p => { if (p !== 0 || !story.say || !story.say.open) return; const at = slStr(story.say.at), was = sayLines(story.say).map(l => l.id); story.say = Object.assign({}, story.say, { open: 0 }); if (at) slineArrive(at, was); };
+// a say's sentences (one from before Nov 21 has only its own)
+const sayLines = s => !s ? [] : Array.isArray(s.L) && s.L.length ? s.L : [{ id: s.id, txt: s.txt, who: s.who }];
 
 // ---- the objective, done when the game sees it: a purchase or a sale at the destination (marketSell - slObjEv), cargo of that good
 // aboard (COLLECT), at the destination (GO), the good handed over there - its GIVE / DELIVER arrow pressed (stDeliver - slObjEv)
@@ -81505,25 +81534,32 @@ function drawStorySay() {
   if (!STORY || ui.title) return false;
   const s = story.say, up = slSayUp(), fly = SAY.fly >= 0 ? time - SAY.fly : -1;
   if (!up && (fly < 0 || fly > 0.9)) { SAY.fly = -1; return false; }
-  const txt = trText(up ? s.txt : SAY.txt || ''), sc = ubw < 420 ? 2 : 3, W = Math.min(ubw - 40, 150 * sc * 2), L = slLayout(txt, sc, W), lh = 9 * sc;
+  const Ls = up ? sayLines(s) : SAY.L || [], sc = ubw < 420 ? 2 : 3, W = Math.min(ubw - 40, 150 * sc * 2), lh = 9 * sc, nsc = Math.max(1, sc - 1);
+  // (every sentence at once: each under its speaker's name - the name left out where the one before was theirs too)
+  const B = Ls.map((l, i) => { const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who); return { who, named, L: slLayout(trText(l.txt || ''), sc, W) }; });
+  const gap = Ls.length > 1 ? 2 * lh : 0, hOf = b => (b.named ? 2 * lh : 0) + b.L.length * lh, H = B.reduce((h, b) => h + hOf(b), 0) + gap * Math.max(0, B.length - 1);
   const a = up ? clamp((time - SAY.t) / 0.35, 0, 1) : 1 - clamp(fly / 0.5, 0, 1);
   ug.fillStyle = 'rgba(0,0,0,' + (0.96 * a).toFixed(3) + ')'; ug.fillRect(0, 0, ubw, ubh);
-  const y0 = Math.round((ubh - L.length * lh) / 2) - (up && s.who !== -1 ? 0 : 0);
-  if (up && slWho(s.who)) drawText(ug, slWho(s.who), ubw / 2, y0 - 2 * lh, '#8a93a8', Math.max(1, sc - 1), 'center');
-  L.forEach((ln, j) => {
-    const lw = ln.length ? ln[ln.length - 1].x + ln[ln.length - 1].ww : 0, x0 = Math.round((ubw - lw) / 2);
-    for (const q of ln) {
-      const key = q.col !== SL_COL.text; if (!up && !key) continue;   // (read: the plain words fade with the black, the keywords stay)
-      ug.globalAlpha = up ? a : key ? 1 - clamp(fly / 0.8, 0, 1) : 0;
-      drawText(ug, q.w, x0 + q.x, y0 + j * lh, q.col, sc);
-    }
+  let y = Math.round((ubh - H) / 2) + (B[0] && B[0].named ? 2 * lh : 0);
+  B.forEach((b, i) => {
+    if (i > 0) y += gap + (b.named ? 2 * lh : 0);
+    if (up && b.named) { ug.globalAlpha = a; drawText(ug, b.who, ubw / 2, y - 2 * lh, '#8a93a8', nsc, 'center'); }
+    b.L.forEach((ln, j) => {
+      const lw = ln.length ? ln[ln.length - 1].x + ln[ln.length - 1].ww : 0, x0 = Math.round((ubw - lw) / 2);
+      for (const q of ln) {
+        const key = q.col !== SL_COL.text; if (!up && !key) continue;   // (read: the plain words fade with the black, the keywords stay)
+        ug.globalAlpha = up ? a : key ? 1 - clamp(fly / 0.8, 0, 1) : 0;
+        drawText(ug, q.w, x0 + q.x, y + j * lh, q.col, sc);
+      }
+    });
+    y += b.L.length * lh;
   });
   ug.globalAlpha = 1;
-  if (up && a >= 1) { const t = storyBuyHint().replace('PURCHASE', 'CONTINUE'), bob = Math.round(2 * Math.abs(Math.sin(time * 3.4))); drawText(ug, t, ubw / 2, y0 + L.length * lh + 2 * lh + bob, '#7fe08a', 2, 'center'); }
+  if (up && a >= 1) { const t = storyBuyHint().replace('PURCHASE', 'CONTINUE'), bob = Math.round(2 * Math.abs(Math.sin(time * 3.4))); drawText(ug, t, ubw / 2, y + 2 * lh + bob, '#7fe08a', 2, 'center'); }
   return up;
 }
 // read it: this screen lets go of it, the simulation hears it (storySaid)
-function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid'); sound('click', 0); return true; }
+function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid'); sound('click', 0); return true; }
 // a line just put up: when it started (its fade in)
 function slSayWatch() { if (story.say && story.say.open && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }
 window.addEventListener('pointerdown', ev => { if (!slSayUp() || smapOwns(ev)) return; slSayNext();   /* (a press on the STORY MAP is the map's - 1243 a line up ate them) */ ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
