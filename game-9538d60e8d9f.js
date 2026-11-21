@@ -12971,8 +12971,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1248;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 23:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1249;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 23:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70429,7 +70429,7 @@ function storySubs(dt) {
     if (storySubAlive(s)) {
       if (s.driven != null) continue;
       const o = s.berth != null ? strsUsed().find(q => q.id === s.berth) : null; if (!o) continue;
-      s.x += (storySpotX(o, s.spot) - s.x) * Math.min(1, dt * 2);   // (tied up: it stays at its spot)
+      s.x += (storySpotX(o, s.spot, vehLenM(s)) - s.x) * Math.min(1, dt * 2);   // (tied up: it stays at its spot)
       continue;
     }
     if (s.lostT == null) { s.lostT = time; s.lostDay = W.day; s.own = false; s.berth = null; }
@@ -70506,8 +70506,25 @@ ACTS.storyResume = p => storyResume(p);
    dot: pressing it takes you aboard. Driving one slowly by a structure that takes it shows a dot over that structure:
    pressing it ties her up at its nearest free berth and takes you ashore there. Only tied up can she be left (user Nov 19 - storyParked). ---- */
 const STORY_PARK_M = 15;                                 // (how far past a structure's ends you can still tie up to it)
-const storyBerths = o => Math.max(1, strSpots(o));   // (a dock: as many as fit along it - strSpots, 50-zz-struct.js)
-function storySpotX(o, i) { const B = strBox(o); return B.x0 + (i + 0.5) * (B.x1 - B.x0) / storyBerths(o); }
+/* (user Nov 20 22:43: "My Pier (dock4 is 334M ffs)" - the 36 m cargo ship refused by a 334 m pier whose spots were its design's 12 m MAX SIZE) in the Story world a
+   DOCK's length is what it holds: each boat takes its own length along the deck and DOCK_GAP_M more (dockRun) - a berth is the first of its run of DOCK_CELL_M
+   cells (v.spot), its middle where the run's middle is. Anything else (a parking, a hangar - and every structure's SPOTS in the open world): spots of one size */
+const DOCK_CELL_M = 1, DOCK_GAP_M = 2;
+const dockRun = o => STORY_WORLD && !!o && o.k === 'dock';
+const dockCells = o => Math.max(1, Math.floor(dockLenM(o) / DOCK_CELL_M));
+const berthLen = len => Math.max(1, Math.ceil(((len || 0) + DOCK_GAP_M) / DOCK_CELL_M));   // (cells a boat len metres long takes)
+const storyBerths = o => dockRun(o) ? dockCells(o) : Math.max(1, strSpots(o));   // (a dock elsewhere: as many as fit along it - strSpots, 50-zz-struct.js)
+// the middle of berth i (len: the length in metres of what stands there - a dock's run; none: one cell)
+function storySpotX(o, i, len) { const B = strBox(o), n = storyBerths(o); return B.x0 + (i + (dockRun(o) && len != null ? berthLen(len) : 1) / 2) * (B.x1 - B.x0) / n; }
+const vehLenM = v => storyBoatSize(v)[0] / UPM;   // (a vehicle's own length, metres)
+// the free berth of o nearest x for something len metres long, the berths taken being U (a Set): its first, or -1
+function berthPick(o, U, len, x) {
+  const n = storyBerths(o), k = dockRun(o) ? berthLen(len) : 1; let best = -1, bd = 1e12;
+  for (let i = 0; i + k <= n; i++) { let ok = true; for (let c = i; c < i + k; c++) if (U.has(c)) { ok = false; break; } if (!ok) continue; const d = Math.abs(storySpotX(o, i, len) - x); if (d < bd) { bd = d; best = i; } }
+  return best;
+}
+// the berths of o taken by v (berth i, len metres long) - added to U
+function berthTake(o, U, i, len) { const k = dockRun(o) ? berthLen(len) : 1; for (let c = i; c < i + k; c++) U.add(c); return U; }
 const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')), shuttles.filter(v => v.story && shuttleAlive(v)), civHelis.filter(h => h.story && storyHeliAlive(h)), minisubs.filter(m => m.story && storySubAlive(m)), cranes.filter(cr => cr.story && !cr.gone));   // (a pier's crane - 50-zzzzz-pier-crane.js)   // (and the helicopters - 50-story-helis.js)   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
 function storyBoats() {
   if (!LAND) return;   // (Nov 1, the editor chat - structures-everywhere step 2: a structure's spots start their vehicles in every mode with ground, not only STORY; STORY's own rules - buying, fuel, mornings - stay STORY's)
@@ -70553,10 +70570,8 @@ function storyParksAt(v) {
 }
 // a structure's free spot nearest the vehicle (-1: every spot taken by another)
 function storyFreeSpot(o, v) {
-  const used = new Set(storyVehs().filter(j => j !== v && j.berth === o.id).map(j => j.spot));
-  let best = -1, bd = 1e12;
-  for (let i = 0; i < storyBerths(o); i++) if (!used.has(i)) { const d = Math.abs(storySpotX(o, i) - v.x); if (d < bd) { bd = d; best = i; } }
-  return best;
+  const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) berthTake(o, U, j.spot, vehLenM(j));
+  return berthPick(o, U, vehLenM(v), v.x);
 }
 /* (user Nov 19 13:30: "in story mode, all vehicles must always either be in a hangar or a 'parking' like the taxi shelter we have.
    Just like a boat must be at a dock to start. This also means that swapping between structures, you must first park your car in
@@ -70568,7 +70583,7 @@ function storyPark(p, id) {
   const c = crew[p], v = c.mode === 'civ' ? c.civ : null, o = storyParks(v).find(q => q.id === id); if (!o) return;
   const best = storyFreeSpot(o, v);
   if (best < 0) { sound('empty', v.x); return; }                         // (every berth taken)
-  v.berth = o.id; v.spot = best; v.x = storySpotX(o, best); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
+  v.berth = o.id; v.spot = best; v.x = storySpotX(o, best, vehLenM(v)); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
   if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
   if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); netAboard(v); storyCarryOut(v); civRelease(p); civUI[p] = true;   // (tied up: the net aboard, its catch landed into the hold - 50-story-net.js -, then carried out with you - 50-zz-story-swap.js)
@@ -73627,7 +73642,7 @@ function pfStructBox(p, box, el, css) {
   }
   if (takes.length) {
     sw(v, 'ALLOW REPAIR', 'rep', 'Vehicles here get repaired');   // (a workplace's REPAIR: its type of work's; no REFUEL - no fuel, user Nov 20 12:41)
-    if (p.k === 'dock') sl(v, 'MAX SIZE', 'maxL', 4, 80, ' M', DOCK_SPOT_M, 'Longest vehicle a spot takes, metres');   // (a spot's length - never longer than a copy's dock)
+    if (p.k === 'dock') { if (!STORY_WORLD) sl(v, 'MAX SIZE', 'maxL', 4, 80, ' M', DOCK_SPOT_M, 'Longest vehicle a spot takes, metres'); }   // (the Story world: none - a dock holds boats by their own lengths, dockRun)   // (a spot's length - never longer than a copy's dock)
     else if (p.k !== 'hangarAir' && p.k !== 'hangarSea') sl(v, 'MAX SIZE', 'maxL', 4, 80, ' M', 30, 'Longest vehicle a spot takes, metres');
     const t = T.toggle(p.restrict ? 1 : 0); t.title = 'Only the vehicle types ticked below';
     t.addEventListener('input', () => { if (+t.value) { p.restrict = true; if (!p.allow) p.allow = (K.only || Object.keys(STR_VEHS).filter(k => takes.includes(STR_VEHS[k].fam))).slice(); } else delete p.restrict; ed(); });
@@ -74455,7 +74470,7 @@ const dockLenM = o => isPierS(o) ? pierLenOf(o) / UPM : (o.len || 24);
 // (user Nov 1 21:38-21:44: a hangar's SIZE, SMALL or LARGE: SMALL the Cessna, the small helicopters, the boats and the minisub;
 // LARGE everything - the types marked big in STR_VEHS) a hangar's size decides what it takes, not a length
 const isHangarS = o => o.k === 'hangarAir' || o.k === 'hangarSea';
-const strMaxL = o => o.k === 'dock' ? Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o)) : isHangarS(o) ? Infinity : o.maxL || (STR_KINDS[o.k] || {}).maxL || 30;   // (a kind's own: the PARKING's bollards)
+const strMaxL = o => o.k === 'dock' ? (STORY_WORLD ? dockLenM(o) : Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o))) :   /* (the Story world: a dock takes any boat as long as it is - its boats laid by their own lengths, dockRun - 50-story.js) */ isHangarS(o) ? Infinity : o.maxL || (STR_KINDS[o.k] || {}).maxL || 30;   // (a kind's own: the PARKING's bollards)
 /* (user Nov 20 11:06: "the parking lot needs to have enough length, like a dock, in order to store vehicles") a PARKING's spots: one a PARK_STALL_M
    along its length - its vehicles stand in it seen from the front (50-story-cars.js), the widest a bus's 2.5 m; stretched by its ends' handles */
 const PARK_STALL_M = 3;
@@ -80208,7 +80223,7 @@ function folkCrane(c, S, v, J, T) {
   const reach = q => Math.abs(q - D.cx) < K.jib * UPM * 0.9;          // (a tie-up whose spot has the door in her jib's reach)
   const here = v.berth != null ? slStr(v.berth) : null;
   if (!(here && reach(v.x))) {
-    const P = folkPark(v, D.cx, q => reach(storySpotX(q, Math.max(0, storyFreeSpot(q, v)))));
+    const P = folkPark(v, D.cx, q => reach(storySpotX(q, Math.max(0, storyFreeSpot(q, v)), vehLenM(v))));
     if (P && P !== here) { folkGo(v, P.x, P); return 1; }
     if (!P) return 0;                                                  // (nowhere to tie up in reach: as before - beside it, by numbers)
   }
@@ -80741,14 +80756,14 @@ function folkGo(v, x, park, fish) {
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
   if (v.berth != null) { v.berth = null; v.spot = null; }
   v.bay = 0; v.bayOut = 0;                                                  // (out of a place's door - 50-zzzzz-place-door.js)
-  FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v))) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 };
+  FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 };
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
   const o = slStr(T.park); delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: o ? slPlaceName(o) : folkWhere(v.x) }); v.npcV = 0; v.vDrive = 0;
   if (!o) return;
   const sp = storyFreeSpot(o, v); if (sp < 0) return;
-  v.berth = o.id; v.spot = sp; v.x = storySpotX(o, sp);
+  v.berth = o.id; v.spot = sp; v.x = storySpotX(o, sp, vehLenM(v));
 }
 /* (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car ... the same universal system for all characters")
    GOODS GO WITH WHOEVER STEPS OUT: out of a vehicle, what it holds is carried - a character's in hand (S.carry: { good: n }), the player's in
@@ -82006,7 +82021,7 @@ function workVehMake(W, who, sv = W.wv, tag = { wk: W.id }) {
   else v = storyCarMade({ sid, own: mine, sv, art: D.art, berth: null, spot: 0, hb: null, hs: null, x: W.x, dir: -dir });
   Object.assign(v, tag, { wfor: who }); if (!mine) v.fac = who;   // (its character's: theirs to drive, stolen from them as anything of theirs - vehOwnerVal)
   const P = workSpot(W, v, D.fam); if (!P) return null;
-  const [o, s] = P; v.berth = o.id; v.spot = s; v.x = storySpotX(o, s); const on = strSpotOn(o, v.x); if (on) Object.assign(v, on);
+  const [o, s] = P; v.berth = o.id; v.spot = s; v.x = storySpotX(o, s, vehLenM(v)); const on = strSpotOn(o, v.x); if (on) Object.assign(v, on);
   if (D.fam === 'boat') jetboats.addRow(v); else storyCars.addRow(v);
   folkLog({ t: 'wv', who, at: slPlaceName(o), veh: slVehName(v.sv) });
   return v;
@@ -82317,9 +82332,8 @@ function assignPlan() {
     const L = lotsFor(from, sv, D.fam, W);
     for (const o of L) {
       const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
-      let best = -1, bd = 1e12;
-      for (let i = 0; i < storyBerths(o); i++) if (!U.has(i)) { const d = Math.abs(storySpotX(o, i) - from.x); if (d < bd) { bd = d; best = i; } }
-      if (best >= 0) { U.add(best); return [o, best]; }
+      const len = strTypeLenM(sv), best = berthPick(o, U, len, from.x);   // (a dock: by its own length - berthPick)
+      if (best >= 0) { berthTake(o, U, best, len); return [o, best]; }
     }
     const want = L[L.length - 1] || null; if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);   // (short: the last it could go to - its lot)
     return [null, want];
@@ -82386,7 +82400,7 @@ function assignEdDraw(o, X0, X1, Y0, q) {
       if (lab) drawText(C, lab, ix - gap - textWidth(lab) * q, y + (Math.max(h, 7 * q) >> 1) - 3 * q, e.red ? [255, 120, 110] : [150, 220, 255], q, 'left');
       y -= gap; continue;
     }
-    const x = storySpotX(o, e.s), wet = (STR_KINDS[o.k] || {}).water, on = !wet && strSpotOn(o, x);   // (afloat at a dock: its water's level, not its layer's ground)
+    const x = storySpotX(o, e.s, strTypeLenM(e.sv)), wet = (STR_KINDS[o.k] || {}).water, on = !wet && strSpotOn(o, x);   // (afloat at a dock: its water's level, not its layer's ground)
     const by = on ? PY(on.y) : wet ? PY(waterLv(clamp(x, 0, WORLD_W - 1))) + h * 0.3 : PY(B.foot);
     const ix = Math.round(PX(x) - w / 2), iy = Math.round(by - h);
     one(e, ix, iy, w, h, P, o.flip);
