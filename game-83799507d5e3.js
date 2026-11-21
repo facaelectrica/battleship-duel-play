@@ -12975,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1256;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 00:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1257;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 00:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -80748,7 +80748,9 @@ const folkDeck = x => strsUsed().some(o => o.k === 'dock' && (() => { const B = 
 // whether vehicle v can go from a to b: a car over land all the way, a boat over water (the ends free within STORY_PARK_M)
 function folkReach(v, a, b) {
   const lo = Math.min(a, b), hi = Math.max(a, b), r = STORY_PARK_M * UPM, st = 4 * UPM, boat = folkBoat(v);
-  for (let x = lo + r; x < hi - r; x += st) { const dry = dryLand(x); if (boat ? dry && !folkDeck(x) : !dry && !folkDeck(x)) return false; }
+  // (user Nov 20 23:27: "KILAUEA POINT is an island. Boats are all supposed to pass islands, that the whole point??") a boat stops only where boats stop (coastAhead):
+  // land that isn't an island at sea - every island at sea stands behind the water, and boats go by in front of it (isleCol)
+  for (let x = lo + r; x < hi - r; x += st) { const dry = dryLand(x); if (boat ? dry && !isleCol(x) && !folkDeck(x) : !dry && !folkDeck(x)) return false; }
   return true;
 }
 // where vehicle v ties up near x: the structure that takes it, with a free spot, it can reach - the nearest to x (of those ok takes: one joined to where
