@@ -12971,8 +12971,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1247;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 23:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1248;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 23:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72870,18 +72870,26 @@ function placedNotParked(v) {
   if (!STORY_WORLD || !v || v.placed == null) return '';
   return v.story && v.berth == null && !storyParksAt(v).length ? 'TEST ONLY - ' + parkWhyNot(v) : 'TEST ONLY';
 }
-/* (user Nov 20 21:57: the cargo ship by a PIER said NEEDS A DOCK - "it doesn't seem to care about that") why the nearest structure within reach that takes
-   its kind doesn't take it - the same tests as storyParksAt, in its order: its design's MAX SIZE (or a hangar's SIZE), its RESTRICT, its spots all taken.
-   None of its kind within reach: what it needs (PARK_NEEDS) */
+/* (user Nov 20 21:57: the cargo ship by a PIER said NEEDS A DOCK - "it doesn't seem to care about that") why a structure doesn't take a vehicle of
+   type sv (len: its length in metres - a vehicle's own, else its type's), or '': the same tests as storyParksAt / workTakes, in their order - it
+   takes its family, its RESTRICT, a hangar's SIZE, its design's MAX SIZE. One rule for every place that offers a structure (strWhyNot) */
+function strWhyNot(o, sv, len) {
+  const D = STR_VEHS[sv], fam = D ? D.fam : null;
+  if (fam && !(strTakes(o) || []).includes(fam)) return 'TAKES NO ' + fam.toUpperCase() + 'S';
+  if (!strAllows(o, sv)) return 'RESTRICTED';
+  if (isHangarS(o) && !strFits(o, sv)) return 'TOO SMALL';
+  const L = len != null ? len : strTypeLenM(sv);
+  if (L != null && L > strMaxL(o) + 1e-6) return 'MAX SIZE ' + Math.floor(strMaxL(o)) + ' M < ' + Math.ceil(L) + ' M';
+  return '';
+}
+// a placed Story vehicle standing by nothing that takes it: why the nearest structure within reach that takes its kind won't (strWhyNot), its spots all
+// taken (FULL), or none of its kind near - what it needs (PARK_NEEDS)
 function parkWhyNot(v) {
   const cat = civCat(v), len = storyBoatSize(v)[0] / UPM, r = STORY_PARK_M * UPM;
   const near = strsUsed().filter(o => (strTakes(o) || []).includes(cat)).map(o => { const B = strBox(o); return [o, v.x < B.x0 ? B.x0 - v.x : v.x > B.x1 ? v.x - B.x1 : 0]; }).filter(q => q[1] < r).sort((a, b) => a[1] - b[1])[0];
   if (!near) return PARK_NEEDS[cat] || 'NOT PARKED';
-  const o = near[0], nm = strName(o).toUpperCase();
-  if (len > strMaxL(o) + 1e-6 || !strFits(o, v.sv)) return isHangarS(o) ? nm + ': TOO SMALL' : nm + ': MAX SIZE ' + Math.floor(strMaxL(o)) + ' M < ' + Math.ceil(len) + ' M';
-  if (!strAllows(o, v.sv)) return nm + ': RESTRICTED';
-  if (storyFreeSpot(o, v) < 0) return nm + ': FULL';
-  return PARK_NEEDS[cat] || 'NOT PARKED';
+  const o = near[0], why = strWhyNot(o, v.sv, len) || (storyFreeSpot(o, v) < 0 ? 'FULL' : '');
+  return why ? strName(o).toUpperCase() + ': ' + why : PARK_NEEDS[cat] || 'NOT PARKED';
 }
 // every placed one in the world (the editor lists them in STORY too, where the person button lists only yours)
 const PLACED_TABLES = ['jetboats', 'storyCars', 'civHelis', 'minisubs', 'civShips', 'sailboats', 'traffic', 'seaplanes', 'balloons', 'blimps', 'orbiters', 'planes', 'ships', 'subs', 'tanks', 'helis'];
@@ -81246,8 +81254,11 @@ function smapToggle() {
 // past it the map; in Story, past what you're in allows (storyFarLv) if that's nearer. It opens on the view exactly as it is: the world point at the window's
 // middle and the world's units a CSS pixel read from the camera itself (screenToWorld - what the game draws where), so every shape is where it was; what's
 // picked eases to the map's middle after
-const SMAP_FAR_Z = 0.625;
-const SMAP_ED_Z = () => SMAP_FAR_Z;
+// (user Nov 20 22:36: "the zoom out must be at least 4 more levels before switching to world map") SMAP_STEPS zoom levels farther out than 0.625 - this
+// screen's levels (ZOOM_LEVELS, setZoomLevels)
+const SMAP_STEPS = 4;
+const SMAP_FAR_Z = () => ZOOM_LEVELS[clamp(zoomLevelOf(0.625) - SMAP_STEPS, 1, ZN) - 1];
+const SMAP_ED_Z = () => SMAP_FAR_Z();
 function smapViewNow() {
   const z = cam.view[0].z, k = dpr / (PIXW * S * Math.max(1e-6, z)), o = screenToWorld(0, 0);   // (the camera as last drawn - the editor's zoom may have moved since, in this same pinch)
   const V = { z: k, cx: o[0] + innerWidth / 2 * k, cy: o[1] + innerHeight / 2 * k };
@@ -81255,7 +81266,7 @@ function smapViewNow() {
   return V;
 }
 // Story play: the level zooming out past which the map opens - the farthest Story allows now (storyFarLv), or SMAP_FAR_Z's level if that's nearer
-const smapStoryLv = () => clamp(Math.max(storyFarLv(), zoomLevelOf(SMAP_FAR_Z)), 1, ZN);
+const smapStoryLv = () => clamp(Math.max(storyFarLv(), zoomLevelOf(SMAP_FAR_Z())), 1, ZN);
 function smapZoomOut() { if (SMAP.on || !smapWhere()) return; smapToggle(); }
 // what's picked, and where it is now (null: gone)
 const smapVeh = k => smapVehs().find(v => smapKey(v) === k) || null;
@@ -82415,11 +82426,17 @@ function lotNeeds(o) {
   if (strWork(o)) add('suv', null);   // (user 11:37: "The fishery should also complaint if it doesnt have a parking lot close to it. Otherwise how will someone get to it?" - every workplace: its workers drive there)
   return F;
 }
+// every structure joined to it, by hops
+function lotJoined(o) { const seen = new Set([o]), Q = [o], L = []; while (Q.length) { const q = Q.shift(); if (q !== o) L.push(q); for (const z of storyLinks(q)) if (!seen.has(z)) { seen.add(z); Q.push(z); } } return L; }
 // the lots it may use for a family: joined to it (by hops), taking that family and that type, not a workplace
-function lotChoices(o, fam, sv) {
-  const seen = new Set([o]), Q = [o], L = [];
-  while (Q.length) { const q = Q.shift(); if (q !== o && workTakes(q, sv, fam, null)) L.push(q); for (const z of storyLinks(q)) if (!seen.has(z)) { seen.add(z); Q.push(z); } }
-  return L;
+const lotChoices = (o, fam, sv) => lotJoined(o).filter(q => workTakes(q, sv, fam, null));
+// (user Nov 20 22:36: "It still doesnt let me atach to it" - the cargo ship's workplace's DOCK handle dropped on a 12 m PIER did nothing) why t isn't a lot
+// o may use for family fam's type sv, or '' - strWhyNot, then a workplace's own, then not joined to it by hops (lotChoices)
+function lotWhyNot(o, fam, sv, t) {
+  if (!t || t === o) return 'NOT A ' + LOT_FAMS[fam];
+  const w = strWhyNot(t, sv); if (w) return w;
+  if (strWork(t)) return 'A WORKPLACE';
+  return lotChoices(o, fam, sv).includes(t) ? '' : 'NOT JOINED';
 }
 const lotOf = (o, fam) => { const id = o && o.lot ? o.lot[fam] : null, q = id != null ? strsUsed().find(z => z.id === id) : null; return q && (strTakes(q) || []).includes(fam) ? q : null; };
 function lotSet(o, fam, q) { const L = Object.assign({}, o.lot || {}); if (q) L[fam] = q.id; else delete L[fam]; if (Object.keys(L).length) o.lot = L; else delete o.lot; }
@@ -82453,6 +82470,8 @@ function lotBox(o, el, css) {
     l.title = fam === 'boat' ? 'The dock its boats are kept at - or drag its handle onto one' : 'The parking its cars are kept at - or drag its handle onto one';
     const cur = lotOf(o, fam), L = lotChoices(o, fam, sv);
     for (const [v, t] of [['', 'NONE'], ...L.map(q => [String(q.id), placeLab(q)])]) { const z = document.createElement('option'); z.value = v; z.textContent = t; s.appendChild(z); }
+    // (user Nov 20 22:36) the ones joined to it that take this family but can't take these: listed greyed, why beside them (rules.md 6: a list offers only what's accepted - and says why not)
+    for (const q of lotJoined(o).filter(q => !L.includes(q) && (strTakes(q) || []).includes(fam))) { const z = document.createElement('option'); z.value = String(q.id); z.disabled = true; z.textContent = placeLab(q) + ' - ' + lotWhyNot(o, fam, sv, q); s.appendChild(z); }
     if (cur && !L.includes(cur)) { const z = document.createElement('option'); z.value = String(cur.id); z.textContent = strName(cur) + ' (NOT JOINED)'; s.appendChild(z); }
     s.value = cur ? String(cur.id) : '';
     s.onchange = () => { lotSet(o, fam, s.value ? strById(+s.value) : null); strSave(); strSync(); };
@@ -82477,7 +82496,7 @@ function lotKnobs(o, q) {
   for (const [fam] of N) {
     const X = Math.round(PX(B.x1)) + R * 2 + 4 * q, Y = Math.round(PY(B.top)) + i * (R * 2 + 6 * q) + R, cur = lotOf(o, fam);
     if (cur && !(LOTD.d && LOTD.d.o === o && LOTD.d.fam === fam)) { const Bq = strBox(cur); lotLine(X, Y, PX((Bq.x0 + Bq.x1) / 2), PY(Bq.top), q, LOT_FAMS[fam], [255, 154, 46]); }
-    if (LOTD.d && LOTD.d.o === o && LOTD.d.fam === fam) { const t = strPick(LOTD.d.x, LOTD.d.y, 0), ok = t && t !== o && lotChoices(o, fam, N.get(fam)).includes(t); lotLine(X, Y, PX(LOTD.d.x), PY(LOTD.d.y), q, ok ? LOT_FAMS[fam] : '', ok ? [120, 230, 140] : [255, 154, 46]); }
+    if (LOTD.d && LOTD.d.o === o && LOTD.d.fam === fam) { const t = strPick(LOTD.d.x, LOTD.d.y, 0), why = t && t !== o ? lotWhyNot(o, fam, N.get(fam), t) : null; lotLine(X, Y, PX(LOTD.d.x), PY(LOTD.d.y), q, why === '' ? LOT_FAMS[fam] : why ? strName(t).toUpperCase() + ': ' + why : '', why === '' ? [120, 230, 140] : why ? [255, 90, 80] : [255, 154, 46]); }   // (over one it can't use: red, why)
     C.fillStyle = '#ffffff'; pxDisc(C, X, Y, R + q); C.fillStyle = cur ? '#ff9a2e' : '#ff4a3a'; pxDisc(C, X, Y, R - q);
     drawText(C, fam === 'boat' ? 'D' : 'P', X - 2 * q, Y - 3 * q, [255, 255, 255], q, 'left');
     SE.hnd.push({ o: o.id, lk: fam, x: (X + CAMPX) / SV, y: (Y + TOPPX) / SV, r: (R + q) / SV });
@@ -82494,7 +82513,7 @@ function lotLine(ax, ay, bx, by, q, lab, col) {
 function lotDragEnd(X, Y) {
   const d = LOTD.d; LOTD.d = null; if (!d) return;
   const t = strPick(X, Y, 0), N = lotNeeds(d.o); if (!t || t === d.o || !N.has(d.fam)) return;
-  if (!lotChoices(d.o, d.fam, N.get(d.fam)).includes(t)) return;   // (not one it may use: nothing changes)
+  const why = lotWhyNot(d.o, d.fam, N.get(d.fam), t); if (why) { showToast(strName(t).toUpperCase() + ': ' + why); return; }   // (not one it may use: nothing changes - and why)
   lotSet(d.o, d.fam, t); strSave(); strSync(); setTimeout(undoCommit, 0);
 }
 
