@@ -12968,8 +12968,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1242;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 22:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1243;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 22:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81221,19 +81221,21 @@ function smapToggle() {
 // map opens at it and goes on; zoomed in past it, it closes. (1240 read the whole world's width here - VIS_R - VIS_L: endless in Story, Infinity - and the map's
 // every position came out not a number: nothing drawn, on the iPad 20:42)
 // (user Nov 20 21:01: "Is it possible that it zooms out sooner? Like at least half earlier than when it zooms now? And it matches 100% the shape you're seeing
-// before. So the transition is practically seamless") it opens at twice the farthest zoom (half as far out: SMAP_EARLY - the GAME EDITOR's SMAP_ED_Z,
-// Story's smapStoryLv), and opens on the view exactly as it is: the world point at the window's middle and the world's units a CSS pixel read from the
-// camera itself (screenToWorld - what the game draws where), so every shape is where it was; what's picked eases to the map's middle after
-const SMAP_EARLY = 2;
-const SMAP_ED_Z = () => ZOOM_MIN * SMAP_EARLY;
+// before. So the transition is practically seamless"; 21:02, a report from the GAME EDITOR at zoom 0.625 - its labels piled on each other: "This level would be the
+// maximum zoom, and at this level you don't even have labels because it's too messy") the game's view goes no farther out than SMAP_FAR_Z (that report's zoom):
+// past it the map; in Story, past what you're in allows (storyFarLv) if that's nearer. It opens on the view exactly as it is: the world point at the window's
+// middle and the world's units a CSS pixel read from the camera itself (screenToWorld - what the game draws where), so every shape is where it was; what's
+// picked eases to the map's middle after
+const SMAP_FAR_Z = 0.625;
+const SMAP_ED_Z = () => SMAP_FAR_Z;
 function smapViewNow() {
   const z = cam.view[0].z, k = dpr / (PIXW * S * Math.max(1e-6, z)), o = screenToWorld(0, 0);   // (the camera as last drawn - the editor's zoom may have moved since, in this same pinch)
   const V = { z: k, cx: o[0] + innerWidth / 2 * k, cy: o[1] + innerHeight / 2 * k };
   if (!Number.isFinite(V.z) || V.z <= 0) V.z = 10; if (!Number.isFinite(V.cx) || !Number.isFinite(V.cy)) { V.cx = WORLD_W / 2; V.cy = WATER_Y; }
   return V;
 }
-// Story play: the level zooming out past which the map opens - twice the farthest Story allows (storyFarLv) in zoom, its nearest level at or in from that
-const smapStoryLv = () => clamp(zoomLevelOf(Math.min(ZOOM_TOP, ZOOM_LEVELS[storyFarLv() - 1] * SMAP_EARLY)), 1, ZN);
+// Story play: the level zooming out past which the map opens - the farthest Story allows now (storyFarLv), or SMAP_FAR_Z's level if that's nearer
+const smapStoryLv = () => clamp(Math.max(storyFarLv(), zoomLevelOf(SMAP_FAR_Z)), 1, ZN);
 function smapZoomOut() { if (SMAP.on || !smapWhere()) return; smapToggle(); }
 // what's picked, and where it is now (null: gone)
 const smapVeh = k => smapVehs().find(v => smapKey(v) === k) || null;
