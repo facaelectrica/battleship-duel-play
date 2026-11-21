@@ -12975,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1253;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 00:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1254;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 00:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -68633,9 +68633,10 @@ fn texel(I: u32, B: bool, t: vec2i) -> vec4f {
      NOBODY, PLAYER, these - and TEAM 1, TEAM 2 outside the Story world (ownersBuild) - every OWNER dropdown and facOf (36-zz-factions.js) read it.
    - The CARGO list itself: 50-zz-cargo.js (CARGO). The tabs: STORY > CHARACTERS, CARGO, STORY SETTINGS (50-zzz-story-tab.js).
    ================================================================ */
-const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, coins: 0, inv: { medicine: 0 }, fishM: 10, farM: 400, warnD: 5, pri: ['danger', 'call', 'work'] };   // (warnD / pri: STORY > PRIORITIES - WARN AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
+const STORY_CFG_DEF = { startH: 9, rise: 2, day: 6, set: 2, night: 2, fishM: 10, farM: 400, warnD: 5, pri: ['danger', 'call', 'work'] };   // (warnD / pri: STORY > PRIORITIES - WARN AT, the order: 50-zzzzz-story-family.js)   // (farM: FARTHEST VIEW AT A PLACE - metres across, the most Story lets you zoom out at a structure; a vehicle's own: storyZoomOf)
 //   // (fishM: FISH A MINUTE - a character's boat fishing out of view, 50-zzzzz-story-folk.js)
 let STORY_CFG = JSON.parse(JSON.stringify(STORY_CFG_DEF));
+let STORY_OLD_START = null;   // (an older world's STORY SETTINGS > PLAYER: COINS, goods - the player's own now)
 function storyClockBuild() {
   const C = STORY_CFG, m = k => Math.max(0.1, +C[k] || STORY_CFG_DEF[k]);
   CLOCK_S = [[5, 8, 3 / (60 * m('rise'))], [8, 16.5, 8.5 / (60 * m('day'))], [16.5, 19.2, 2.7 / (60 * m('set'))], [19.2, 29, 9.8 / (60 * m('night'))]];
@@ -68643,7 +68644,10 @@ function storyClockBuild() {
 worldLoad(() => {
   let o = null; try { o = JSON.parse(localStorage.getItem('bd_story_cfg') || 'null'); } catch (e) { }
   STORY_CFG = Object.assign(JSON.parse(JSON.stringify(STORY_CFG_DEF)), o && typeof o === 'object' ? o : {});
-  STORY_CFG.inv = Object.assign({}, STORY_CFG_DEF.inv, (o && o.inv) || {});
+  // (user Nov 20 23:19: "why am I able to define the start amounts for everyone minus the player?") the player's starting COINS and goods are the player's
+  // own, STORY > CHARACTERS > PLAYER (PLAYER_C.coins / .inv) as every character's - an older world's STORY SETTINGS > PLAYER read once into them (50-zz-struct.js)
+  STORY_OLD_START = o && (o.coins || (o.inv && Object.values(o.inv).some(Boolean))) ? { coins: o.coins || 0, inv: Object.assign({}, o.inv || {}) } : null;
+  delete STORY_CFG.coins; delete STORY_CFG.inv;
   delete STORY_CFG.keepD; delete STORY_CFG.urgD;   // (KEEP FOR and URGENT AT gone - user Nov 20 14:04: one WARN AT)
   storyClockBuild();
 });
@@ -70475,7 +70479,7 @@ const storyR = sysRng('story');
 const STORY_ROW = worldRow({ go: [() => story.go || 0, v => { story.go = v || 0; }], rate: [() => story.rate || 1, v => { story.rate = v > 1 ? v : 1; }], swaps: [() => story.swaps || [], v => { lifeSwapsApply(v); }], coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], cpk: [() => story.cpk, v => { story.cpk = v && typeof v === 'object' ? v : null; }],   // (cpk: your things as they were at the checkpoint - storyDie)
  inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }], car: [() => story.car || '', v => { story.car = typeof v === 'string' ? v : ''; }] });   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = STORY_CFG.coins; story.inv = Object.assign({}, STORY_CFG.inv); story.at = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
+function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = PLAYER_C.coins || 0; story.inv = Object.assign({}, PLAYER_C.inv || {});   /* (the player's COINS and START goods - STORY > CHARACTERS > PLAYER, as every character's) */ story.at = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // (user Nov 19 20:54: "when the game starts, you and the grandfather live in the lighthouse") where you live: the player's HOME (STORY >
 // CHARACTERS - PLAYER_C, 50-zz-struct.js); a new story opens there, you sleep there
 const storyHome = () => PLAYER_C.home != null ? strsUsed().find(o => o.id === PLAYER_C.home) || null : null;
@@ -74474,6 +74478,7 @@ worldLoad(() => {
   OWNERS = Array.isArray(L) ? L.filter(o => o && o.id >= 2 && typeof o.name === 'string') : [];
   const P = Array.isArray(L) ? L.find(o => o && o.id === 'player') : null;
   PLAYER_C = Object.assign({}, P || {}, { id: 'player', name: 'PLAYER' });
+  if (typeof STORY_OLD_START !== 'undefined' && STORY_OLD_START && PLAYER_C.coins == null && PLAYER_C.inv == null) { const O = STORY_OLD_START; if (O.coins) PLAYER_C.coins = O.coins; const I = {}; for (const k in O.inv) if (O.inv[k]) I[k] = O.inv[k]; if (Object.keys(I).length) PLAYER_C.inv = I; }   // (an older world's STORY SETTINGS > PLAYER - 50-story-0-cfg.js)
   ownersBuild();
 });
 function ownersSave() { if (typeof lotAuto === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on && lotAuto()) strSave();   /* (who lives / works where changed what needs a PARKING / DOCK) */ const L = [...OWNERS]; if (Object.keys(PLAYER_C).some(k => k !== 'id' && k !== 'name' && PLAYER_C[k] != null && !(Array.isArray(PLAYER_C[k]) && !PLAYER_C[k].length))) L.push(PLAYER_C);   /* (anything set on the player - HOME, WORK, VEHICLE, FAMILY: kept; was HOME / FAMILY only, so WORK and VEHICLE set alone were lost) */ try { if (L.length) localStorage.setItem('bd_owners', JSON.stringify(L)); else localStorage.removeItem('bd_owners'); } catch (e) { } ownersBuild(); }
@@ -76652,7 +76657,7 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    removed (every OWNER choice is one of them, or NOBODY); CARGO - every kind of cargo, its price and PLAYER INVENTORY,
    created and deleted. The settings: 50-story-0-cfg.js (STORY_CFG, OWNERS); the cargo list: 50-zz-cargo.js (CARGO). ---- */
 const STY = { panes: {}, el: null, open: null };   // (open: the character whose rows show - CHARACTERS)
-const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', PLAYER: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', OBJECTIVES: 'OBJECTIVES', SIMULATE: 'SIMULATE' };
+const STY_TABS = { 'STORY SETTINGS': 'STORY SETTINGS', WORLD: 'STORY SETTINGS', CHARACTERS: 'CHARACTERS', PRIORITIES: 'PRIORITIES', CARGO: 'CARGO', OBJECTIVES: 'OBJECTIVES', SIMULATE: 'SIMULATE' };
 const STY_SIM = { days: 3, log: null };   // (the last fast-forward's report - storySim, 50-zzzzz-story-folk.js)
 // (user Nov 19 21:54: "I cant even close the menu anymore. Only add more and more and cant select any others") every change draws the
 // pages again: where each was scrolled to is kept (the box that scrolls it), and a new character's name is put in view, ready to type
@@ -76694,10 +76699,6 @@ function styFill(el) {
     slider(c, 'NIGHT', 'night', 0.5, 60, 0.5, 'MIN', 'Minutes from 7:12PM to 5AM');
     slider(c, 'FISH A MINUTE', 'fishM', 1, 100, 1, '', 'Fish a character\'s boat catches a minute out of view');
     slider(c, 'FARTHEST VIEW AT A PLACE', 'farM', 100, 2000, 10, ' M', 'The widest view zooming out by hand at a structure, metres (in a vehicle: the STORY ZOOM FARTHEST of its design)'); }
-  // PLAYER
-  { const c = cat('PLAYER');
-    num(c, 'COINS', () => STORY_CFG.coins, v => { STORY_CFG.coins = v; storyCfgSave(); }, 'Coins a new story starts with');
-    for (const C of CARGO.filter(q => q.inv)) num(c, C.name, () => STORY_CFG.inv[C.k] || 0, v => { STORY_CFG.inv[C.k] = v; storyCfgSave(); }, C.name.charAt(0) + C.name.slice(1).toLowerCase() + ' a new story starts with'); }
   // OWNERS
   { const [list, c] = listCat('CHARACTERS', 'CHARACTER');
     if (!charsAll().some(q => q.id === STY.open)) STY.open = PLAYER_C.id;   // (one is always open - the player first)
@@ -76718,6 +76719,10 @@ function styFill(el) {
       { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'WORK'); help(l, 'Where a new story starts you signed up'); r.append(l, pick(placeOpts(strWork, o.work, ['', 'NOWHERE'], 'A WORKPLACE'), o.work ?? '', v => { if (v !== '') o.work = +v; else delete o.work; }, 130, 'Where you work')); c.appendChild(r); }
       { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', 'VEHICLE'); help(l, 'Your own vehicle: at your home, again the morning after it\'s lost'); r.append(l, pick([['', 'NONE'], ...workVehTypes().map(sv => [sv, STR_VEHS[sv].lab])], o.veh ?? '', v => { if (v) o.veh = v; else delete o.veh; }, 130, 'Your own vehicle')); c.appendChild(r); }
       famRow(o);
+      // (user Nov 20 23:19) the coins and goods you start with - as every character's COINS and START rows (were STORY SETTINGS > PLAYER)
+      const num = (lab, tip, val, set) => { const r = el('div', 'row'); r.style.cssText = sub; const l = el('label', '', lab); help(l, tip); const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(val || 0); n.style.cssText = css + ';width:56px'; n.title = tip; n.onchange = () => { set(Math.max(0, Math.floor(+n.value || 0))); ownersSave(); }; r.append(l, n); c.appendChild(r); };
+      num('COINS', 'Starting coins', o.coins, v => { if (v) o.coins = v; else delete o.coins; });
+      for (const C of CARGO) num('START ' + C.name, 'Starting inventory', (o.inv || {})[C.k], v => { o.inv = Object.assign({}, o.inv); if (v) o.inv[C.k] = v; else delete o.inv[C.k]; if (!Object.keys(o.inv).length) delete o.inv; });
     };
     for (const o of charsAll()) {   // (you first, then the world's own - nothing else: NOBODY / the Battle sides aren't characters, user Nov 20 00:06)
       const id = o.id, r = el('div', 'row');
@@ -80278,7 +80283,7 @@ const benchName = id => { const c = charOf(id); return c ? (c === PLAYER_C ? 'YO
 // a new story's moment: the player at home with what a new story starts with, everyone's days as they start
 function benchStart(who) {
   const c = charOf(who) || PLAYER_C, H = stHome(c) || strsUsed().find(o => o.id === PLAYER_C.home) || strsUsed()[0];
-  return { who: c.id, at: H ? H.id : 0, coins: c === PLAYER_C ? STORY_CFG.coins : c.coins || 0, carry: c === PLAYER_C ? Object.assign({}, STORY_CFG.inv) : {}, days: {} };
+  return { who: c.id, at: H ? H.id : 0, coins: c.coins || 0, carry: c === PLAYER_C ? Object.assign({}, c.inv || {}) : {}, days: {} };
 }
 // the copy: a new story's start, then the moment over it; fn(c) reads or acts on it; the game's own tables put back after
 function benchOn(M, fn) {
