@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1285;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 18:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1286;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 18:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -83961,7 +83961,8 @@ ACTS.vehnew = (p, L) => { const cur = vmDiff(); vnewSet(Array.isArray(L) ? L : [
    click on them and it takes me there so I can quickly fix issues").
    One rule: what the editor shows red is an issue, with the same reason it shows - a structure's strPlaceBad (OFF THE GROUND, NEEDS WATER / DRY LAND,
    NEEDS PARKING / DOCK, NEEDS A PLACE TO ..., SPOTS SHORT, a second service on a land) or, a workplace with nobody working there, NO WORKERS
-   (peopleEdDraw's red); a vehicle's vehPlaceBad (where it stands; in the Story world TEST ONLY and what it needs - placedNotParked). A press on a row
+   (peopleEdDraw's red); a vehicle's vehRestBad (where it stands). Only what needs fixing (user Nov 21 17:30): a Story world's placed vehicle is red as
+   TEST ONLY - it's there to test, never in a story (placedNotParked) - so that's not listed. A press on a row
    picks it (as any pick: its tab opens) and puts the view on it, the map closed first if it's open. The list is in the GAME EDITOR's panel (#skyEd -
    its look, its presses never the world's: onEdUI) though it sits at the screen's top left, under the WORLD gear (and under its sliders while
    they're open); it shows on WORLD EDITOR only (TUNE.when). Written from the state in TUNE.onSync - after every press and every 0.2 s. ---- */
@@ -83977,7 +83978,7 @@ function edIssues() {
   L.sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : a.x - b.x);
   const V = [];
   for (const e of vehAll()) {
-    let why = ''; try { why = vehPlaceBad(e); } catch (x) { }
+    let why = ''; try { why = vehRestBad(e); } catch (x) { }   // (not placedNotParked's TEST ONLY - a test vehicle's state, nothing to fix)
     if (!why) continue;
     const [x, y] = vehPos(e); V.push({ t: vehName(e), why, v: e, x, y });
   }
