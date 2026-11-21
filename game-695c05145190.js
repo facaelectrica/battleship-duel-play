@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1281;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1282;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81626,12 +81626,70 @@ function goalNow() {
     benchSay(() => { const o = strById(BENCH.m.at); if (o && BENCH.m.who === 'player') slineArrive(o); }); storyObjStep();
     const out = [];
     for (const c of OWNERS) { if (!slHousehold(c)) continue; const G = goalChain(c); if (!G) continue;
-      out.push({ who: goalName(c), links: G.links.map(l => ({ txt: l.txt, ok: l.ok, says: l.says })), obj: (w => w ? w.dest + ' - ' + w.what : 'NONE')(story.obj && slObjWords(story.obj)),
+      out.push({ who: goalName(c), graph: goalGraph(G), plan: goalPlanSteps(G), links: G.links.map(l => ({ txt: l.txt, ok: l.ok, says: l.says })), obj: (w => w ? w.dest + ' - ' + w.what : 'NONE')(story.obj && slObjWords(story.obj)),
         path: (G.path || []).map(o => { const pl = goalPlaceLine(o, G.k); return slPlaceName(o) + ': ' + (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') + (goalTold(o, G.k) ? '' : '  (NOT TOLD YET)'); }) }); }
     return out;
   });
 }
-// ---- the pane: NOW (the chain) | PHRASES
+// ---- THE GRAPH (user Nov 21 16:51 - "start the graph view": a dependency chart, as puzzle dependency charts and the AI debuggers draw them): the
+// chain as boxes, each requirement above what it needs, every WAY the planner considered side by side - taken (green), failed with why (red), off or
+// not tried (grey); the objective orange. A box: { t: title, d: [detail lines], st: 'ok' | 'bad' | 'cur' | 'off' | 'idle', kids }
+const GOAL_WHY = { nocarry: N => 'YOU CARRY ' + (N.has || 0), nosell: () => 'NO MARKET SELLS IT', nostock: N => 'NONE IN STOCK' + (N.M ? ' - NEAREST ' + slPlaceName(N.M) : ''),
+  short: N => 'YOUR COINS ' + (N.has || 0) + ' < ' + N.p, nocatch: () => 'YOU CARRY NO CATCH', catchshort: N => 'CATCH ' + (N.has || 0) + ' WORTH ' + (Math.round((N.worth || 0) * 100) / 100), nobuyer: () => 'NOBODY BUYS THE CATCH',
+  nojob: () => 'YOU HAVE NO WORK', nohunt: N => (N.W0 ? slPlaceName(N.W0) : 'WORK') + ': NO HUNT IN ITS ROUTINE', noboat: () => 'NO FISHING BOAT YOU CAN USE', noway: () => 'NO WAY' };
+const goalWhyTxt = N => N && N.why ? (GOAL_WHY[N.why] || (() => N.why.toUpperCase()))(N) : '';
+const goalWayName = (g, w) => (PLAN_WAYS[g].find(q => q[0] === w) || ['', String(w).toUpperCase()])[1];
+function goalGraph(G) {
+  const act = G.act ? slStepKey(G.act) : null, gd = goalGood(G.k), H = stHome(G.c);
+  const steps = (J, from) => ({ t: 'STEPS', d: J.map(q => famStepTxt(q)), st: 'ok', cur: J.findIndex(q => slStepKey(q) === act), kids: [] });
+  const coins = C => !C ? null : { t: 'GET ' + C.p + ' COINS', d: ['YOU HAVE ' + (story.coins || 0)], st: C.ok ? 'ok' : 'bad', kids: (C.alts || []).map(a => way('coins', a)) };
+  const way = (g, a) => {
+    const N = a.node, B = { t: goalWayName(g, a.way), d: [], st: a.st === 'taken' ? 'ok' : a.st === 'failed' ? 'bad' : a.st === 'off' ? 'off' : 'idle', kids: [] };
+    if (a.st === 'off') B.d.push('SWITCHED OFF'); else if (a.st === 'later') B.d.push('NOT TRIED - ONE ABOVE WORKS');
+    if (a.st === 'failed' && !N.sub) B.d.push(goalWhyTxt(N));
+    if (!N) return B;
+    if (g === 'good' && a.way === 'buy') {
+      if (N.M) B.d.push(slPlaceName(N.M) + ' - ' + cargoBuyPrice(G.k) + ' COINS');
+      if (N.why === 'nostock' && G.path) B.kids.push(...goalPathBoxes(G));
+      if (N.sub) B.kids.push(coins(N.sub));
+    }
+    if (a.st === 'taken' && N.steps && N.steps.length && !(g === 'good' && a.way === 'buy')) B.kids.push(steps(N.steps));
+    return B;
+  };
+  const need = { t: G.c.name.toUpperCase() + ' NEEDS ' + gd, d: [goalDays(G.days) + ' LEFT', 'WARN AT ' + STORY_CFG.warnD + ' DAYS'], st: G.urgent ? 'bad' : 'ok', kids: [] };
+  if (G.urgent) { const P = G.plan; need.kids.push({ t: 'GET ' + gd + ' TO ' + (H ? slPlaceName(H) : '?'), d: [], st: P && P.ok ? 'ok' : 'bad', kids: P ? (P.alts || []).map(a => way('good', a)) : [] }); }
+  else { const R = { t: 'READY FOR THE NEXT ' + gd, d: ['CARRY ONE, OR HAVE ITS PRICE'], st: 'ok', kids: [] };
+    if (slCarry(G.k) >= 1) R.d.push('YOU CARRY ' + slCarry(G.k)); else if (G.plan) { const C = coins(G.plan); if (G.plan.way === 'have') R.d.push('YOU HAVE ' + (story.coins || 0) + ' COINS'); else { R.st = 'bad'; R.kids.push(C); } }
+    need.kids.push(R); }
+  return { t: 'KEEP ' + G.c.name.toUpperCase() + ' ALIVE', d: [], st: G.urgent ? 'bad' : 'ok', kids: [need] };
+}
+// the supply path as boxes, one under the other: each place - what it told you, or not told yet (the first not told: your objective)
+function goalPathBoxes(G) {
+  let first = true;
+  const L = (G.path || []).map(o => { const told = goalTold(o, G.k), pl = goalPlaceLine(o, G.k), B = { t: slPlaceName(o), d: [told ? (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') : 'NOT TOLD YET'], st: told ? 'ok' : first ? 'cur' : 'idle', kids: [] }; if (!told) first = false; return B; });
+  for (let i = L.length - 1; i > 0; i--) L[i - 1].kids.push(L[i]);
+  return L.length ? [L[0]] : [];
+}
+// the whole plan, in order - the first is your objective
+const goalPlanSteps = G => { const P = G.plan, J = P && P.ok ? P.steps : []; return J.map(q => famStepTxt(q)); };
+const GOAL_GCSS = `.gt{overflow-x:auto;padding:4px 0 8px}.gt ul{padding:14px 0 0;margin:0;position:relative;display:flex;justify-content:center}
+.gt>ul{padding-top:0}.gt li{list-style:none;text-align:center;position:relative;padding:14px 3px 0}
+.gt li::before,.gt li::after{content:'';position:absolute;top:0;right:50%;border-top:1px solid #3a4560;width:50%;height:14px}
+.gt li::after{right:auto;left:50%;border-left:1px solid #3a4560}.gt li:only-child::before,.gt li:only-child::after{display:none}.gt li:only-child{padding-top:0}
+.gt li:first-child::before,.gt li:last-child::after{border:0 none}.gt li:last-child::before{border-right:1px solid #3a4560}
+.gt ul ul::before{content:'';position:absolute;top:0;left:50%;border-left:1px solid #3a4560;width:0;height:14px}
+.gt .gb{display:inline-block;border:1px solid;border-radius:4px;padding:3px 6px;font-size:10px;line-height:1.45;max-width:180px;background:#141b2a;text-align:left}
+.gt .gb b{display:block;font-size:11px}`;
+const GOAL_GCOL = { ok: '#7fe08a', bad: '#ff6a5a', cur: '#ffb02e', off: '#5a6478', idle: '#5a6478' };
+function goalGraphEl(B, el) {
+  const li = el('li', ''), b = el('div', 'gb'), c = GOAL_GCOL[B.st] || '#d8dce8'; b.style.borderColor = c; b.style.color = B.st === 'off' || B.st === 'idle' ? '#7a8294' : '#d8dce8';
+  const h = el('b', '', B.t); h.style.color = c; b.appendChild(h);
+  B.d.forEach((t, i) => { const q = el('div', '', (B.cur != null && B.cur >= 0 ? (i + 1) + '. ' : '') + t); if (i === B.cur) { q.style.color = GOAL_GCOL.cur; q.title = 'Your objective'; } b.appendChild(q); });
+  b.title = [B.t, ...B.d].join('\n'); li.appendChild(b);
+  if (B.kids.length) { const ul = el('ul', ''); for (const k of B.kids) ul.appendChild(goalGraphEl(k, el)); li.appendChild(ul); }
+  return li;
+}
+// ---- the pane: NOW (the graph) | WAYS | PHRASES
 const GOALS_UI = { ui: null };
 function goalsSync() { const U = GOALS_UI.ui; if (!U || !U.pane.isConnected || U.pane.hidden) return; const sc = typeof styScroller === 'function' ? styScroller(U.pane) : null, top = sc ? sc.scrollTop : 0; try { goalsDraw(U); } finally { if (sc) sc.scrollTop = top; } }
 function goalsDraw(U) {
@@ -81639,12 +81697,14 @@ function goalsDraw(U) {
   const sec = name => { const s = el('div', 'osec'); s.style.flex = '0 1 auto'; s.appendChild(el('h3', '', name)); pane.appendChild(s); return s; };
   const line = (c, t, col, pad) => { const d = el('div', ''); d.textContent = t; d.style.cssText = 'font-size:11px;line-height:1.6;white-space:pre-wrap;color:' + (col || '#d8dce8') + (pad ? ';padding-left:' + pad + 'px' : ''); c.appendChild(d); return d; };
   // NOW: each family member's chain - ✓ met, ✗ not; the objective; the supply path
-  { const s = sec('NOW'); let L = null; try { L = goalNow(); } catch (e) { line(s, 'ERROR: ' + (e && e.message || e), '#ff6a5a'); }
+  { const s = sec('NOW'); s.style.flex = '1 1 520px'; let L = null; try { L = goalNow(); } catch (e) { line(s, 'ERROR: ' + (e && e.message || e), '#ff6a5a'); }
+    if (!document.getElementById('goalGcss')) { const st = document.createElement('style'); st.id = 'goalGcss'; st.textContent = GOAL_GCSS; document.head.appendChild(st); }
     if (L && !L.length) line(s, 'NO FAMILY NEEDS', '#7a8294');
     for (const G of L || []) {
-      for (const l of G.links) { const d = line(s, (l.ok ? '✓ ' : '✗ ') + l.txt, l.ok ? '#7fe08a' : '#ff6a5a'); if (l.says) { const q = el('div', '', 'SAYS: ' + l.says); q.style.cssText = 'color:#9aa3b8;padding-left:14px'; d.appendChild(q); } }
-      const h = el('h4', '', 'OBJECTIVE'); s.appendChild(h); line(s, G.obj, '#ffb02e');
-      if (G.path.length) { s.appendChild(el('h4', '', 'SUPPLY PATH')); G.path.forEach((t, i) => line(s, (i + 1) + '. ' + t, '#d8dce8')); }
+      const t = el('div', 'gt'), ul = el('ul', ''); ul.appendChild(goalGraphEl(G.graph, el)); t.appendChild(ul); s.appendChild(t);
+      s.appendChild(el('h4', '', 'OBJECTIVE')); line(s, G.obj, '#ffb02e');
+      if (G.plan.length) { s.appendChild(el('h4', '', 'PLAN')); G.plan.forEach((q, i) => line(s, (i + 1) + '. ' + q, i === 0 ? '#ffb02e' : '#d8dce8')); }
+      const said = G.links.filter(l => l.says); if (said.length) { s.appendChild(el('h4', '', 'SAID AT HOME')); for (const l of said) line(s, l.says, '#9aa3b8'); }
     }
     line(s, 'MOMENT: STORY > OBJECTIVES', '#7a8294'); }
   // WAYS: the planner's ways to get a good and to get coins - their order (tried top down) and which are on (STORY_CFG.ways / waysOff)
@@ -82388,50 +82448,65 @@ function planWays(g) {
 function planX(who, coins, carry, x, at, inSv) { return { who, coins: coins || 0, carry: typeof carry === 'function' ? carry : (() => 0), x: x || 0, at: at || 0, inSv: inSv || '' }; }
 // (the player, now)
 function planXPlayer() { const cur = storyCur(), H = stHome(PLAYER_C); return planX('player', story.coins, slCarry, cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : 0) : H ? H.x : 0, cur && cur.o ? cur.o.id : 0, cur && cur.v ? cur.v.sv : ''); }
-// ---- a good k (n of it) to home H
+// ---- a good k (n of it) to home H. Every way in order is recorded on the node (alts: { way, st: 'taken' | 'failed' | 'off' | 'later', why, sub }),
+// so what wasn't taken and why can be shown (STORY > GOALS > NOW)
 function planGood(X, k, n, H) {
-  const tries = [];
-  for (const way of planWays('good').on) {
-    if (way === 'carry') { if (X.carry(k) >= 1) return { goal: 'good', k, n, H, way, ok: true, steps: [{ do: 'deliver', k, at: H.id }] }; continue; }
-    if (way === 'buy') {
+  const W = planWays('good'), alts = [], tries = []; let got = null;
+  for (const way of W.order) {
+    if (got) { alts.push({ way, st: 'later' }); continue; }
+    if (!W.on.includes(way)) { alts.push({ way, st: 'off' }); continue; }
+    let N = null;
+    if (way === 'carry') N = X.carry(k) >= 1 ? { goal: 'good', k, n, H, way, ok: true, steps: [{ do: 'deliver', k, at: H.id }] } : { goal: 'good', k, n, H, way, ok: false, why: 'nocarry', has: X.carry(k) };
+    else if (way === 'buy') {
       const sells = strsUsed().filter(o => strMarket(o) && marketSells(o).includes(k));
-      if (!sells.length) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: 'nosell' }); continue; }
-      const M = famMarket(k, H.x), near = sells.slice().sort((a, b) => Math.abs(a.x - H.x) - Math.abs(b.x - H.x))[0];
-      if (!M) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: 'nostock', M: near }); continue; }
-      const C = planCoins(X, cargoBuyPrice(k));
-      if (!C.ok) { tries.push({ goal: 'good', k, n, H, way, ok: false, why: C.why, M, sub: C }); continue; }
-      return { goal: 'good', k, n, H, way, ok: true, M, sub: C, steps: [...C.steps, { do: 'collect', k, n, at: M.id }, { do: 'deliver', k, at: H.id }] };   // (COLLECT where it's sold: paid for - folkList)
+      if (!sells.length) N = { goal: 'good', k, n, H, way, ok: false, why: 'nosell' };
+      else { const M = famMarket(k, H.x), near = sells.slice().sort((a, b) => Math.abs(a.x - H.x) - Math.abs(b.x - H.x))[0];
+        if (!M) N = { goal: 'good', k, n, H, way, ok: false, why: 'nostock', M: near };
+        else { const C = planCoins(X, cargoBuyPrice(k));
+          N = C.ok ? { goal: 'good', k, n, H, way, ok: true, M, sub: C, steps: [...C.steps, { do: 'collect', k, n, at: M.id }, { do: 'deliver', k, at: H.id }] }   // (COLLECT where it's sold: paid for - folkList)
+            : { goal: 'good', k, n, H, way, ok: false, why: C.why, M, sub: C }; } }
     }
+    if (!N) continue;
+    alts.push({ way, st: N.ok ? 'taken' : 'failed', why: N.why, node: N });
+    if (N.ok) got = N; else tries.push(N);
   }
-  return tries.sort((a, b) => planWhyRank(b) - planWhyRank(a))[0] || { goal: 'good', k, n, H, way: null, ok: false, why: 'noway' };   // (the one that got furthest)
+  const R = got || tries.sort((a, b) => planWhyRank(b) - planWhyRank(a))[0] || { goal: 'good', k, n, H, way: null, ok: false, why: 'noway' };   // (failing: the one that got furthest)
+  return Object.assign(R, { alts });
 }
 const planWhyRank = N => N.sub ? 3 : N.why === 'nostock' ? 2 : 1;
-// ---- p coins
+// ---- p coins (alts as planGood's)
 function planCoins(X, p) {
-  const fish = X.carry('fish'), W0 = workOf(charOf(X.who)), tries = [];
+  const fish = X.carry('fish'), W0 = workOf(charOf(X.who)), W = planWays('coins'), alts = [], tries = []; let got = null;
   const want = (k, c) => Math.max(1, Math.min(NETP.HOLD, Math.ceil((p - c) / Math.max(1e-6, cargoPrice(k)))));
-  for (const way of planWays('coins').on) {
-    if (way === 'have') { if (X.coins >= p) return { goal: 'coins', p, way, ok: true, steps: [] }; continue; }
-    if (way === 'sell') {
-      if (fish > 0 && X.coins + cargoCoins('fish', fish) >= p) { const S = strsUsed().filter(o => buysHere(o, 'fish')).sort((a, b) => Math.abs(a.x - X.x) - Math.abs(b.x - X.x))[0];
-        if (S) return { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'sell', k: 'fish', at: S.id }] }; }
-      continue;
+  for (const way of W.order) {
+    if (got) { alts.push({ way, st: 'later' }); continue; }
+    if (!W.on.includes(way)) { alts.push({ way, st: 'off' }); continue; }
+    let N = null;
+    if (way === 'have') N = X.coins >= p ? { goal: 'coins', p, way, ok: true, steps: [] } : { goal: 'coins', p, way, ok: false, why: 'short', has: X.coins };
+    else if (way === 'sell') {
+      const S = strsUsed().filter(o => buysHere(o, 'fish')).sort((a, b) => Math.abs(a.x - X.x) - Math.abs(b.x - X.x))[0];
+      N = fish > 0 && X.coins + cargoCoins('fish', fish) >= p && S ? { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'sell', k: 'fish', at: S.id }] }
+        : { goal: 'coins', p, way, ok: false, why: !fish ? 'nocatch' : !S ? 'nobuyer' : 'catchshort', has: fish, worth: cargoCoins('fish', fish) };
     }
-    if (way === 'work') {
-      if (!W0) continue;
-      const R = folkList(workRt(W0)), Hn = R.find(J => J.do === 'hunt'); if (!Hn) { tries.push({ goal: 'coins', p, way, ok: false, why: 'noway', W0 }); continue; }
-      const k = Hn.k || 'fish', E = famEarn(X.who, X.x); if (!E) { tries.push({ goal: 'coins', p, way, ok: false, why: 'noway', W0 }); continue; }
-      const Sl = R.find(J => J.do === 'sell' && J.k === k), at = Sl && slStr(Sl.at) ? Sl.at : E.M.id, f = X.carry(k), n = want(k, X.coins);   // (n: the catch to carry for the price)
-      const sell = { do: 'sell', k, at }, hunt = { do: 'hunt', k, n, sv: E.v.sv, at: Hn.at };
-      const there = X.at === W0.id || X.inSv === E.v.sv;
-      return { goal: 'coins', p, way, ok: true, k, W0, steps: !there && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell] };
+    else if (way === 'work') {
+      if (!W0) N = { goal: 'coins', p, way, ok: false, why: 'nojob' };
+      else { const R = folkList(workRt(W0)), Hn = R.find(J => J.do === 'hunt'), k = (Hn && Hn.k) || 'fish', E = Hn ? famEarn(X.who, X.x) : null;
+        if (!Hn) N = { goal: 'coins', p, way, ok: false, why: 'nohunt', W0 };
+        else if (!E) N = { goal: 'coins', p, way, ok: false, why: 'noboat', W0 };
+        else { const Sl = R.find(J => J.do === 'sell' && J.k === k), at = Sl && slStr(Sl.at) ? Sl.at : E.M.id, f = X.carry(k), nn = want(k, X.coins);   // (nn: the catch to carry for the price)
+          const sell = { do: 'sell', k, at }, hunt = { do: 'hunt', k, n: nn, sv: E.v.sv, at: Hn.at }, there = X.at === W0.id || X.inSv === E.v.sv;
+          N = { goal: 'coins', p, way, ok: true, k, W0, steps: !there && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell] }; } }
     }
-    if (way === 'fish') {
-      const E = famEarn(X.who, X.x); if (!E) continue;
-      return { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'hunt', k: 'fish', n: want('fish', X.coins), at: E.a.id, sv: E.v.sv }, { do: 'sell', k: 'fish', at: E.M.id }] };
+    else if (way === 'fish') {
+      const E = famEarn(X.who, X.x);
+      N = E ? { goal: 'coins', p, way, ok: true, k: 'fish', steps: [{ do: 'hunt', k: 'fish', n: want('fish', X.coins), at: E.a.id, sv: E.v.sv }, { do: 'sell', k: 'fish', at: E.M.id }] } : { goal: 'coins', p, way, ok: false, why: 'noboat' };
     }
+    if (!N) continue;
+    alts.push({ way, st: N.ok ? 'taken' : 'failed', why: N.why, node: N });
+    if (N.ok) got = N; else if (way !== 'have' && way !== 'sell') tries.push(N);
   }
-  return tries[0] || { goal: 'coins', p, way: null, ok: false, why: W0 ? 'noway' : 'nojob' };
+  const R = got || tries[0] || { goal: 'coins', p, way: null, ok: false, why: W0 ? 'noway' : 'nojob' };
+  return Object.assign(R, { alts });
 }
 // (family) the steps to keep member F.m's home stocked, for character who with these coins, carrying so many of the good and so many fish, at x; null: no way
 function famSteps(who, F, coins, carry, fish, x, at, inSv) {
