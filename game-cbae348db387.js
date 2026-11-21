@@ -11890,7 +11890,7 @@ const farDef = bn => bn === 'sea' ? { 4: [], 5: [], 6: [] } : bn === 'desert' ? 
   : bn === 'tropical' ? { 4: [{ k: 'meadow' }], 5: [], 6: [] } : { 4: [{ k: 'meadow' }, { k: 'sprite', s: 'fn' }], 5: [{ k: 'sprite', s: 'ff' }], 6: [{ k: 'sprite', s: 'fm' }] };
 let BIOME_FAR = {}, FAR_VER = 1;
 worldLoad(() => { BIOME_FAR = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.far && typeof o.far === 'object') BIOME_FAR = o.far; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
-const farValid = q => q && (q.k === 'meadow' || (q.k === 'sprite' && FAR_SPRITES[q.s]) || (q.k === 'sea' && SEA_ITEMS[q.s]) || (q.k === 'cave' && CAVE_ITEMS[q.s]) || (q.k === 'pf' && typeof q.p === 'string'));
+const farValid = q => q && ((q.k === 'bld' && typeof q.s === 'string') || q.k === 'meadow' || (q.k === 'sprite' && FAR_SPRITES[q.s]) || (q.k === 'sea' && SEA_ITEMS[q.s]) || (q.k === 'cave' && CAVE_ITEMS[q.s]) || (q.k === 'pf' && typeof q.p === 'string'));
 /* ---- (user Nov 8 22:05: "In the Biome Editor, when I open Deep Sea ... I should see the DECKS, with the rocks and algae that it has so I can edit how it
    should look") the ocean's own scenery as the DEEP SEA biome's deck entries { k: 'sea', s } - on its UNDERWATER DECKS (user 22:45): the near-black rocks and weed in front of everything (DECK 0),
    the floor's rock formations, weed and corals (DECK 1 - the rocks are what a sub stands on and runs into), and the seabed layers behind (one a deck,
@@ -13071,8 +13071,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1264;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 12:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1265;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 13:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53796,6 +53796,36 @@ function plWalk(seed, P, amt) {
 }
 // its first place in PL_X (none: its first)
 function plFrom(W) { if (!PL_X) return 0; let lo = 0, hi = W.n; while (lo < hi) { const m = (lo + hi) >> 1; if (W.x[m] < PL_X[0]) lo = m + 1; else hi = m; } return lo; }
+/* ---- A DECK'S BUILDINGS (user Nov 21 11:08: "we should be able to place building sprites in the biome editor"; 11:20, his pick: scattered like plants -
+   scenery: no doors, no collisions, windows lit at night). A deck entry { k: 'bld', s: its picture, amount } of a biome (the Biome Editor's ADD >
+   BUILDINGS, DECK 2 and behind) is laid along that biome's ground as its plants are - its own seed, a building's width and a gap apart (amount: as many
+   again) - where the ground under it is that biome's, dry, near flat across it, clear of the structures placed in the world and of each other. Each one
+   a structure of the world's kinds that isn't in the world's list (o.scene - nobody's, never picked, hit or entered): drawn as one, behind them
+   (drawStructs), lit at night by the town's clock (strLightsOn) ---- */
+const sceneKindOf = a => Object.keys(STR_KINDS).find(k => !STR_KINDS[k].gone && (STR_KINDS[k].art === a || (STR_KINDS[k].arts || []).includes(a))) || null;
+// the building pictures a deck can take - every residence's, workplace's and plain building's: [picture, its name]
+const sceneBldArts = () => { const out = []; for (const k in STR_KINDS) { const K = STR_KINDS[k]; if (K.gone || !(K.res || K.work || K.plain || K.home)) continue; for (const a of [K.art, ...(K.arts || [])]) if (a && !out.some(q => q[0] === a)) out.push([a, String(K.lab).toUpperCase() + (a !== K.art ? ' ' + (K.arts.indexOf(a) + 2) : '')]); } return out; };
+const sceneBldLab = a => (sceneBldArts().find(q => q[0] === a) || [a, String(a).toUpperCase()])[1];
+function sceneBuildings() {
+  const out = [], sets = VEG_MODE ? [[VEG_SET, VEG_DECKS]] : Object.entries(VEG_SETS).filter(([k]) => k !== 'jungle');
+  const taken = strsUsed().map(o => { const B = strBox(o); return B && isFinite(B.x0) ? [B.x0, B.x1] : null; }).filter(Boolean), gapM = 1.5 * UPM;
+  const clear = (a, b) => !taken.some(([p, q]) => b + gapM > p && a - gapM < q);
+  for (const [bn, DK] of sets) DK.forEach((list, d) => list.forEach((e, n) => {
+    if (!e || e.k !== 'bld' || !(e.amount > 0)) return;
+    const k = sceneKindOf(e.s); if (!k) return;
+    const o0 = { k, art: e.s, x: WORLD_W / 2, dy: 0, scene: 1 }, B0 = strBox(o0); if (!B0 || !B0.P) return;
+    const w = B0.x1 - B0.x0, hw = w / 2, salt = 1000 * (1 + VEG_SET_NAMES.indexOf(bn)), seed = 7717 + d * 97 + n * 13 + salt + [...e.s].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) % 100003, 7);
+    const W = plWalk(seed, { x0: 200 + w, gap: R => w * (3 + 6 * R()) }, e.amount);
+    for (let i = 0; i < W.n; i++) {
+      const x = W.x[i]; if (x - hw < 0 || x + hw > WORLD_W) continue;
+      if (!VEG_MODE && biomeAtX(x, true) !== bn && biomeAtX(x) !== bn) continue;   // (the Biome Editor's ground is its picked biome's - as its plants: tropPalms ok)
+      const t = landTop(x, 0), ta = landTop(x - hw, 0), tb = landTop(x + hw, 0);
+      if (!(t < WATER_Y - 4) || Math.abs(ta - tb) > 1.5 * UPM || Math.abs(t - ta) > 1.5 * UPM || lakeOf(x) || !clear(x - hw, x + hw)) continue;
+      out.push({ k, art: e.s, x, dy: 0, flip: W.a[i] < 0.5, scene: 1, deck: d }); taken.push([x - hw, x + hw]);
+    }
+  }));
+  return out;
+}
 function tropPalms() {
   if (typeof hplLay === 'function') hplLay();                 // (the plants placed by hand - 50-zzzz-hand-plants.js: on any ground)
   const AS = airTreeSpans();
@@ -53845,6 +53875,7 @@ function tropPalms() {
       if (okLow(x, P.w) && vegFadeKeep(x, d * 13 + n, false, 0, VR[d], VN)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, low: true }, D0 === VEG_DECKS ? {} : { ve: e }, P.make); if (plantH(it) + deckRaise(it) < gapUnder(x) - 4) land.props.push(it); }   // (and on the ground under an overhang: one that fits under it)
     }
   })); }
+  if (!PL_X) land.sceneB = sceneBuildings();   // (the decks' buildings - the whole world's at once: a stretch keeps them)
   // (user Nov 8 22:45: each biome's UNDERWATER DECKS - VEG_UW, 50-land-zz-rig.js) their prefabs on the biome's ground wherever it lies under a water - the sea's floor
   // (the DEEP SEA's), a lake's bed - as the land decks' on the ground over the water: their own seeds. it.uw: drawn in its water's pass under its tint
   // (drawUwPlants), swaying in the current (rigAir), never burning, shedding or holding a bird
@@ -66333,6 +66364,7 @@ function rigReplant() {
 }
 function* rigReplantGen() {
   const nk = Math.ceil(land.cols / LT_CHUNK), L = []; for (let k = 0; k < nk; k += LIVE_PLK) L.push(k);
+  land.sceneB = sceneBuildings();   // (the decks' building pictures: the whole world's at once - a stretch's replant (PL_X) leaves them)
   if (land.props) land.props = land.props.filter(it => !((it.trop || it.bush || it.fol || it.deck) && it.open == null && (it.x < 0 || it.x >= WORLD_W)));   // (past the world's ends: none laid there)
   while (L.length) {
     yield;
@@ -72696,7 +72728,7 @@ function strLit(o, B) {
    biggest whole size the plate holds - none when the view's too far out to read it, the plate alone */
 const SIGN_OPEN = [40, 128, 64], SIGN_SHUT = [164, 40, 38], SIGN_INK = [248, 244, 232], SIGN_H = 5;   // (SIGN_H: the plate's height, art pixels - 0.5 m)
 function strDoorSign(o, B, X0, Y0, X1, Y1) {
-  if (!B.P || !(strMarket(o) || (typeof buysHere === 'function' && goodKs().some(k => buysHere(o, k))))) return;
+  if (!B.P || o.scene || !(strMarket(o) || (typeof buysHere === 'function' && goodKs().some(k => buysHere(o, k))))) return;
   const W = STR_WINDOWS[o.art || STR_KINDS[o.k].art], D = W && W.door; if (!D) return;
   const sx = (X1 - X0) / B.P.width, sy = (Y1 - Y0) / B.P.height, pw = clamp(D[2] - 2, 6, 12), cx = D[0] + D[2] / 2;
   const x = Math.round(o.flip ? X1 - (cx + pw / 2) * sx : X0 + (cx - pw / 2) * sx), y = Math.round(Y0 + (D[1] + Math.round(D[3] * 0.2)) * sy), w = Math.round(pw * sx), h = Math.round(SIGN_H * sy);
@@ -75006,8 +75038,9 @@ const drawIslStructs = (x0, x1) => drawStructs(x0, x1, true);
 function drawStructs(x0, x1, isl = false, lay = 0) {
   STR_LAND.length = 0; for (const o of strsUsed()) if (!strInSea(o) && (o.lay | 0) === lay && (lay || strOnIsl(o) === isl)) STR_LAND.push(o);
   const L = STR_LAND, cars = lay ? 'lay' + lay : isl ? 'isl' : 'dry'; if (!img.tropical) return;
-  if (!L.length) { drawStoryCars(x0, x1, cars); return; }
+  if (!L.length && !(land.sceneB && land.sceneB.length)) { drawStoryCars(x0, x1, cars); return; }
   const own = thingsOwn();                                  // (one batch: the old code's draws between - thingsGL)
+  if (!lay && land.sceneB) for (const o of land.sceneB) { if (strOnIsl(o) !== isl) continue; const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) continue; strStillDraw(o, B); strLit(o, B); }   // (the decks' buildings, behind the world's - sceneBuildings, 50-land-plants.js)
   for (const o of L) {
     const B = strBox(o); if (!strDrawn(o, B) || strDown(o) || offView(B.x0, B.x1, x0, x1)) continue;   // (brought down: its pieces are the chunks' - strCollapse)
     strStillDraw(o, B);
@@ -79105,6 +79138,7 @@ function strSmokes(o) {
 // its lights at night (strLit): the home you're in by its LIGHT; the town's till bedtime - in Story while someone's in it; a workplace or market while open
 function strLightsOn(o) {
   if (o.empty) return false;                               // (nobody lives there: dark)
+  if (o.scene) return hourIn(env.time, 17, HOME_BED_H) || env.time < 5;   // (a deck's building - scenery: lit by the town's clock)
   if (strIsLh(o)) { const C = lhCtlId(o.id); return !(C && C.off); }   // (a lighthouse: its windows with its light - BEAM)
   if (strRes(o)) { if (stInHome(o)) return !!story.light; return (!STORY || strInside(o)) && (hourIn(env.time, 17, HOME_BED_H) || env.time < 5); }
   if (strMarket(o) || strWork(o)) return placeOpen(o);
@@ -85223,7 +85257,10 @@ function vegUI(Z) {
         r.style.marginBottom = '4px'; c.insertBefore(r, c.children[1] || null); return r; };
       if (UWM === 'cave') caveRock(cats);                    // (the caves' rock first: its colour, brightness, roughness, sand)
       list.forEach((e, ei) => {
-        const kind = e.k === 'sprite' || e.k === 'meadow' || e.k === 'sea' || e.k === 'cave' ? e.k : 'pf';
+        const kind = e.k === 'sprite' || e.k === 'meadow' || e.k === 'sea' || e.k === 'cave' || e.k === 'bld' ? e.k : 'pf';
+        // (user Nov 21 11:08-11:20: building pictures on a deck, scattered like its plants - scenery: sceneBuildings, 50-land-plants.js) its AMOUNT
+        if (kind === 'bld') { const c = catOf(cats, 'BUILDING: ' + sceneBldLab(e.s), 'A building picture on this deck - scenery, scattered like the plants'), ce = () => list[ei] || e;
+          c.appendChild(slider('AMOUNT', 'How many on this deck: 1 usual, 2 twice as many, 0 none', 0, 10, 0.05, () => ce().amount, v => { ce().amount = v; changed(true); }, 1)); move(c, ei); return; }
         // (user Nov 8 22:43) a cave's own things on the biome's CAVE DECKS: AMOUNT 0-100, 20 as many as the biome had (BIOME_CAVE's value 1 - over the GAME EDITOR's CAVES
         // sliders, as before); the caves laid again as it changes
         if (kind === 'cave') {
@@ -85302,10 +85339,11 @@ function vegUI(Z) {
       if (UWM === 'uw' && bn === 'sea') { const g = grp('SEA'); for (const k in SEA_ITEMS) if (k === 'front') opt(g, 'sea|' + k, SEA_ITEMS[k] + onLab('sea', k), onDk('sea', k) === di);
         const gb = grp('SEABED SHAPES'); for (const S of seaShapes().slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) opt(gb, 'bed|' + S.n, S.name); }   // (as many as wanted, on any deck - user Nov 9 08:36)
       if (di >= 2 && !UWM) { const g = grp('PICTURES'); for (const k in FAR_SPRITES) opt(g, 'sprite|' + k, FAR_SPRITES[k][0] + onLab('sprite', k), onDk('sprite', k) === di);
+        { const gb = grp('BUILDINGS'); for (const [a, lab] of sceneBldArts()) opt(gb, 'bld|' + a, lab); }   // (scenery: as many as wanted, each its AMOUNT)
         opt(grp('SURFACE'), 'meadow|', (biomeBaseOf(bn) === 'desert' ? 'SAND BAND' : 'MEADOW') + onLab('meadow'), onDk('meadow') === di); }
       const ab = sBtn('ADD', 'Adds what is picked to ' + DN(di).toLowerCase(), () => { const [k, v] = sel.value.split('|');
         if (k === 'sea' || k === 'cave' || k === 'sprite' || k === 'meadow') for (const L of D) for (let j = L.length - 1; j >= 0; j--) if (L[j].k === k && (k === 'meadow' || L[j].s === v)) L.splice(j, 1);   // (one of: moved here)
-        if (k === 'pf') list.push({ p: v, amount: 1 }); else if (k === 'bed') list.push(seaBedNew(SEA_DECKS[clamp(di - 2, 0, SEA_DECKS.length - 1)], +v)); else if (k === 'sea' || k === 'cave') list.push({ k, s: v }); else if (k === 'sprite') list.push({ k: 'sprite', s: v }); else if (k === 'meadow') list.push({ k: 'meadow' });
+        if (k === 'pf') list.push({ p: v, amount: 1 }); else if (k === 'bed') list.push(seaBedNew(SEA_DECKS[clamp(di - 2, 0, SEA_DECKS.length - 1)], +v)); else if (k === 'sea' || k === 'cave') list.push({ k, s: v }); else if (k === 'sprite') list.push({ k: 'sprite', s: v }); else if (k === 'bld') list.push({ k: 'bld', s: v, amount: 1 }); else if (k === 'meadow') list.push({ k: 'meadow' });
         changed(k === 'pf', true); });
       add.appendChild(sel); add.appendChild(ab); (subAdd || note).appendChild(add);
       // (user Nov 8 13:19: "we have a SAVE button near the DECKS tab, but then the SAVE CHANGES on the left ... We should remove the one in the DECKS")
