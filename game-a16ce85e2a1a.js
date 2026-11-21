@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1284;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 18:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1285;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 18:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81661,7 +81661,7 @@ function goalNow() {
   if (!BENCH.m || !charOf(BENCH.m.who)) BENCH.m = benchStart('player');
   return benchOn(BENCH.m, () => {
     benchSay(() => { const o = strById(BENCH.m.at); if (o && BENCH.m.who === 'player') slineArrive(o); }); storyObjStep();
-    const out = [];
+    const out = []; GOALS_UI.heard = Object.assign({}, story.said || {});
     for (const c of OWNERS) { if (!slHousehold(c)) continue; const G = goalChain(c); if (!G) continue;
       out.push({ who: goalName(c), graph: goalGraph(G), plan: goalPlanSteps(G), links: G.links.map(l => ({ txt: l.txt, ok: l.ok, says: l.says })), obj: (w => w ? w.dest + ' - ' + w.what : 'NONE')(story.obj && slObjWords(story.obj)),
         path: (G.path || []).map(o => { const pl = goalPlaceLine(o, G.k); return slPlaceName(o) + ': ' + (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') + (goalTold(o, G.k) ? '' : '  (NOT TOLD YET)'); }) }); }
@@ -81679,11 +81679,17 @@ const goalWayName = (g, w) => (PLAN_WAYS[g].find(q => q[0] === w) || ['', String
 function goalGraph(G) {
   const act = G.act ? slStepKey(G.act) : null, gd = goalGood(G.k), H = stHome(G.c);
   const steps = (J, from) => ({ t: 'STEPS', d: J.map(q => famStepTxt(q)), st: 'ok', cur: J.findIndex(q => slStepKey(q) === act), kids: [] });
-  const coins = C => !C ? null : { t: 'GET ' + C.p + ' COINS', d: ['YOU HAVE ' + (story.coins || 0)], st: C.ok ? 'ok' : 'bad', kids: (C.alts || []).map(a => way('coins', a)) };
+  const coins = C => !C ? null : { t: 'GET ' + C.p + ' COINS', d: [], st: C.ok ? 'ok' : 'bad', kids: (C.alts || []).map(a => way('coins', a)), ctl: [{ c: 'num', lab: 'YOUR COINS', at: ['coins'], v: story.coins || 0 }] };
   const way = (g, a) => {
     const N = a.node, B = { t: goalWayName(g, a.way), d: [], st: a.st === 'taken' ? 'ok' : a.st === 'failed' ? 'bad' : a.st === 'off' ? 'off' : 'idle', kids: [] };
+    const W = planWays(g), i = W.order.indexOf(a.way);
+    B.ctl = [{ c: 'way', g, w: a.way, on: a.st !== 'off', i, n: W.order.length }];   // (the way on / off, its order - STORY > GOALS > WAYS)
+    if (g === 'good' && a.way === 'carry') B.ctl.push({ c: 'num', lab: 'YOU CARRY', at: ['carry', G.k], v: slCarry(G.k) });
+    if (g === 'coins' && a.way === 'sell') B.ctl.push({ c: 'num', lab: 'FISH CARRIED', at: ['carry', 'fish'], v: slCarry('fish') });
+    if (g === 'coins' && a.way === 'work') B.ctl.push({ c: 'work', v: PLAYER_C.work || 0 });
+    if (g === 'good' && a.way === 'buy') for (const o of strsUsed().filter(q => strMarket(q) && marketSells(q).includes(G.k))) B.ctl.push({ c: 'num', lab: slPlaceName(o) + ' STOCK', at: ['stock', o.id, G.k], v: stN(o, G.k) });
     if (a.st === 'off') B.d.push('SWITCHED OFF'); else if (a.st === 'later') B.d.push('NOT TRIED - ONE ABOVE WORKS');
-    if (a.st === 'failed' && !N.sub) B.d.push(goalWhyTxt(N));
+    if (a.st === 'failed' && !N.sub && N.why !== 'nocarry') B.d.push(goalWhyTxt(N));   // (YOU CARRY: its field says it)
     if (!N) return B;
     if (g === 'good' && a.way === 'buy') {
       if (N.M) B.d.push(slPlaceName(N.M) + ' - ' + cargoBuyPrice(G.k) + ' COINS');
@@ -81693,7 +81699,7 @@ function goalGraph(G) {
     if (a.st === 'taken' && N.steps && N.steps.length && !(g === 'good' && a.way === 'buy')) B.kids.push(steps(N.steps));
     return B;
   };
-  const need = { t: G.c.name.toUpperCase() + ' NEEDS ' + gd, d: [goalDays(G.days) + ' LEFT', 'WARN AT ' + STORY_CFG.warnD + ' DAYS'], st: G.urgent ? 'bad' : 'ok', kids: [] };
+  const need = { t: G.c.name.toUpperCase() + ' NEEDS ' + gd, d: [], st: G.urgent ? 'bad' : 'ok', kids: [], ctl: [{ c: 'num', lab: 'DAYS LEFT', at: ['days', G.c.id], v: Math.round(G.days * 10) / 10, step: 0.5 }, { c: 'num', lab: 'WARN AT', at: ['cfg', 'warnD'], v: STORY_CFG.warnD, step: 0.5 }] };
   if (G.urgent) { const P = G.plan; need.kids.push({ t: 'GET ' + gd + ' TO ' + (H ? slPlaceName(H) : '?'), d: [], st: P && P.ok ? 'ok' : 'bad', kids: P ? (P.alts || []).map(a => way('good', a)) : [] }); }
   else { const R = { t: 'READY FOR THE NEXT ' + gd, d: ['CARRY ONE, OR HAVE ITS PRICE'], st: 'ok', kids: [] };
     if (slCarry(G.k) >= 1) R.d.push('YOU CARRY ' + slCarry(G.k)); else if (G.plan) { const C = coins(G.plan); if (G.plan.way === 'have') R.d.push('YOU HAVE ' + (story.coins || 0) + ' COINS'); else { R.st = 'bad'; R.kids.push(C); } }
@@ -81703,7 +81709,10 @@ function goalGraph(G) {
 // the supply path as boxes, one under the other: each place - what it told you, or not told yet (the first not told: your objective)
 function goalPathBoxes(G) {
   let first = true;
-  const L = (G.path || []).map(o => { const told = goalTold(o, G.k), pl = goalPlaceLine(o, G.k), B = { t: slPlaceName(o), d: [told ? (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') : 'NOT TOLD YET'], st: told ? 'ok' : first ? 'cur' : 'idle', kids: [] }; if (!told) first = false; return B; });
+  const L = (G.path || []).map(o => { const told = goalTold(o, G.k), pl = goalPlaceLine(o, G.k), keeps = keepList(o, STR_KINDS[o.k] || {}).includes(G.k);
+    const B = { t: slPlaceName(o), d: [told ? (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') : 'NOT TOLD YET'], st: told ? 'ok' : first ? 'cur' : 'idle', kids: [],
+      ctl: [...(keeps ? [{ c: 'num', lab: 'STOCK', at: ['stock', o.id, G.k], v: stN(o, G.k) }] : []), { c: 'go', at: o.id }] };   // (GO THERE: you arrive, as playing - what it says is heard)
+    if (!told) first = false; return B; });
   for (let i = L.length - 1; i > 0; i--) L[i - 1].kids.push(L[i]);
   return L.length ? [L[0]] : [];
 }
@@ -81716,15 +81725,51 @@ const GOAL_GCSS = `.gt{overflow-x:auto;padding:4px 0 8px}.gt ul{padding:14px 0 0
 .gt li:first-child::before,.gt li:last-child::after{border:0 none}.gt li:last-child::before{border-right:1px solid #3a4560}
 .gt ul ul::before{content:'';position:absolute;top:0;left:50%;border-left:1px solid #3a4560;width:0;height:14px}
 .gt .gb{display:inline-block;border:1px solid;border-radius:4px;padding:3px 6px;font-size:10px;line-height:1.45;max-width:180px;background:#141b2a;text-align:left}
-.gt .gb b{display:block;font-size:11px}`;
+.gt .gb b{display:block;font-size:11px}.gt .gb button{font-size:10px;padding:1px 4px}`;
 const GOAL_GCOL = { ok: '#7fe08a', bad: '#ff6a5a', cur: '#ffb02e', off: '#5a6478', idle: '#5a6478' };
 function goalGraphEl(B, el) {
   const li = el('li', ''), b = el('div', 'gb'), c = GOAL_GCOL[B.st] || '#d8dce8'; b.style.borderColor = c; b.style.color = B.st === 'off' || B.st === 'idle' ? '#7a8294' : '#d8dce8';
   const h = el('b', '', B.t); h.style.color = c; b.appendChild(h);
   B.d.forEach((t, i) => { const q = el('div', '', (B.cur != null && B.cur >= 0 ? (i + 1) + '. ' : '') + t); if (i === B.cur) { q.style.color = GOAL_GCOL.cur; q.title = 'Your objective'; } b.appendChild(q); });
   b.title = [B.t, ...B.d].join('\n'); li.appendChild(b);
+  for (const q of B.ctl || []) b.appendChild(goalCtlEl(q, el));
   if (B.kids.length) { const ul = el('ul', ''); for (const k of B.kids) ul.appendChild(goalGraphEl(k, el)); li.appendChild(ul); }
   return li;
+}
+// a box's control - it sets the same values as STORY > OBJECTIVES (the moment, BENCH.m) and GOALS > WAYS (STORY_CFG), never a copy; the graph is drawn
+// again at once (user Nov 21 17:13: "Am I able to update the flowchart, change the values")
+function goalSet(at, v) {
+  const M = BENCH.m; if (!M) return;
+  if (at[0] === 'cfg') { STORY_CFG[at[1]] = v; storyCfgSave(); }
+  else if (at[0] === 'coins') M.coins = Math.floor(v);
+  else if (at[0] === 'days') M.days = Object.assign({}, M.days, { [at[1]]: v });
+  else if (at[0] === 'carry') { M.carry = Object.assign({}, M.carry); if (v) M.carry[at[1]] = Math.floor(v); else delete M.carry[at[1]]; }
+  else if (at[0] === 'stock') { M.stock = Object.assign({}, M.stock); M.stock[at[1]] = Object.assign({}, M.stock[at[1]], { [at[2]]: Math.floor(v) }); }
+  BENCH.said = null; goalsSync(); if (typeof storyTabSync === 'function') storyTabSync();
+}
+function goalCtlEl(q, el) {
+  const T = NSKY.editor.TUNE, r = el('div', ''); r.style.cssText = 'display:flex;gap:3px;align-items:center;margin-top:3px;flex-wrap:wrap';
+  const css = 'font:inherit;font-size:10px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:3px;padding:1px 3px';
+  const lab = t => { const l = el('span', '', t); l.style.cssText = 'color:#9aa3b8;font-size:10px'; return l; };
+  if (q.c === 'num') { const i = el('input'); i.type = 'number'; i.min = '0'; i.step = String(q.step || 1); i.value = String(q.v); i.style.cssText = css + ';width:52px'; i.title = q.lab;
+    i.onchange = () => goalSet(q.at, Math.max(0, +i.value || 0)); r.append(lab(q.lab), i); }
+  else if (q.c === 'way') {
+    const t = T.toggle(q.on ? 1 : 0); t.title = 'Tried, or skipped';
+    t.addEventListener('input', () => { const O = Object.assign({}, STORY_CFG.waysOff), S = new Set(O[q.g] || []); if (+t.value) S.delete(q.w); else S.add(q.w); O[q.g] = [...S]; STORY_CFG.waysOff = O; storyCfgSave(); goalsSync(); });
+    const mv = d => { const L = planWays(q.g).order.slice(), j = q.i + d; if (j < 0 || j >= L.length) return; [L[q.i], L[j]] = [L[j], L[q.i]]; STORY_CFG.ways = Object.assign({}, STORY_CFG.ways, { [q.g]: L }); storyCfgSave(); goalsSync(); };
+    const a = el('button', '', '←'), b = el('button', '', '→'); a.title = q.i > 0 ? 'Tried before the one on its left' : 'First already'; b.title = q.i < q.n - 1 ? 'Tried after the one on its right' : 'Last already';
+    T.need(a, () => q.i > 0); T.need(b, () => q.i < q.n - 1); a.onclick = () => mv(-1); b.onclick = () => mv(1);
+    for (const x of [a, b]) x.style.cssText = css;
+    r.append(t, a, b); }
+  else if (q.c === 'work') { const s = el('select'); s.style.cssText = css + ';max-width:150px'; s.title = 'Your WORK place';
+    for (const [v, n] of placeOpts(o => strWork(o), q.v, [0, 'NONE'], 'A WORKPLACE')) { const z = document.createElement('option'); z.value = String(v); z.textContent = n; s.appendChild(z); }
+    s.value = String(BENCH.m && BENCH.m.work != null ? BENCH.m.work : q.v); s.onchange = () => { if (BENCH.m) BENCH.m.work = +s.value; goalsSync(); if (typeof storyTabSync === 'function') storyTabSync(); };
+    r.append(lab('WORK'), s); }
+  else if (q.c === 'go') { const here = BENCH.m && BENCH.m.at === q.at, g = el('button', '', here ? 'YOU ARE HERE' : 'GO THERE'); g.style.cssText = css;
+    g.title = here ? 'You are here' : 'Arrive here, as playing: what it says is heard'; T.need(g, () => !here);
+    g.onclick = () => { if (!BENCH.m) return; BENCH.m.heard = Object.assign({}, GOALS_UI.heard || {}); BENCH.m.at = q.at; BENCH.said = null; goalsSync(); if (typeof storyTabSync === 'function') storyTabSync(); };
+    r.append(g); }
+  return r;
 }
 // ---- the pane: NOW (the graph) | WAYS | PHRASES
 const GOALS_UI = { ui: null };
