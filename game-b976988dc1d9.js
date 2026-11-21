@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1274;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1275;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 17:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36864,7 +36864,7 @@ const ED_GROUPS = [['SUN', ['DISC', 'LIGHT ON CLOUDS', 'BACKLIGHT & BURN', 'RAYS
 // PROPERTIES: the rest. A top tab not named here is a world property.
 // (user Nov 2 12:54: STRUCTURES and VEHICLE one tab, OBJECTS - "the properties just change depending on what I want to spawn OR what I
 // have selected"; GROUPING its own tab - groups of anything, not only structures: 50-zzz-objects-tab.js)
-const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'STRUCTURES', 'VEHICLES', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'TYPES OF WORK', 'STRUCTURE DESIGNS', 'VEHICLE DESIGNS', 'PRIORITIES', 'WANTS', 'OBJECTIVES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLE SETTINGS', 'BATTLE ZOOM LEVELS']],
+const ED_MODES = [['WORLD EDITOR', ['TERRAIN', 'STRUCTURES', 'VEHICLES', 'OBJECTS', 'WEATHER AREAS', 'GROUPING']], ['STORY', ['CHARACTERS', 'TYPES OF WORK', 'STRUCTURE DESIGNS', 'VEHICLE DESIGNS', 'PRIORITIES', 'GOALS', 'OBJECTIVES', 'CARGO', 'STORY SETTINGS', 'SIMULATE']], ['WORLD PROPERTIES', ['SUN', 'CLOUDS', 'WEATHER', 'WIND', 'BACKGROUND', 'PARTICLES', 'CAVE', 'VEHICLE SETTINGS', 'BATTLE ZOOM LEVELS']],
   // (user Nov 1 21:55: PREFABS - every structure and vehicle designed there, 50-zz-prefabs.js; DISPLAY - what the editor shows, not the world)
   ['DISPLAY', ['COLLISION', 'CHANGE HISTORY']]];   // (PREFABS gone, user Nov 20 10:20: "Isnt that the same as structures?" - a design is made in the SPAWN half of STRUCTURES / VEHICLES / OBJECTS)   // (CHANGE HISTORY: UNDO's steps - 50-zz-undo.js, user Nov 3)
 // buttons the game adds to a tab (TUNE.buttons): [tab, category, [[label, description, onclick(button)]...]]
@@ -71202,8 +71202,7 @@ function storyBannerTop() {
   const y = hudTop() + 12, R = uvw - 16, cur = storyTargets().find(q => q.cur);
   drawStoryDamaged(y - 18);
   // (Nov 7: under the corner's REPORT / version / FPS - drawFps; what the player carries under the coins - story.inv)
-  const dw = drawTextC(ug, 'DAY ' + (W.day || 1), R, y + 70, '#ffffff', 2, 'right', '#04070f');
-  const lf = stWatch(); if (lf) drawTextC(ug, stDaysText(lf.d), R - dw - 12, y + 70, SL_COL.days, 2, 'right', '#04070f');   // (user Nov 19: the purple countdown beside the day - how long the life hanging on a place's stock lasts, 50-zzzzz-story-stock.js)
+  drawTextC(ug, 'DAY ' + (W.day || 1), R, y + 70, '#ffffff', 2, 'right', '#04070f');   // (the countdown: under the objective - drawGoalWatch, 50-zzzzz-story-goals.js)
   drawTextC(ug, '$ ' + story.coins, R, y + 90, '#ffd23a', 2, 'right', '#04070f', 3);   // (the coin and your coins - drawTextC)
   let yy = y + 110;
   for (const [k, lab] of CARGO_KINDS) { const n = storyInvN(k); if (n > 0 || (k === 'medicine' && cargoInv(k))) { drawTextC(ug, lab + ' ' + n, R, yy, '#9dff8a', 2, 'right', '#04070f'); yy += 20; } }
@@ -80646,11 +80645,12 @@ const benchName = id => { const c = charOf(id); return c ? (c === PLAYER_C ? 'YO
 // a new story's moment: the player at home with what a new story starts with, everyone's days as they start
 function benchStart(who) {
   const c = charOf(who) || PLAYER_C, H = stHome(c) || strsUsed().find(o => o.id === PLAYER_C.home) || strsUsed()[0];
-  return { who: c.id, at: H ? H.id : 0, coins: c.coins || 0, carry: c === PLAYER_C ? Object.assign({}, c.inv || {}) : {}, days: {} };
+  return { who: c.id, at: H ? H.id : 0, work: c.work != null ? c.work : 0, coins: c.coins || 0, carry: c === PLAYER_C ? Object.assign({}, c.inv || {}) : {}, days: {} };   // (work: their WORK place - user Nov 21 16:04: "allow me to change ... where he currently works")
 }
 // the copy: a new story's start, then the moment over it; fn(c) reads or acts on it; the game's own tables put back after
 function benchOn(M, fn) {
   const saved = tablesSave(), was = { STORY, time, sound, glide: cam.glide, sel: storySel, mkt: Object.assign({}, MKT) };
+  const wc = charOf(M.who) || PLAYER_C, w0 = wc.work; if (M.work !== undefined) wc.work = M.work ? +M.work : null;   // (the moment's WORK, put back after)
   STORY = true; sound = () => { };
   try {
     storyReset(); env.time = Math.max(STORY_CFG.startH, 8); W.day = 1;
@@ -80665,7 +80665,7 @@ function benchOn(M, fn) {
       story.at = o ? o.id : 0; story.coins = M.coins; story.inv = Object.assign({}, M.carry);
     }
     return fn(c, o);
-  } finally { tablesLoad(saved); STORY = was.STORY; time = was.time; sound = was.sound; cam.glide = was.glide; storySel = was.sel; Object.assign(MKT, was.mkt); }
+  } finally { wc.work = w0; tablesLoad(saved); STORY = was.STORY; time = was.time; sound = was.sound; cam.glide = was.glide; storySel = was.sel; Object.assign(MKT, was.mkt); }
 }
 // (the player) what's said - all of a place's at once, then what follows once they're read: [[who, text]]
 function benchSay(start) {
@@ -80688,7 +80688,7 @@ function benchRead(M) {
       const G = famDecide(c, S);
       return { goal: G ? G.why + ' (' + (PRI_KINDS.find(q => q[0] === G.pri) || ['', ''])[1] + ')' : stNeeds(c) ? 'STAYS HOME - SICK' : 'NOTHING TO DO NOW',
         steps: G ? folkList(G.jobs).slice(G.start || 0).map(J => famStepTxt(Object.assign({}, J, { do: J.pay > 0 ? 'sell' : J.do }))) : [],
-        says: slWantOf(c).map(w => w.txt + '  · ' + wantRowName(w.row)), days };
+        says: slWantOf(c).filter(w => !w.quiet).map(w => w.txt + '  · ' + goalLinkName(w.row)), days };
     }
     const said = o ? benchSay(() => slineArrive(o)) : [];
     storyObjStep(); const W = slObjWords(story.obj);
@@ -80732,8 +80732,8 @@ function benchFill(P, el, css) {
   // LEFT: what they see
   const L = sec('WHAT ' + (mine ? 'YOU SEE' : benchName(M.who) + ' DOES')), O = BENCH.out;
 
-  // a line said: who, the sentence, and the WANTS row it came from (grey - STORY > WANTS)
-  const benchLine = (c, w, t, r, col) => { const d = line(c, (w === -1 || w == null ? '' : benchName(w) + ': ') + t, col); if (r) { const s = el('span', '', '  · ' + wantRowName(r)); s.style.color = '#7a8294'; s.title = 'Its row: STORY > WANTS'; d.appendChild(s); } };
+  // a line said: who, the sentence, and the GOALS phrase it is (grey - STORY > GOALS)
+  const benchLine = (c, w, t, r, col) => { const d = line(c, (w === -1 || w == null ? '' : benchName(w) + ': ') + t, col); if (r) { const s = el('span', '', '  · ' + goalLinkName(r)); s.style.color = '#7a8294'; s.title = 'Its phrase: STORY > GOALS'; d.appendChild(s); } };
   const head = t => { const h = el('h4', '', t); h.style.cssText = 'margin:6px 0 2px;font-size:11px'; L.appendChild(h); };
   if (BENCH.err) line(L, 'ERROR: ' + BENCH.err, '#ff6a5a');
   if (BENCH.said && BENCH.said.length) { head('JUST SAID'); for (const [w, t, r] of BENCH.said) benchLine(L, w, t, r, '#c08cff'); }
@@ -80763,6 +80763,7 @@ function benchFill(P, el, css) {
   const num = (val, set, tip, step) => { const i = el('input'); i.type = 'number'; i.min = '0'; i.step = step || '1'; i.value = String(val ?? 0); i.style.cssText = css + ';width:70px'; i.title = tip; i.onchange = () => { set(Math.max(0, +i.value || 0)); BENCH.said = null; storyTabSync(); }; return i; };
   row('WHO', 'Character', pick(charsAll().map(c => [c.id, c === PLAYER_C ? 'PLAYER (YOU)' : c.name]), M.who, v => { BENCH.m = Object.assign(benchStart(benchWho(v)), { days: M.days }); }, 'Character'));
   row('AT', 'Location', pick(placeOpts(() => true, M.at, [0, 'NOWHERE'], 'A PLACE'), M.at, v => { M.at = +v; }, 'Location'));
+  row('WORK', 'Their WORK place', pick(placeOpts(o => strWork(o), M.work, [0, 'NONE'], 'A WORKPLACE'), M.work || 0, v => { M.work = +v; }, 'Their WORK place'));
   row('COINS', 'Coins', num(M.coins, v => { M.coins = Math.floor(v); }, 'Coins'));
   if (mine) for (const C of CARGO) row(C.name, 'Carried', num(M.carry[C.k] || 0, v => { if (v) M.carry[C.k] = Math.floor(v); else delete M.carry[C.k]; }, 'Carried'));
   for (const d of stNeedy()) row(String(d.name).toUpperCase() + ' DAYS LEFT', 'Carried, in days', num(M.days[d.id] ?? (O && O.days ? O.days[d.id] : ''), v => { M.days[d.id] = v; }, 'Carried, in days', '0.5'));
@@ -81344,6 +81345,239 @@ function folkNext(o, k) {
 // (tools)
 window.__folk = { state: FOLK, plan: id => { const c = OWNERS.find(q => q.id === id); return c ? { jobs: folkJobs(c), vehs: folkVehs(c).map(v => ({ sid: v.sid, x: Math.round(v.x), berth: v.berth })), s: FOLK.c[id] || null } : null; } };
 
+//@src 50-zzzzz-story-goals.js:1
+/* ================================================================
+   GOALS - THE REQUIREMENT CHAIN (user Nov 21 15:54: "Your main goal is to keep your grandfather alive. To stay alive he needs medicine. To get medicine
+   you need to buy it. To buy it you need coins. To get coins you need a job. Then its about 'where to buy it' 'where to work' etc."; 15:56: "the place
+   where you buy the medicine runs out (marketplace) then they will tell you where they get the medicine from (cargo terminal) so your objective is to
+   go there to get more info, and that shows you the path to find where the chain broke"; "a permanent display of 'Your grandfather medicine will run
+   out in X days'"). Replaces STORY > WANTS (1273: a sentence a row - "That means there's no system", 15:53).
+   One chain for every FAMILY member whose NEEDS end in DEATH, each link a rule of the game checked against the state, top down:
+     KEEP <WHO> ALIVE  ->  <WHO> NEEDS <GOOD> (days left; urgent at WARN AT or fewer)  ->  you carry it: GIVE IT
+     ->  BUY IT where it's sold  ->  its PRICE in coins  ->  coins from your WORK (its ROUTINE: hunt, sell)
+   The first link not met that you can act on is your objective (the top bar), followed as things change (slObjFollow). Not urgent (user 15:54: "Earn for
+   the next dose"): ready when you carry one or have its price; else work. Out of stock: THE SUPPLY PATH - the market and, upstream, each place it gets the
+   good from (a worker of it COLLECTs there, or someone DELIVERs to it - their ROUTINE: goalSrc), till a place that has it or that nobody brings it to;
+   your objective is the first place on it that hasn't told you its part yet (each says it on arriving - its line is the knowledge, story.said).
+   Said (user: "Spoken, plus the top bar"): at their home, the chain's lines from the need down to your objective, all at once; a place's supply line
+   where it is. Everything said and shown is a PHRASE (GOAL_PH - STORY > GOALS, saved in bd_goals): one a link, {TOKEN}s from the state.
+   The countdown (drawGoalWatch): YOUR <WHO>'S <GOOD> WILL RUN OUT IN <N> DAYS, always on, under the objective.
+   ================================================================ */
+// the phrases: [link id, NAME, tooltip, the game's phrase]
+const GOAL_PH_DEF = [
+  ['alive', 'GOAL', 'Chain: the goal', 'KEEP {WHO} ALIVE'],
+  ['need', 'NEEDS - URGENT', 'Said at their home: WARN AT days or fewer', 'I NEED {GOOD} OR I WILL DIE IN {DAYS LEFT}.'],
+  ['have', 'NEEDS - FOR NOW', 'Said at their home: more than WARN AT days', 'I HAVE {GOOD} FOR {DAYS LEFT}.'],
+  ['needC', 'NEEDS - CHAIN', 'Chain: the need', '{WHO} NEEDS {GOOD}: {DAYS LEFT} LEFT'],
+  ['give', 'GIVE', 'Chain: you carry it, urgent', 'GIVE {GOOD} TO {WHO}'],
+  ['ready', 'READY', 'Chain: you carry the next one or its price', 'READY FOR THE NEXT {GOOD}'],
+  ['buy', 'BUY', 'Said and chain: where it is bought', 'BUY {GOOD} AT {MARKET} FOR {PRICE} COINS.'],
+  ['nosell', 'NOBODY SELLS', 'Said and chain: no market sells it', 'NOBODY SELLS {GOOD}.'],
+  ['coins', 'COINS', 'Said and chain: short of its price', 'YOU NEED {PRICE} COINS TO BUY {GOOD}.'],
+  ['work', 'WORK', 'Said and chain: your WORK and its steps', 'TO MAKE COINS, DO YOUR JOB AT {WORK}: {JOB}.'],
+  ['nojob', 'NO JOB', 'Said and chain: you have no WORK', 'YOU NEED A JOB TO MAKE COINS.'],
+  ['thanks', 'THANKS', 'Said when it\'s handed to them', 'THANK YOU.'],
+  ['fromUs', 'WE FETCH IT FROM', 'Said at a place out of it: its own worker fetches it', 'WE HAVE NO {GOOD} LEFT. WE GET IT FROM {SOURCE}.'],
+  ['from', 'SOMEONE BRINGS IT FROM', 'Said at a place out of it: someone else brings it', 'WE HAVE NO {GOOD} LEFT. THE {CARRIER} BRINGS IT FROM {SOURCE}.'],
+  ['coming', 'ON ITS WAY', 'Said at a place out of it: it\'s aboard on its way', 'WE HAVE NO {GOOD} LEFT. THE {CARRIER} IS BRINGING IT FROM {SOURCE}.'],
+  ['hunted', 'HUNTED', 'Said at a place out of it: someone hunts it', 'WE HAVE NO {GOOD} LEFT. THE {CARRIER} HUNTS IT.'],
+  ['nofrom', 'NOBODY BRINGS IT', 'Said at a place out of it: nobody brings it', 'WE HAVE NO {GOOD} LEFT. NOBODY BRINGS IT TO US.'],
+  ['stock', 'HAS IT', 'Said at a place on the path that has it', 'WE HAVE {STOCK} {GOOD} HERE.'],
+  ['missing', 'MISSING INGREDIENT', 'Said at a workplace short of what it makes from', 'WE NEED {GOOD} TO MAKE {MAKES}.'],
+  ['watch', 'COUNTDOWN', 'Always on screen: the most urgent', 'YOUR {WHO}\'S {GOOD} WILL RUN OUT IN {DAYS LEFT}'],
+  ['jobStep', 'JOB - STEPS JOINED BY', 'Between the steps of {JOB}', ', THEN '],
+  ['hunt', 'STEP - HUNT', 'A step of {JOB}', 'HUNT {GOOD}'],
+  ['sell', 'STEP - SELL', 'A step of {JOB}', 'SELL {GOOD} AT {PLACE}'],
+  ['collect', 'STEP - COLLECT', 'A step of {JOB}', 'COLLECT {GOOD} AT {PLACE}'],
+  ['deliver', 'STEP - DELIVER', 'A step of {JOB}', 'DELIVER {GOOD} TO {PLACE}'],
+];
+const GOAL_TOKENS = [['WHO', 'The family member'], ['GOOD', 'The good'], ['DAYS LEFT', 'Their days left'], ['PRICE', 'Its buy price'], ['MARKET', 'Where it\'s bought'], ['WORK', 'Your WORK place'], ['JOB', 'Your WORK\'s steps'], ['CARRIER', 'Who brings it'], ['SOURCE', 'Where it comes from'], ['STOCK', 'Units there'], ['MAKES', 'What the place makes'], ['PLACE', 'A step\'s place']];
+let GOAL_PH = {};
+worldLoad(() => {
+  let o = null; try { o = JSON.parse(localStorage.getItem('bd_goals') || 'null'); } catch (e) { }
+  GOAL_PH = {}; for (const [id, , , def] of GOAL_PH_DEF) GOAL_PH[id] = o && typeof o[id] === 'string' ? o[id] : def;
+});
+function goalsSave() { const o = {}; for (const [id, , , def] of GOAL_PH_DEF) if (GOAL_PH[id] !== def) o[id] = GOAL_PH[id]; try { if (Object.keys(o).length) localStorage.setItem('bd_goals', JSON.stringify(o)); else localStorage.removeItem('bd_goals'); } catch (e) { } }
+const goalPh = (id, T) => String(GOAL_PH[id] ?? (GOAL_PH_DEF.find(q => q[0] === id) || [])[3] ?? '').replace(/\{([A-Z ]+)\}/g, (m, t) => T[t] != null ? String(T[t]) : '');
+const goalGood = k => String(CARGO_LAB[k] || k || '').toUpperCase();
+const goalDays = d => { const n = Math.max(0, Math.floor(d + 1e-6)); return n + (n === 1 ? ' DAY' : ' DAYS'); };   // (whole days, down - one rule)
+const goalName = c => String((c && c.name) || '').toUpperCase();
+// ---- THE SUPPLY PATH: where place o gets good k from - a worker of o COLLECTs it at another place, or someone DELIVERs it to o after COLLECTing it
+// somewhere or HUNTing it (their ROUTINE, folkRoutine). { from (null: hunted), by, hunt, carry (units aboard their vehicles now), named }
+function goalSrcs(o, k) {
+  const has = J => J.k === k || rtAll(J), out = [];
+  const aboard = c => [...storyCars, ...jetboats].filter(v => v.story && (v.wfor === c.id || vehOwnerVal(v) === c.id)).reduce((n, v) => n + cargoN(v, k), 0);
+  for (const c of OWNERS) { if (stGone(c.id) || c.work !== o.id) continue; for (const J of folkRoutine(c)) if (J.do === 'collect' && has(J) && J.at !== o.id && slStr(J.at)) out.push({ from: slStr(J.at), by: c, named: J.k === k, carry: aboard(c) }); }
+  for (const c of OWNERS) { if (stGone(c.id)) continue; const R = folkRoutine(c); R.forEach((J, i) => { if (J.do !== 'deliver' || !has(J) || J.at !== o.id) return;
+    const C = R.slice(0, i).reverse().find(q => (q.do === 'collect' && has(q) && slStr(q.at)) || (q.do === 'hunt' && q.k === k)); if (!C) return;
+    out.push(C.do === 'hunt' ? { from: null, by: c, hunt: true, named: true, carry: aboard(c) } : { from: slStr(C.at), by: c, named: J.k === k || C.k === k, carry: aboard(c) }); }); }
+  return out;
+}
+// whether good k can come from a source: hunted, aboard on its way, or from a place that has it, keeps it, makes it or gets it from further up.
+// A step for every good (no good named - rtAll) counts only where k can come from; one naming k first.
+const goalSrcOk = (s, k, seen) => s.hunt || s.carry > 0 || goalReach(s.from, k, seen);
+function goalReach(P, k, seen) {
+  if (!P) return false;
+  if (stN(P, k) > 0 || strKeeps(P, k) || (stMakes(P) && stMakes(P).k === k)) return true;
+  if (seen.has(P) || seen.size > 8) return false; seen.add(P);
+  return goalSrcs(P, k).some(s => goalSrcOk(s, k, seen));
+}
+function goalSrc(o, k) {
+  const S = goalSrcs(o, k); if (!S.length) return null;
+  return S.find(q => q.named && goalSrcOk(q, k, new Set([o]))) || S.find(q => goalSrcOk(q, k, new Set([o]))) || S.find(q => q.named) || null;
+}
+// the path from market M upstream while a place is out of k: [M, ...] - ends at a place that has it, that it's on its way to or hunted for, that nobody
+// brings it to, or a loop
+function goalPath(M, k) {
+  const P = [M]; let o = M;
+  for (let i = 0; i < 8 && stN(o, k) < 1; i++) { const s = goalSrc(o, k); if (!s || s.hunt || s.carry > 0 || !s.from || P.includes(s.from)) break; P.push(s.from); o = s.from; }
+  return P;
+}
+// a place's line about good k (its state: has it, where from and who brings it, on its way, hunted, nobody brings it) - { key, ph, T }
+function goalPlaceLine(o, k) {
+  const T = { GOOD: goalGood(k), STOCK: stN(o, k) };
+  if (stN(o, k) >= 1) return strMarket(o) && marketSells(o).includes(k) ? null : { key: 'g:place:' + o.id + ':' + k + ':s', ph: 'stock', T };   // (a market that has it: nothing to say - you buy it)
+  const s = goalSrc(o, k); if (!s) return { key: 'g:place:' + o.id + ':' + k + ':n', ph: 'nofrom', T };
+  Object.assign(T, { CARRIER: goalName(s.by), SOURCE: s.from ? slPlaceName(s.from) : '' });
+  const ph = s.hunt ? 'hunted' : s.carry > 0 ? 'coming' : s.by.work === o.id ? 'fromUs' : 'from';
+  return { key: 'g:place:' + o.id + ':' + k + ':' + ph + (s.from ? s.from.id : ''), ph, T };
+}
+const goalTold = (o, k) => Object.keys(story.said || {}).some(id => id.startsWith('g:place:' + o.id + ':' + k + ':'));
+// ---- EARN: making p coins - your WORK's ROUTINE as any worker's (its HUNT, and SELL the catch where it says), there from wherever you are. [] - no way
+function goalEarnPlan(p) {
+  const W0 = workOf(PLAYER_C); if (!W0) return [];
+  const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : W0.x) : W0.x, R = folkList(workRt(W0)), H = R.find(J => J.do === 'hunt');
+  const there = !!cur && storyPlace(cur).includes(W0); if (!H) return there ? [] : [{ do: 'go', k: '', at: W0.id }];
+  const E = famEarn('player', x), k = H.k || 'fish'; if (!E) return there ? [] : [{ do: 'go', k: '', at: W0.id }];
+  const S = R.find(J => J.do === 'sell' && J.k === k), sellAt = S && slStr(S.at) ? S.at : E.M.id;
+  const c = story.coins || 0, f = slCarry(k), n = Math.max(1, Math.min(NETP.HOLD, Math.ceil((p - c) / Math.max(1e-6, cargoPrice(k)))));
+  const sell = { do: 'sell', k, at: sellAt }, hunt = { do: 'hunt', k, n, sv: E.v.sv, at: H.at };
+  if (f >= n || f > 0 && c + cargoCoins(k, f) >= p) return [sell];
+  const inBoat = !!cur && !!cur.v && cur.v.sv === E.v.sv;
+  return !there && !inBoat && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell];
+}
+// your job's steps in words (the ROUTINE's, as the plan has them: HUNT FISH, THEN SELL FISH AT KEAWE FISH LANDING)
+const goalJobTxt = P => P.filter(J => J.do !== 'go' && GOAL_PH[J.do] != null).map(J => goalPh(J.do, { GOOD: goalGood(J.k), PLACE: wantPlaceName(J.at) })).join(GOAL_PH.jobStep ?? ', THEN ');
+const wantPlaceName = id => { const o = id != null ? slStr(id) : null; return o ? slPlaceName(o) : ''; };
+// ---- THE CHAIN for family member c: { c, k, days, urgent, links: [{ id, txt, ok, says }], act (the step that's your objective, or null), path }
+function goalChain(c) {
+  const N = stNeeds(c), H = stHome(c); if (!N || !H || stGone(c.id) || String(N.out || 'death') !== 'death') return null;
+  const k = N.k, days = stDays(c), urgent = days <= STORY_CFG.warnD + 1e-9, price = cargoBuyPrice(k);
+  const T = { WHO: goalName(c), GOOD: goalGood(k), 'DAYS LEFT': goalDays(days), PRICE: price, WORK: workOf(PLAYER_C) ? slPlaceName(workOf(PLAYER_C)) : '' };
+  const L = [], link = (id, ok, says, extra) => { const TT = Object.assign({}, T, extra || {}); L.push({ id, txt: goalPh(id === 'need' || id === 'have' ? 'needC' : id, TT), ok, says: says ? goalPh(id, TT) : '' }); };
+  const G = { c, k, days, urgent, links: L, act: null, path: null };
+  L.push({ id: 'alive', txt: goalPh('alive', T), ok: true, says: '' });
+  link(urgent ? 'need' : 'have', !urgent, true);
+  if (slCarry(k) >= 1) { if (urgent) { link('give', false, false); G.act = { do: 'deliver', k, at: H.id }; } else link('ready', true, false); return G; }
+  const sell = strsUsed().filter(o => strMarket(o) && marketSells(o).includes(k));
+  if (!sell.length) { link('nosell', false, true); return G; }
+  const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : H.x) : H.x, near = A => A.slice().sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+  const M = near(sell.filter(o => stN(o, k) > 0)) || near(sell);
+  T.MARKET = slPlaceName(M);
+  link('buy', false, (story.coins || 0) >= price);
+  if ((story.coins || 0) < price) {
+    link('coins', false, true);
+    if (!workOf(PLAYER_C)) { link('nojob', false, true); return G; }
+    const P = goalEarnPlan(price); link('work', false, true, { JOB: goalJobTxt(P) }); G.act = P[0] || null; return G;
+  }
+  if (!urgent) { L[L.length - 1] = { id: 'ready', txt: goalPh('ready', T), ok: true, says: '' }; return G; }
+  if (stN(M, k) >= 1) { G.act = { do: 'collect', k, at: M.id }; return G; }
+  // out of stock: the supply path - the first place on it that hasn't told you its part
+  const P = G.path = goalPath(M, k);
+  for (let i = 0; i < P.length; i++) {
+    const o = P[i], told = goalTold(o, k), pl = goalPlaceLine(o, k);
+    L.push({ id: 'path', txt: slPlaceName(o) + (told && pl ? ': ' + goalPh(pl.ph, pl.T) : ''), ok: told, says: '' });
+    if (!told) { G.act = i === 0 ? { do: 'collect', k, at: o.id } : { do: 'go', k: '', at: o.id }; break; }
+  }
+  return G;
+}
+// (the objective words for a step - as the chain names it: BUY where it's paid for)
+const goalActKey = J => slStepKey(J);
+// what character c says now (the lines said at their home or work - slWantsAt): for your FAMILY, the chain's lines from the need to your objective
+// (the first carries the objective); anyone else's urgent need; a workplace's short ingredients
+function slWantOf(c) {
+  const out = []; if (!c || stGone(c.id)) return out;
+  const H = stHome(c), G = slHousehold(c) ? goalChain(c) : null;
+  if (G) {
+    const key = 'g:chain:' + c.id + ':' + G.k, sk = goalActKey(G.act) + (G.urgent ? ':u' : ':f'), says = G.links.filter(l => l.says);
+    if (G.act || G.urgent) says.forEach((l, i) => {
+      const w = { id: key + ':' + l.id + ':' + sk, key, row: l.id, who: c.id, at: H.id, txt: l.says, d: G.days + i * 1e-6, k: G.k, to: '', do: 'go' };
+      if (i === 0 && G.act) Object.assign(w, G.act.do === 'hunt' ? { to: 'k:' + G.act.sv, do: 'hunt', k: G.act.k, n: G.act.n } : { to: 's:' + G.act.at, do: G.act.do, k: G.act.k || '', n: G.act.do === 'collect' ? 0 : G.act.n || 0 });
+      out.push(w);
+    });
+    if (!says.length && G.act) out.push({ id: key + ':obj:' + sk, key, row: 'needC', who: c.id, at: H.id, txt: '', d: G.days, k: G.k, to: G.act.do === 'hunt' ? 'k:' + G.act.sv : 's:' + G.act.at, do: G.act.do, n: G.act.n || 0, quiet: 1 });
+  } else { const N = stNeeds(c); if (N && H && stDays(c) <= STORY_CFG.warnD + 1e-9) out.push({ id: 'g:need:' + c.id + ':' + N.k, key: 'g:need:' + c.id + ':' + N.k, row: 'need', who: c.id, at: H.id, txt: goalPh('need', { GOOD: goalGood(N.k), 'DAYS LEFT': goalDays(stDays(c)) }), d: stDays(c), k: N.k, to: '', do: 'go' }); }
+  const W0 = workOf(c), M = W0 && stMakes(W0);
+  if (M) for (const q of (cargoKind(M.k) || {}).needs || []) if (cargoKind(q.k) && stN(W0, q.k) < q.n) out.push({ id: 'g:miss:' + W0.id + ':' + q.k, key: 'g:miss:' + W0.id + ':' + q.k, row: 'missing', who: c.id, at: W0.id, txt: goalPh('missing', { GOOD: goalGood(q.k), MAKES: goalGood(M.k) }), d: 1e9, k: q.k, to: '', do: 'go' });
+  return out;
+}
+// a place's supply lines (said where it is - slWantsAt): a market out of what it sells; any place on a family chain's supply path, for that good
+function goalPlaceWants(o) {
+  const out = [], ks = new Set(strMarket(o) ? marketSells(o) : []);
+  for (const c of OWNERS) if (slHousehold(c)) { const G = goalChain(c); if (G && G.path && G.path.includes(o)) ks.add(G.k); }
+  for (const k of ks) { const pl = goalPlaceLine(o, k); if (!pl) continue; const w = OWNERS.find(c => c.work === o.id && !stGone(c.id));
+    out.push({ id: pl.key, key: pl.key, row: pl.ph, who: w ? w.id : -1, at: o.id, txt: goalPh(pl.ph, pl.T), d: 1e9, k, to: '', do: 'go' }); }
+  return out;
+}
+// handed in at o: THANKS, from whoever lives there and needed it
+function slHanded(o, k) {
+  const c = stNeedy().find(q => q.home === o.id && q.needs.k === k && !stGone(q.id)); if (!c) return [];
+  return [{ id: 'g:thanks:' + c.id + ':' + k + ':' + (story.saveN || 0) + ':' + Math.round(stDays(c) * 10), key: 'g:thanks:' + c.id, row: 'thanks', who: c.id, at: o.id, txt: goalPh('thanks', {}), d: -1, k, to: '', do: 'go' }];
+}
+// the countdown, always on: the most urgent of your family's - under the objective
+function goalWatch() { let best = null; for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id) && stNeeds(c) && stHome(c)) { const d = stDays(c); if (!best || d < best.d) best = { c, d }; } return best; }
+function drawGoalWatch(y) {
+  const B = goalWatch(); if (!B) return;
+  const t = trText(goalPh('watch', { WHO: goalName(B.c), GOOD: goalGood(stNeeds(B.c).k), 'DAYS LEFT': goalDays(B.d) }));
+  drawTextC(ug, t, Math.round(uvw / 2), y, B.d <= STORY_CFG.warnD + 1e-9 ? '#ff6a5a' : SL_COL.days, 2, 'center', '#04070f');
+}
+const goalLinkName = id => { const r = GOAL_PH_DEF.find(q => q[0] === id); return r ? r[1] : String(id || ''); };
+// ---- NOW: the chains at the OBJECTIVES moment (as you'd stand there: arrived, read)
+function goalNow() {
+  if (!BENCH.m || !charOf(BENCH.m.who)) BENCH.m = benchStart('player');
+  return benchOn(BENCH.m, () => {
+    benchSay(() => { const o = strById(BENCH.m.at); if (o && BENCH.m.who === 'player') slineArrive(o); }); storyObjStep();
+    const out = [];
+    for (const c of OWNERS) { if (!slHousehold(c)) continue; const G = goalChain(c); if (!G) continue;
+      out.push({ who: goalName(c), links: G.links.map(l => ({ txt: l.txt, ok: l.ok, says: l.says })), obj: (w => w ? w.dest + ' - ' + w.what : 'NONE')(story.obj && slObjWords(story.obj)),
+        path: (G.path || []).map(o => { const pl = goalPlaceLine(o, G.k); return slPlaceName(o) + ': ' + (pl ? goalPh(pl.ph, pl.T) : 'SELLS IT') + (goalTold(o, G.k) ? '' : '  (NOT TOLD YET)'); }) }); }
+    return out;
+  });
+}
+// ---- the pane: NOW (the chain) | PHRASES
+const GOALS_UI = { ui: null };
+function goalsSync() { const U = GOALS_UI.ui; if (!U || !U.pane.isConnected || U.pane.hidden) return; const sc = typeof styScroller === 'function' ? styScroller(U.pane) : null, top = sc ? sc.scrollTop : 0; try { goalsDraw(U); } finally { if (sc) sc.scrollTop = top; } }
+function goalsDraw(U) {
+  const { pane, el, css } = U, T = NSKY.editor.TUNE; pane.textContent = ''; pane.className = 'opane';
+  const sec = name => { const s = el('div', 'osec'); s.style.flex = '0 1 auto'; s.appendChild(el('h3', '', name)); pane.appendChild(s); return s; };
+  const line = (c, t, col, pad) => { const d = el('div', ''); d.textContent = t; d.style.cssText = 'font-size:11px;line-height:1.6;white-space:pre-wrap;color:' + (col || '#d8dce8') + (pad ? ';padding-left:' + pad + 'px' : ''); c.appendChild(d); return d; };
+  // NOW: each family member's chain - ✓ met, ✗ not; the objective; the supply path
+  { const s = sec('NOW'); let L = null; try { L = goalNow(); } catch (e) { line(s, 'ERROR: ' + (e && e.message || e), '#ff6a5a'); }
+    if (L && !L.length) line(s, 'NO FAMILY NEEDS', '#7a8294');
+    for (const G of L || []) {
+      for (const l of G.links) { const d = line(s, (l.ok ? '✓ ' : '✗ ') + l.txt, l.ok ? '#7fe08a' : '#ff6a5a'); if (l.says) { const q = el('div', '', 'SAYS: ' + l.says); q.style.cssText = 'color:#9aa3b8;padding-left:14px'; d.appendChild(q); } }
+      const h = el('h4', '', 'OBJECTIVE'); s.appendChild(h); line(s, G.obj, '#ffb02e');
+      if (G.path.length) { s.appendChild(el('h4', '', 'SUPPLY PATH')); G.path.forEach((t, i) => line(s, (i + 1) + '. ' + t, '#d8dce8')); }
+    }
+    line(s, 'MOMENT: STORY > OBJECTIVES', '#7a8294'); }
+  // PHRASES: one a link
+  { const s = sec('PHRASES'), tk = el('div', ''); tk.style.cssText = 'font-size:11px;color:#7a8294;padding-bottom:4px'; tk.textContent = GOAL_TOKENS.map(q => '{' + q[0] + '}').join(' '); tk.title = GOAL_TOKENS.map(q => '{' + q[0] + '}: ' + q[1]).join('\n'); s.appendChild(tk);
+    for (const [id, name, tip, def] of GOAL_PH_DEF) {
+      const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center';
+      const l = el('label', '', name); l.title = tip; l.dataset.help = tip;
+      const i = el('input'); i.type = 'text'; i.value = GOAL_PH[id] ?? def; i.title = tip; i.style.cssText = css + ';width:380px;max-width:100%;text-transform:uppercase';
+      i.onchange = () => { GOAL_PH[id] = i.value.toUpperCase().replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, id === 'jobStep' ? '' : ''); goalsSave(); goalsSync(); };
+      const rv = el('button', '', 'REVERT TO DEFAULT'); rv.title = (GOAL_PH[id] ?? def) === def ? 'Same as the default' : 'The game\'s phrase'; T.need(rv, () => (GOAL_PH[id] ?? def) !== def);
+      rv.onclick = () => { GOAL_PH[id] = def; goalsSave(); goalsSync(); };
+      r.append(l, i, rv); s.appendChild(r);
+    } }
+}
+NSKY.editor.TUNE.pane('GOALS', (pane, el) => {
+  GOALS_UI.ui = { pane, el, css: 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px' };
+  new MutationObserver(() => { if (!pane.hidden) goalsSync(); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
+});
+window.__goals = { chain: id => { const c = charOf(id); const G = c && goalChain(c); return G ? { links: G.links, act: G.act, path: (G.path || []).map(o => o.id) } : null; }, now: () => goalNow() };
+
 //@src 50-zzzzz-story-lines.js:1
 /* ================================================================
    WHAT IS SAID AND THE OBJECTIVE (user Nov 19 15:20, story-systems chat - his story notes "Far Away: Story Mode Notes": "Entering a
@@ -81351,7 +81585,7 @@ window.__folk = { state: FOLK, plan: id => { const c = OWNERS.find(q => q.id ===
    All systematic"; 15:17: "even the dialogues you'd get from characters are generated based on the systems ... barely anything
    would be actually scripted"). (user Nov 20 12:40, objectives chat: the written LINES removed - "let's remove the lines and have a
    OBJECTIVES tab": everything said comes from the state, and STORY > OBJECTIVES shows it at any moment - 50-zzzzz-story-bench.js.)
-   One rule: what a character says comes from their state (WANTS, below - one sentence a kind, in lang/strings.csv), where they
+   One rule: what a character says comes from their state (the GOALS chain - 50-zzzzz-story-goals.js), where they
    are - their HOME or their WORK place; your FAMILY's wants are your objectives (slAutoObj). The game sees the objective done (a
    purchase, a sale, cargo aboard, a GIVE pressed, being there) and the next comes from the state again.
    - Said: arriving at a place (storyGo), pressing its TALK arrow, or pressing a market's arrow there. A FRESH want (never said, or
@@ -81399,8 +81633,8 @@ const slCarry = k => storyInvN(k) + storyVehs().filter(storyYours).reduce((s, v)
 const slineFresh = l => !(story.said || {})[l.id] || (!!l.to && !(story.obj && story.obj.line === l.id));
 // what a place says: the first want not said yet (or setting an objective you don't have) - else, pressed, the first; on arriving, only a fresh one
 function slineFor(o, freshOnly) { const W = slWantsAt(o); return W.find(slineFresh) || (freshOnly ? null : W[0]) || null; }
-/* ---- WANTS: what each character says comes from STORY > WANTS (50-zzzzz-story-wants.js - user Nov 21 15:17: "the ability to understand how the
-   sentences were built and the ability to edit them is pretty important") - each row's ABOUT, AT, WHEN, SAYS, PLAN and SETS OBJECTIVE; slWantOf(c) there.
+/* ---- WHAT'S SAID: the requirement chain and the supply path (STORY > GOALS, 50-zzzzz-story-goals.js - user Nov 21 15:54: "keep your grandfather
+   alive ... needs medicine ... buy it ... coins ... a job"); slWantOf(c), goalPlaceWants(o), slHanded there; every sentence a phrase of GOAL_PH.
    Whose wants are your objectives: your FAMILY's (user Nov 19 20:57 - famOf); with none set, the most pressing of them is the objective (slAutoObj). ---- */
 const slHousehold = c => !!c && famOf('player', c.id);   // (your FAMILY - STORY > CHARACTERS, 50-zzzzz-story-family.js)
 // a step as a key: what's done, where, with what ('none': no way to get it)
@@ -81408,7 +81642,8 @@ const slStepKey = S0 => !S0 ? 'none' : [S0.do, S0.at || S0.sv || '', S0.k || '']
 // the wants said at a place: of those who live or work there (a market's or a maker's own wants only there)
 function slWantsAt(o) {
   const out = [];
-  for (const c of OWNERS) { if (stGone(c.id) || !(c.home === o.id || c.work === o.id)) continue; for (const w of slWantOf(c)) if (w.at === o.id) out.push(w); }   // (each want is said where its row's AT is - STORY > WANTS)
+  for (const c of OWNERS) { if (stGone(c.id) || !(c.home === o.id || c.work === o.id)) continue; for (const w of slWantOf(c)) if (w.at === o.id && !w.quiet) out.push(w); }   // (each said where it belongs: their home, their work - 50-zzzzz-story-goals.js)
+  out.push(...goalPlaceWants(o));   // (the place's own: out of a good, where it comes from - the supply path)
   return out.sort((a, b) => a.d - b.d);
 }
 // no objective: the most pressing of your household's wants that has one (silently - its line is said when you meet them)
@@ -81450,7 +81685,7 @@ const sayLines = s => !s ? [] : Array.isArray(s.L) && s.L.length ? s.L : [{ id: 
 function slObjDone() {
   const g = story.obj; story.obj = null; sound('clink', 0, 1);
   const T = g && g.to[0] === 's' ? slStr(+g.to.slice(2)) : null;
-  if (T && storyPlace(storyCur() || {}).includes(T)) slinePlay(T, false); else { const at = storyAt(); if (at && crew[0].mode === 'dock') slineArrive(at); }
+  if (T && storyPlace(storyCur() || {}).includes(T)) slinePlay(T, true);   // (what's new there - what you've just read there isn't said again) else { const at = storyAt(); if (at && crew[0].mode === 'dock') slineArrive(at); }
 }
 function slObjEv(what, id, k) { const g = story.obj; if (!STORY || !g || g.do !== what || g.to !== 's:' + id || (g.k && g.k !== k)) return; slObjDone(); }
 function slHere(to) {
@@ -81468,7 +81703,7 @@ function storyObjStep() {
 // a want's objective, as things are now: its first step again (coins earned another way, a good bought, carried, handed in); the want gone
 // (met, or no way to it) - none, and the next is picked (slAutoObj). An objective of something else's (a job's - tk) is its own.
 function slObjFollow(g) {
-  if (g.tk) return; const key = g.want; if (!key) { if (/^w:/.test(g.line || '')) story.obj = null; return; }   // (an objective from a want before STORY > WANTS: worked out again - slAutoObj)
+  if (g.tk) return; const key = g.want; if (!key) { if (/^[wg]:/.test(g.line || '')) story.obj = null; return; }   // (an objective from before the chain: worked out again - slAutoObj)
   let w = null; for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id)) { w = slWantOf(c).find(q => q.key === key && q.to); if (w) break; }
   if (!w) { story.obj = null; return; }
   if (w.to !== g.to || w.do !== g.do || (w.k || '') !== (g.k || '') || (w.n || 0) !== (g.n || 0) || w.id !== g.line) { story.obj = slObjOf(w); OBJFLY.t = -9; }
@@ -81483,7 +81718,8 @@ const slSayUp = () => STORY && !ui.title && !(typeof EDMODE !== 'undefined' && E
 function slObjWords(g) {
   if (!g) return null; const T = slTo(g.to); if (!T) return null;
   const give = g.do === 'deliver' && T.o && g.k && !stPays(T.o, g.k, 1, 'player'), to = give ? stTo(T.o, g.k) : null;   // (to your family, for nothing: GIVE * TO * - as its arrow says, 50-zz-story-swap.js)
-  const dz = give ? 'GIVE' : (VERBS.find(q => q[0] === slVerb(g.do)) || ['', ''])[1], gd = (g.k ? (CARGO_LAB[g.k] || '') : '') + (to ? ' TO ' + String(to.name).toUpperCase() : '');
+  const buy = slVerb(g.do) === 'collect' && T.o && g.k && strMarket(T.o) && marketSells(T.o).includes(g.k);   // (user Nov 21 15:54: "To get medicine you need to buy it" - COLLECT where it's sold is BUY)
+  const dz = give ? 'GIVE' : buy ? 'BUY' : (VERBS.find(q => q[0] === slVerb(g.do)) || ['', ''])[1], gd = (g.k ? (CARGO_LAB[g.k] || '') : '') + (to ? ' TO ' + String(to.name).toUpperCase() : '');
   return { dest: T.name, what: (g.do === 'go' ? dz : dz + (gd ? ' ' + gd : '')).trim(), T };   // (HUNT FISH, COLLECT MEDICINE...)
 }
 // a line's words with their colours: the places', vehicles' and goods' names, and 'N DAY(S)'
@@ -81559,12 +81795,14 @@ window.addEventListener('keydown', ev => {
 // is read, the pair flies up from the middle of the screen (OBJFLY)
 const OBJFLY = { t: -9 };
 function drawStoryObj() {
-  const W = slObjWords(story.obj); if (!W || slSayUp()) return;
+  if (slSayUp()) return;
+  const W = slObjWords(story.obj); if (!W) { drawGoalWatch(hudTop() + 14); return; }   // (the countdown always on - under the objective, or alone at the top)
   const y = hudTop() + 14, cx = Math.round(uvw / 2), k = clamp((time - OBJFLY.t) / 0.7, 0, 1), e = 1 - Math.pow(1 - k, 3);
   const yy = Math.round(ubh / 2 + (y - ubh / 2) * e), sc = 3 - Math.round(e);
   const dest = trText(W.dest), what = trText(W.what);
   drawTextC(ug, dest, cx, yy, SL_COL.place, sc, 'center', '#04070f');
   drawTextC(ug, what, cx, yy + 7 * sc + 4, '#ffffff', 2, 'center', '#04070f');
+  if (k >= 1) drawGoalWatch(yy + 7 * sc + 4 + 20);   // (user Nov 21 15:56: "a permanent display of 'Your grandfather medicine will run out in X days'")
   // the way: left or right of where the camera looks, or here
   if (k < 1 || W.T.x == null) return;
   const X = storyToUI()(W.T.x, 0).X, dx = X < 0 ? -1 : X > uvw ? 1 : 0;   // (off the screen: the way to it)
@@ -82272,7 +82510,6 @@ function stDays(c) { const N = stNeeds(c); if (!N) return null; if (stGone(c.id)
 worldLoad(() => { for (const c of OWNERS) if (c.needs) { delete c.needs.grace; if (!NEED_OUT.some(q => q[0] === c.needs.out)) c.needs.out = 'death'; } });
 // the days that matter at a place: the soonest of those who live there (null: nobody there needs anything)
 function stDaysAt(o) { let d = null; for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id)) { const x = stDays(c); if (d == null || x < d) d = x; } return d; }
-const stDaysText = d => { const n = Math.max(0, Math.ceil(d - 1e-6)); return n + (n === 1 ? ' DAY' : ' DAYS'); };
 // the clock: game hours since day 1
 const stHour = () => ((W.day || 1) - 1) * 24 + (env.time || 0);
 function stockStep() {
@@ -82300,7 +82537,7 @@ function stockStep() {
    needs it: it makes something made from it (into its stock), or someone who lives there needs it (to them - what they carry: stTo / stHand).
    Stopped by it with that good (carried, or in your vehicle by it), it wears an arrow (storyTargets 'd:<id>'); A hands it all over (stDeliver) -
    paid its price for each (DELIVER), or for nothing when it's for your own family (GIVE * TO *). Whoever needed it says how long it lasts them now
-   (THANKS - STORY > WANTS' HANDED IN rows: slHanded). A market takes goods through its own sheet (SELL - marketSell),
+   (THANKS - slHanded, STORY > GOALS). A market takes goods through its own sheet (SELL - marketSell),
    into its stock too. ---- */
 // (user Nov 20 01:03: "if you get paid for deliveries, the other character should get paid too. It should be the same system") who: the one
 // delivering - the player ('player') or a character's id; paid: only what's work for them (not a need of their own family's - that's given)
@@ -82334,8 +82571,6 @@ function stDeliver(p, id) {
   for (const k of ks) slObjEv('deliver', o.id, k);
 }
 ACTS.storyDeliver = (p, id) => stDeliver(p, id);
-// the countdown at the top: the place whose character's life hangs on what it uses, the soonest first (purple, beside the day)
-function stWatch() { let best = null, bd = 1e9; for (const c of stNeedy()) { if (stGone(c.id)) continue; const d = stDays(c); if (d < bd) { bd = d; best = c; } } return best ? { c: best, d: bd } : null; }
 // (tools)
 window.__stock = { of: id => { const o = strsUsed().find(q => q.id === id); return o ? { goods: stGoods(o), days: stDaysAt(o), u: STOCK.u[id] || null } : null; }, char: id => { const c = stChar(id); return c ? { days: stDays(c), gone: stGone(id) } : null; }, state: STOCK };
 // ---- the editor: a structure's MAKES (WORLD EDITOR > OBJECTS, under its cargo - 50-zz-struct.js)
@@ -82351,265 +82586,6 @@ function stockBox(el, css, o, save) {
     ...(o.makes ? [num(M.per, v => { o.makes.per = v; }, 'How many a day'), lab('A DAY', 'How many a day')] : []));
   return c;
 }
-
-//@src 50-zzzzz-story-wants.js:1
-/* ================================================================
-   STORY > WANTS (user Nov 21 15:16-15:17: "the way you're building the sentences and when they come up is a bit of a black box for me ... the
-   ability to understand how the sentences were built and the ability to edit them is pretty important. So if you can turn that into a system that I
-   can see ... it would also allow us to see where the issues are in the system. And how consistent everything is").
-   Everything a character says is a row of WANTS - the game has no sentence of its own. A row:
-   - ABOUT: what it's about - the good it names: their NEEDS (a character's), SELLS (each good the market they work at sells), MAKES FROM (each
-     ingredient of what their workplace makes), HANDED IN (a good just handed to them - said with the hand-over: stDeliver, 50-zzzzz-story-stock.js).
-   - AT: where it's said - their HOME or their WORK.
-   - PLAN: the steps it's about - NONE; GET IT (to get the good to them: famSteps, the planner every character uses - 50-zzzzz-story-family.js);
-     EARN (making its PRICE: your WORK's ROUTINE - its HUNT and SELL - as any worker's; no WORK: the quickest way you have, famEarn).
-   - SETS OBJECTIVE: the plan's first step is your objective (only your FAMILY's - slHousehold), followed as things change (slObjFollow).
-   - WHEN: conditions, all true - a term, a comparison, a number or another term (WANT_TERMS: DAYS LEFT <= WARN AT, YOUR COINS < PRICE, STEP = HUNT).
-   - SAYS: the sentence; {TOKEN}s filled from the state (WANT_TOKENS).
-   The rows' order is the order they're said on one screen (after the speaker's days left). Kept in bd_wants (the whole list; none saved: WANTS_DEF).
-   Seen: STORY > WANTS - each row's NOW, at the OBJECTIVES moment: every condition with its values, the sentence and the objective it gives
-   (wantNow); STORY > OBJECTIVES names the row each line came from.
-   ================================================================ */
-const WANT_ABOUT = [['need', 'NEEDS', 'Their NEEDS good'], ['sells', 'SELLS', 'Each good their workplace\'s market sells'], ['makes', 'MAKES FROM', 'Each ingredient of what their workplace MAKES'], ['handed', 'HANDED IN', 'A good just handed to them']];
-const WANT_AT = [['home', 'HOME', 'Said at their HOME'], ['work', 'WORK', 'Said at their WORK']];
-const WANT_PLANS = [['none', 'NONE', 'No steps'], ['get', 'GET IT', 'Steps to get the good to them (buy; short of coins: earn first)'], ['earn', 'EARN', 'Steps to make its PRICE: your WORK\'s ROUTINE']];
-const WANT_OPS = [['eq', '='], ['ne', '≠'], ['lt', '<'], ['le', '≤'], ['gt', '>'], ['ge', '≥']];
-const WANT_STEPS = ['COLLECT', 'HUNT', 'SELL', 'DELIVER', 'GO TO', 'NONE'];
-const wantStepWord = J => !J ? 'NONE' : ({ collect: 'COLLECT', hunt: 'HUNT', sell: 'SELL', deliver: 'DELIVER', go: 'GO TO' })[J.do] || String(J.do).toUpperCase();
-// the terms (id, NAME, tooltip, words or null - a number, what it is in a row's context X)
-const WANT_TERMS = [
-  ['days', 'DAYS LEFT', 'Speaker\'s days left of their NEEDS; -1 none', null, X => { const N = stNeeds(X.c); return N && N.k === X.k ? stDays(X.c) : -1; }],
-  ['warn', 'WARN AT', 'STORY > PRIORITIES > WARN AT', null, () => STORY_CFG.warnD],
-  ['out', 'ON EMPTY', 'Their NEEDS\' ON EMPTY', ['DEATH', 'NONE'], X => { const N = stNeeds(X.c); return N ? String(N.out || 'death').toUpperCase() : 'NONE'; }],
-  ['fam', 'FAMILY', '1: the speaker is your FAMILY', null, X => slHousehold(X.c) ? 1 : 0],
-  ['carry', 'YOU CARRY', 'Units of the good you and your vehicles carry', null, X => slCarry(X.k)],
-  ['coins', 'YOUR COINS', 'Your coins', null, () => story.coins || 0],
-  ['price', 'PRICE', 'The good\'s buy price', null, X => cargoBuyPrice(X.k)],
-  ['stock', 'STOCK', 'The place\'s units of the good', null, X => X.o ? stN(X.o, X.k) : 0],
-  ['needed', 'NEEDED', 'Units of the good its MAKES needs (MAKES FROM)', null, X => X.need || 0],
-  ['step', 'STEP', 'The PLAN\'s first step', WANT_STEPS, X => wantStepWord(wantPlan(X)[0])],
-  ['sold', 'SOLD AT', 'Markets that sell the good', null, X => strsUsed().filter(o => strMarket(o) && marketSells(o).includes(X.k)).length],
-  ['instock', 'IN STOCK AT', 'Markets that sell the good and have it', null, X => strsUsed().filter(o => strMarket(o) && marketSells(o).includes(X.k) && stN(o, X.k) > 0).length],
-  ['work', 'YOUR WORK', '1: you have a WORK', null, () => workOf(PLAYER_C) ? 1 : 0],
-  ['ship', 'NEXT SHIPMENT', 'Days to the place\'s next shipment of the good; -1 none', null, X => { const n = X.o ? folkNext(X.o, X.k) : null; return n == null ? -1 : n; }],
-];
-const wantTerm = id => WANT_TERMS.find(t => t[0] === id) || null;
-const wantDays = d => { const n = Math.max(0, Math.floor(d + 1e-6)); return n + (n === 1 ? ' DAY' : ' DAYS'); };   // (whole days, down - one rule for every number of days said)
-const wantGood = k => String(CARGO_LAB[k] || k || '').toUpperCase();
-const wantPlace = id => { const o = id != null ? slStr(id) : null; return o ? slPlaceName(o) : ''; };
-// the tokens a sentence can have
-const WANT_TOKENS = [
-  ['GOOD', 'The good', X => wantGood(X.k)],
-  ['DAYS LEFT', 'Speaker\'s days left, in days', X => wantDays(Math.max(0, wantVal(X, 'days')))],
-  ['PRICE', 'The good\'s buy price', X => String(cargoBuyPrice(X.k))],
-  ['PLACE', 'The first step\'s place', X => { const J = wantPlan(X)[0]; return J && J.do !== 'hunt' ? wantPlace(J.at) : ''; }],
-  ['VEHICLE', 'The plan\'s vehicle', X => { const J = wantPlan(X).find(q => q.sv); return J ? slVehName(J.sv) : ''; }],
-  ['CATCH', 'What the plan hunts or sells', X => { const J = wantPlan(X).find(q => q.do === 'hunt' || q.do === 'sell'); return J ? wantGood(J.k) : ''; }],
-  ['MARKET', 'Where the plan sells', X => { const J = wantPlan(X).find(q => q.do === 'sell'); return J ? wantPlace(J.at) : ''; }],
-  ['MAKES', 'What the place makes', X => { const M = X.o && stMakes(X.o); return M ? wantGood(M.k) : ''; }],
-  ['NEXT SHIPMENT', 'Days to the next shipment, in days', X => wantDays(Math.max(0, wantVal(X, 'ship')))],
-  ['WORK', 'Your WORK place', X => { const W0 = workOf(PLAYER_C); return W0 ? slPlaceName(W0) : ''; }],
-];
-// ---- the rows the game starts with (each the sentence the game said before STORY > WANTS)
-const wNeedFam = [['fam', 'eq', 1], ['days', 'le', 't:warn']];
-const WANTS_DEF = [
-  { id: 'need', name: 'NEED', about: 'need', at: 'home', plan: 'get', obj: 1, when: [['out', 'eq', 'DEATH'], ['days', 'le', 't:warn']], says: 'I NEED {GOOD} OR I WILL DIE IN {DAYS LEFT}.' },
-  { id: 'cost', name: 'COST', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['carry', 'eq', 0], ['coins', 'lt', 't:price']], says: 'YOU NEED {PRICE} COINS TO BUY {GOOD}.' },
-  { id: 'howCollect', name: 'HOW - COLLECT', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'COLLECT']], says: 'COLLECT IT AT {PLACE} FOR {PRICE} COINS.' },
-  { id: 'howHunt', name: 'HOW - HUNT', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'HUNT']], says: 'HUNT {CATCH} IN YOUR {VEHICLE} AND SELL THE CATCH AT {MARKET}.' },
-  { id: 'howSell', name: 'HOW - SELL', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'SELL']], says: 'SELL YOUR {CATCH} AT {PLACE}.' },
-  { id: 'noSeller', name: 'NOBODY SELLS', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'NONE'], ['carry', 'eq', 0], ['sold', 'eq', 0]], says: 'NOBODY SELLS {GOOD}.' },
-  { id: 'noStock', name: 'NOBODY HAS LEFT', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'NONE'], ['carry', 'eq', 0], ['sold', 'ge', 1], ['instock', 'eq', 0]], says: 'NOBODY HAS {GOOD} LEFT.' },
-  { id: 'noEarn', name: 'NO WAY TO EARN', about: 'need', at: 'home', plan: 'get', obj: 0, when: [...wNeedFam, ['step', 'eq', 'NONE'], ['carry', 'eq', 0], ['instock', 'ge', 1]], says: 'YOU HAVE NO WAY TO EARN THE COINS.' },
-  { id: 'thanks', name: 'THANKS', about: 'handed', at: 'home', plan: 'none', obj: 0, when: [], says: 'THANK YOU. I HAVE {GOOD} FOR {DAYS LEFT}.' },
-  { id: 'earnJob', name: 'EARN - DO YOUR JOB', about: 'need', at: 'home', plan: 'earn', obj: 1, when: [['fam', 'eq', 1], ['days', 'gt', 't:warn'], ['carry', 'eq', 0], ['coins', 'lt', 't:price'], ['work', 'eq', 1], ['step', 'ne', 'SELL'], ['step', 'ne', 'NONE']], says: 'TO MAKE COINS, DO YOUR JOB: HUNT {CATCH} IN YOUR {VEHICLE} AND SELL THE CATCH AT {MARKET}.' },
-  { id: 'earnJobSell', name: 'EARN - SELL', about: 'need', at: 'home', plan: 'earn', obj: 1, when: [['fam', 'eq', 1], ['days', 'gt', 't:warn'], ['carry', 'eq', 0], ['coins', 'lt', 't:price'], ['work', 'eq', 1], ['step', 'eq', 'SELL']], says: 'TO MAKE COINS, DO YOUR JOB: SELL YOUR {CATCH} AT {PLACE}.' },
-  { id: 'earnHunt', name: 'EARN - NO JOB', about: 'need', at: 'home', plan: 'earn', obj: 1, when: [['fam', 'eq', 1], ['days', 'gt', 't:warn'], ['carry', 'eq', 0], ['coins', 'lt', 't:price'], ['work', 'eq', 0], ['step', 'ne', 'SELL'], ['step', 'ne', 'NONE']], says: 'TO MAKE COINS, HUNT {CATCH} IN YOUR {VEHICLE} AND SELL THE CATCH AT {MARKET}.' },
-  { id: 'earnSell', name: 'EARN - NO JOB, SELL', about: 'need', at: 'home', plan: 'earn', obj: 1, when: [['fam', 'eq', 1], ['days', 'gt', 't:warn'], ['carry', 'eq', 0], ['coins', 'lt', 't:price'], ['work', 'eq', 0], ['step', 'eq', 'SELL']], says: 'TO MAKE COINS, SELL YOUR {CATCH} AT {PLACE}.' },
-  { id: 'empty', name: 'EMPTY', about: 'sells', at: 'work', plan: 'none', obj: 0, when: [['stock', 'lt', 1], ['ship', 'eq', -1]], says: 'WE HAVE NO {GOOD} LEFT.' },
-  { id: 'emptyToday', name: 'EMPTY - SHIPMENT TODAY', about: 'sells', at: 'work', plan: 'none', obj: 0, when: [['stock', 'lt', 1], ['ship', 'eq', 0]], says: 'WE HAVE NO {GOOD} LEFT. NEXT SHIPMENT TODAY.' },
-  { id: 'emptyLater', name: 'EMPTY - SHIPMENT LATER', about: 'sells', at: 'work', plan: 'none', obj: 0, when: [['stock', 'lt', 1], ['ship', 'ge', 1]], says: 'WE HAVE NO {GOOD} LEFT. NEXT SHIPMENT IN {NEXT SHIPMENT}.' },
-  { id: 'missing', name: 'MISSING', about: 'makes', at: 'work', plan: 'none', obj: 0, when: [['stock', 'lt', 't:needed']], says: 'WE NEED {GOOD} TO MAKE {MAKES}.' },
-];
-let WANTS = JSON.parse(JSON.stringify(WANTS_DEF));
-const wantClean = R => R && typeof R === 'object' && typeof R.id === 'string' ? { id: R.id, name: String(R.name || R.id).toUpperCase(), about: WANT_ABOUT.some(q => q[0] === R.about) ? R.about : 'need', at: R.at === 'work' ? 'work' : 'home', plan: WANT_PLANS.some(q => q[0] === R.plan) ? R.plan : 'none', obj: R.obj ? 1 : 0, when: (Array.isArray(R.when) ? R.when : []).filter(q => Array.isArray(q) && wantTerm(q[0]) && WANT_OPS.some(o => o[0] === q[1])).map(q => [q[0], q[1], q[2]]), says: String(R.says || '') } : null;
-worldLoad(() => {
-  let L = null; try { L = JSON.parse(localStorage.getItem('bd_wants') || 'null'); } catch (e) { }
-  WANTS = Array.isArray(L) ? L.map(wantClean).filter(Boolean) : JSON.parse(JSON.stringify(WANTS_DEF));
-});
-function wantsSave() { try { localStorage.setItem('bd_wants', JSON.stringify(WANTS)); } catch (e) { } }
-// ---- reading a row in a context X = { R, c (the speaker), k (the good), o (the place it's said at), need (MAKES FROM's units), m (memo) }
-function wantVal(X, id) { if (id in X.m) return X.m[id]; const t = wantTerm(id); return (X.m[id] = t ? t[4](X) : 0); }
-const wantRhs = (X, v) => typeof v === 'string' && v.startsWith('t:') ? wantVal(X, v.slice(2)) : v;
-function wantTest(X, q) {
-  const a = wantVal(X, q[0]), b = wantRhs(X, q[2]), op = q[1];
-  if (typeof a === 'string' || typeof b === 'string') return op === 'eq' ? String(a) === String(b) : op === 'ne' ? String(a) !== String(b) : false;
-  const e = 1e-9; return op === 'eq' ? Math.abs(a - b) < e : op === 'ne' ? Math.abs(a - b) >= e : op === 'lt' ? a < b - e : op === 'le' ? a <= b + e : op === 'gt' ? a > b + e : a >= b - e;
-}
-// the row's plan: its steps as things are now ([] - none)
-function wantPlan(X) {
-  if (X.m.plan) return X.m.plan;
-  const R = X.R, c = X.c, k = X.k; let P = null;
-  if (R.plan === 'get') { const H = stHome(c); if (H) { const F0 = famShort(c), F = F0 && F0.k === k ? F0 : { m: c, k, n: 1, sd: wantVal(X, 'days'), H }, cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : H.x) : H.x; P = famSteps('player', F, story.coins || 0, slCarry(k), slCarry('fish'), x); } }
-  else if (R.plan === 'earn') P = wantEarnPlan(cargoBuyPrice(k));
-  return (X.m.plan = Array.isArray(P) ? P : []);
-}
-// EARN: making p coins - your WORK's ROUTINE as any worker's (its HUNT, and SELL the catch where it says), there from wherever you are; no WORK
-// or no HUNT in it: the quickest way you have (famEarn). Enough catch carried: sell it. [] - no way
-function wantEarnPlan(p) {
-  const cur = storyCur(), x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : 0) : (stHome(PLAYER_C) || { x: 0 }).x, E = famEarn('player', x); if (!E) return [];
-  const W0 = workOf(PLAYER_C), R = W0 ? folkList(workRt(W0)) : [], H = R.find(J => J.do === 'hunt'), k = (H && H.k) || 'fish';
-  const S = R.find(J => J.do === 'sell' && J.k === k), sellAt = S && slStr(S.at) ? S.at : E.M.id;
-  const c = story.coins || 0, f = slCarry(k), n = Math.max(1, Math.min(NETP.HOLD, Math.ceil((p - c) / Math.max(1e-6, cargoPrice(k)))));
-  const sell = { do: 'sell', k, at: sellAt }, hunt = { do: 'hunt', k, n, sv: E.v.sv, at: H ? H.at : E.a.id };
-  if (f >= n || f > 0 && c + cargoCoins(k, f) >= p) return [sell];
-  const there = !!cur && (cur.v ? cur.v.sv === E.v.sv : !!W0 && storyPlace(cur).includes(W0));
-  return W0 && H && !there && !f ? [{ do: 'go', k: '', at: W0.id }, hunt, sell] : [hunt, sell];
-}
-const wantSays = X => X.R.says.replace(/\{([A-Z ]+)\}/g, (m, t) => { const T = WANT_TOKENS.find(q => q[0] === t); return T ? T[2](X) : m; });
-// a row's contexts for a speaker: [{ c, k, o, need }] - the goods it's about, at the place it's said
-function wantCtxs(R, c, k0) {
-  const out = [], P = R.at === 'work' ? workOf(c) : stHome(c); if (!P || stGone(c.id)) return out;
-  if (R.about === 'need' || R.about === 'handed') { const N = stNeeds(c); if (N && (k0 == null || k0 === N.k)) out.push({ c, k: N.k, o: P }); }
-  else if (R.about === 'sells') { if (strMarket(P)) for (const k of marketSells(P)) out.push({ c, k, o: P }); }
-  else if (R.about === 'makes') { const M = stMakes(P); if (M) for (const q of (cargoKind(M.k) || {}).needs || []) if (cargoKind(q.k)) out.push({ c, k: q.k, o: P, need: q.n }); }
-  return out;
-}
-// one row read in one context: the want it makes, or null
-function wantMake(R, i, C) {
-  const X = Object.assign({ R, m: {} }, C); if (!R.when.every(q => wantTest(X, q))) return null;
-  const J = R.plan !== 'none' ? wantPlan(X)[0] : null, d = R.about === 'need' || R.about === 'handed' ? Math.max(0, stDays(C.c)) : 1e9, key = R.id + ':' + C.c.id + ':' + C.k + ':' + C.o.id;
-  const w = { id: key + ':' + (R.plan !== 'none' ? slStepKey(J) : ''), key, row: R.id, who: C.c.id, at: C.o.id, txt: wantSays(X), d: d + i * 1e-6, k: C.k, to: '', do: 'go' };
-  if (R.obj && J && slHousehold(C.c)) Object.assign(w, J.do === 'hunt' ? { to: 'k:' + J.sv, do: 'hunt', k: J.k, n: J.n } : { to: 's:' + J.at, do: J.do, k: J.k || '', n: J.do === 'collect' ? 0 : J.n || 0 });
-  return w;
-}
-// what character c wants now: every row (but HANDED IN's) in every context it has
-function slWantOf(c) {
-  const out = []; if (!c) return out;
-  WANTS.forEach((R, i) => { if (R.about === 'handed') return; for (const C of wantCtxs(R, c)) { const w = wantMake(R, i, C); if (w) out.push(w); } });
-  return out;
-}
-// handed in: what whoever lives at o and needed good k says now (HANDED IN rows)
-function slHanded(o, k) {
-  const c = stNeedy().find(q => q.home === o.id && q.needs.k === k && !stGone(q.id)); if (!c) return [];
-  const out = []; WANTS.forEach((R, i) => { if (R.about !== 'handed') return; for (const C of wantCtxs(R, c, k)) { const w = wantMake(R, i, C); if (w) out.push(w); } });
-  return out;
-}
-// ---- NOW: a row at the OBJECTIVES moment - for each speaker and good: every condition with its values, the sentence, the objective
-function wantNow(R) {
-  if (!BENCH.m || !charOf(BENCH.m.who)) BENCH.m = benchStart('player');
-  return benchOn(BENCH.m, () => {
-    benchSay(() => { const o = strById(BENCH.m.at); if (o && BENCH.m.who === 'player') slineArrive(o); }); storyObjStep();   // (as you'd stand there: arrived, read)
-    const i = WANTS.indexOf(R), out = [];
-    for (const c of OWNERS) for (const C of wantCtxs(R, c)) {
-      const X = Object.assign({ R, m: {} }, C);
-      const conds = R.when.map(q => { const t = wantTerm(q[0]), a = wantVal(X, q[0]), b = wantRhs(X, q[2]), rt = typeof q[2] === 'string' && q[2].startsWith('t:') ? wantTerm(q[2].slice(2)) : null;
-        const f = v => typeof v === 'number' ? String(Math.round(v * 100) / 100) : String(v);
-        return { txt: t[1] + ' ' + f(a) + ' ' + (WANT_OPS.find(o => o[0] === q[1]) || ['', '?'])[1] + ' ' + (rt ? rt[1] + ' ' + f(b) : f(b)), ok: wantTest(X, q) }; });
-      const w = wantMake(R, i, C), J = R.plan !== 'none' ? wantPlan(X)[0] : null;
-      out.push({ who: String(C.c.name).toUpperCase(), at: slPlaceName(C.o), good: wantGood(C.k), conds, ok: !!w, says: wantSays(X), obj: w && w.to ? (o => o ? o.dest + ' - ' + o.what : '')(slObjWords(w)) : '', step: R.plan !== 'none' ? (J ? famStepTxt(J) : 'NONE') : '' });
-    }
-    return out;
-  });
-}
-// ---- the pane: the rows down the left, the picked one beside them (the designs' look - .dsn, DSN_CSS)
-const WTW = { id: null, del: null, ui: null };
-const wantRowName = id => { const R = WANTS.find(q => q.id === id); return R ? R.name : String(id || ''); };
-const wantDef = id => WANTS_DEF.find(R => R.id === id) || null;
-const wantSame = (a, b) => JSON.stringify(wantClean(a)) === JSON.stringify(wantClean(b));
-function wantsChanged() { wantsSave(); wantsSync(); if (typeof storyTabSync === 'function') storyTabSync(); }
-function wantsSync() {
-  const U = WTW.ui; if (!U || !U.list.parentNode || U.list.parentNode.hidden) return;
-  const sc = typeof styScroller === 'function' ? styScroller(U.body) : null, top = sc ? sc.scrollTop : 0;
-  try { wantsDraw(U); } finally { if (sc) sc.scrollTop = top; }
-}
-function wantsDraw(U) {
-  const { list, body, el, css } = U, T = NSKY.editor.TUNE;
-  if (!WANTS.some(R => R.id === WTW.id)) WTW.id = WANTS[0] ? WANTS[0].id : null;
-  const keep = list.scrollTop; list.textContent = '';
-  for (const R of WANTS) { const b = el('button', '', R.name); b.classList.toggle('on', R.id === WTW.id); b.title = R.says; b.onclick = () => { WTW.id = R.id; WTW.del = null; wantsSync(); }; list.appendChild(b); }
-  list.scrollTop = keep;
-  const bTop = body.scrollTop, bSame = body._id === WTW.id; body._id = WTW.id;
-  body.textContent = ''; const R = WANTS.find(q => q.id === WTW.id); if (!R) return;
-  const i = WANTS.indexOf(R), D = wantDef(R.id);
-  const grey = (b, no, why) => { if (no) b.title = why; return T.need(b, () => !no); };   // (greyed by the panels' one system, why in its tooltip)
-  // the bar: NAME, NEW, DELETE, the order, REVERT TO DEFAULT
-  const bar = el('div', 'cvbar'), nm = el('input'), bNew = el('button', '', 'NEW'), bDel = el('button', '', 'DELETE'), up = el('button', '', '↑'), dn = el('button', '', '↓'), rv = el('button', '', 'REVERT TO DEFAULT');
-  nm.type = 'text'; nm.style.cssText = css + ';width:200px'; nm.value = R.name; nm.title = 'Row name';
-  nm.onchange = () => { const v = nm.value.trim().toUpperCase(); if (v) { R.name = v; wantsChanged(); } else wantsSync(); };
-  bNew.title = 'New row, copied from this one';
-  bNew.onclick = () => { let n = 1; while (WANTS.some(q => q.id === 'u' + n)) n++; const C = Object.assign(JSON.parse(JSON.stringify(R)), { id: 'u' + n, name: R.name + ' COPY' }); WANTS.splice(i + 1, 0, C); WTW.id = C.id; wantsChanged(); };
-  bDel.title = 'Delete this row';
-  bDel.onclick = () => { if (WTW.del !== R.id) { WTW.del = R.id; bDel.textContent = 'DELETE IT?'; bDel.style.color = '#ff6a5a'; return; } WTW.del = null; WANTS.splice(i, 1); WTW.id = null; wantsChanged(); };
-  up.title = 'Said before the row above'; dn.title = 'Said after the row below';
-  const mv = d => { const j = i + d; if (j < 0 || j >= WANTS.length) return; [WANTS[i], WANTS[j]] = [WANTS[j], WANTS[i]]; wantsChanged(); };
-  up.onclick = () => mv(-1); dn.onclick = () => mv(1); grey(up, i === 0, 'First already'); grey(dn, i === WANTS.length - 1, 'Last already');
-  rv.title = 'The game\'s own row'; grey(rv, !D || wantSame(R, D), !D ? 'A row of yours: no default' : 'Same as the default');
-  rv.onclick = () => { if (!D) return; WANTS[i] = JSON.parse(JSON.stringify(D)); wantsChanged(); };
-  const lab = el('label', 'ocat'); lab.append(el('span', '', 'NAME'), nm); bar.append(lab, bNew, bDel, up, dn, rv); body.appendChild(bar);
-  const box = el('div', 'cats'); body.appendChild(box);
-  const sec = name => { const c = el('div', 'cat'); c.appendChild(el('h4', '', name)); box.appendChild(c); return c; };
-  const row = (c, name, tip, ...xs) => { const r = el('div', 'row'), l = el('label', '', name); l.title = tip; l.dataset.help = tip; r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;align-items:center'; r.append(l, ...xs); c.appendChild(r); return r; };
-  const pick = (opts, val, set, tip, w) => { const s = el('select'); s.style.cssText = css + ';width:' + (w || 130) + 'px'; s.title = tip; for (const [v, t] of opts) { const z = document.createElement('option'); z.value = String(v); z.textContent = t; s.appendChild(z); } s.value = String(val); s.onchange = () => set(s.value); return s; };
-  // WANT: what it's about, where, its plan
-  { const c = sec('WANT');
-    row(c, 'ABOUT', 'The good it names', pick(WANT_ABOUT.map(q => [q[0], q[1]]), R.about, v => { R.about = v; wantsChanged(); }, WANT_ABOUT.find(q => q[0] === R.about)[2]));
-    row(c, 'AT', 'Where it\'s said', pick(WANT_AT.map(q => [q[0], q[1]]), R.at, v => { R.at = v; wantsChanged(); }, WANT_AT.find(q => q[0] === R.at)[2]));
-    row(c, 'PLAN', 'Steps it\'s about: STEP, PLACE, VEHICLE, CATCH, MARKET', pick(WANT_PLANS.map(q => [q[0], q[1]]), R.plan, v => { R.plan = v; if (v === 'none') R.obj = 0; wantsChanged(); }, WANT_PLANS.find(q => q[0] === R.plan)[2]));
-    { const t = T.toggle(R.obj ? 1 : 0); t.title = 'The PLAN\'s first step is your objective (your FAMILY\'s only)'; t.addEventListener('input', () => { R.obj = +t.value ? 1 : 0; wantsChanged(); });
-      grey(t, R.plan === 'none', 'Needs a PLAN');
-      row(c, 'SETS OBJECTIVE', 'The PLAN\'s first step is your objective (your FAMILY\'s only)', t); } }
-  // WHEN: the conditions
-  { const c = sec('WHEN');
-    if (!R.when.length) row(c, 'ALWAYS', 'No conditions');
-    R.when.forEach((q, j) => {
-      const t = wantTerm(q[0]), words = t[3];
-      const tS = pick(WANT_TERMS.map(z => [z[0], z[1]]), q[0], v => { const z = wantTerm(v); R.when[j] = [v, z[3] ? 'eq' : q[1], z[3] ? z[3][0] : 0]; wantsChanged(); }, t[2], 112);
-      const ops = words ? WANT_OPS.filter(o => o[0] === 'eq' || o[0] === 'ne') : WANT_OPS, oS = pick(ops, q[1], v => { q[1] = v; wantsChanged(); }, 'Comparison', 44);
-      const xs = [tS, oS];
-      if (words) xs.push(pick(words.map(w => [w, w]), q[2], v => { q[2] = v; wantsChanged(); }, 'Value', 100));
-      else {
-        const isT = typeof q[2] === 'string' && q[2].startsWith('t:'), vS = pick([['n', 'NUMBER'], ...WANT_TERMS.filter(z => !z[3] && z[0] !== q[0]).map(z => ['t:' + z[0], z[1]])], isT ? q[2] : 'n', v => { q[2] = v === 'n' ? 0 : v; wantsChanged(); }, 'A number or another term', 104);
-        const num = el('input'); num.type = 'number'; num.step = '0.5'; num.style.cssText = css + ';width:48px'; num.value = isT ? '' : String(+q[2] || 0); num.title = 'Number';
-        grey(num, isT, 'A term is picked');
-        num.onchange = () => { q[2] = +num.value || 0; wantsChanged(); };
-        xs.push(vS, num);
-      }
-      const x = el('button', '', 'X'); x.title = 'Remove this condition'; x.onclick = () => { R.when.splice(j, 1); wantsChanged(); }; xs.push(x);
-      const r = row(c, String(j + 1), t[2], ...xs), l = r.firstChild; l.style.cssText = 'min-width:14px;width:auto;flex:0 0 auto';   // (a condition's number, not a property's name: no name column)
-    });
-    const add = el('button', '', '+ CONDITION'); add.title = 'Add a condition'; add.onclick = () => { R.when.push(['days', 'le', 't:warn']); wantsChanged(); }; c.appendChild(add); }
-  // SAYS: the sentence and its tokens
-  { const c = sec('SAYS'), ta = el('textarea'); ta.rows = 2; ta.style.cssText = css + ';width:100%;max-width:420px;box-sizing:border-box;text-transform:uppercase'; ta.value = R.says; ta.title = 'Sentence; {TOKEN}s filled from the state';
-    ta.onchange = () => { R.says = ta.value.toUpperCase().replace(/\s+/g, ' ').trim(); wantsChanged(); };
-    c.appendChild(ta);
-    const r = el('div', 'row'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
-    for (const [t, tip] of WANT_TOKENS) { const b = el('button', '', '{' + t + '}'); b.title = tip; b.onclick = () => { const p = ta.selectionStart ?? ta.value.length; ta.value = ta.value.slice(0, p) + '{' + t + '}' + ta.value.slice(ta.selectionEnd ?? p); ta.onchange(); }; r.appendChild(b); }
-    c.appendChild(r); }
-  // NOW: at the OBJECTIVES moment
-  { const c = sec('NOW'); let L = null, err = null;
-    try { L = wantNow(R); } catch (e) { err = String(e && e.message || e); }
-    const line = (t, col, pad) => { const d = el('div', ''); d.textContent = t; d.style.cssText = 'font-size:11px;line-height:1.5;white-space:pre-wrap;color:' + (col || '#d8dce8') + (pad ? ';padding-left:' + pad + 'px' : ''); c.appendChild(d); };
-    if (err) line('ERROR: ' + err, '#ff6a5a');
-    else if (!L.length) line('NOBODY HAS THIS: ' + (R.about === 'need' || R.about === 'handed' ? 'NO NEEDS' : R.about === 'sells' ? 'NO MARKET' : 'NO MAKES') + ' AT THEIR ' + (R.at === 'work' ? 'WORK' : 'HOME'), '#7a8294');
-    for (const W of L || []) {
-      line(W.who + ' AT ' + W.at + ' - ' + W.good + (R.about === 'handed' ? ' (WHEN HANDED IN)' : ''), W.ok ? '#7fe08a' : '#9aa3b8');
-      for (const q of W.conds) line((q.ok ? '✓ ' : '✗ ') + q.txt, q.ok ? '#7fe08a' : '#ff6a5a', 12);
-      if (W.step) line('STEP: ' + W.step, '#9aa3b8', 12);
-      line((W.ok ? 'SAYS: ' : 'WOULD SAY: ') + W.says, W.ok ? '#ffffff' : '#7a8294', 12);
-      if (W.obj) line('OBJECTIVE: ' + W.obj, '#ffb02e', 12);
-    }
-    line('MOMENT: STORY > OBJECTIVES', '#7a8294'); }
-  body.scrollTop = bSame ? bTop : 0;
-}
-NSKY.editor.TUNE.pane('WANTS', (pane, el) => {
-  if (typeof dsnCss === 'function') dsnCss();
-  pane.className = 'dsn';
-  const list = el('div', 'dlist'), body = el('div', 'dbody'); pane.append(list, body);
-  WTW.ui = { list, body, el, css: 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:220px' };
-  new MutationObserver(() => { if (!pane.hidden) wantsSync(); }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
-});
-window.__wants = { rows: () => WANTS, now: id => { const R = WANTS.find(q => q.id === id); return R ? wantNow(R) : null; } };
 
 //@src 50-zzzzz-story-work.js:1
 /* ================================================================
