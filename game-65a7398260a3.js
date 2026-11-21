@@ -13084,8 +13084,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1270;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 14:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1271;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 15:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81328,7 +81328,12 @@ window.__folk = { state: FOLK, plan: id => { const c = OWNERS.find(q => q.id ===
      for the player, like ... when the game starts ... They should all appear at the same time, and they stay on the screen until you press A")
      Arriving: every fresh want there and at what it's joined to, all on the screen at once, each under its speaker's name, held till A; the
      objective the most pressing one that sets one (slineArrive). After they're read the place is checked again for anything new.
-   - Kept (the story's table - STORY_ROW, saved and sent): story.obj { to, do, k, line } - the objective; story.said { id: times };
+   - (user Nov 21 13:58: "if you have 15 coins, your grandfather still says 'You need 10 coins to buy medicine.' Should it not say to go to the
+     market to buy medicine?") A want's objective FOLLOWS the state: while it's yours, each step it's the want's first step as things are now
+     (slObjFollow - your coins, what you carry); a need's sentences are keyed by that step (w.key + the step - slStepKey), so a new step is
+     new to say, all of them together, and an old one is never said again.
+   - Kept (the story's table - STORY_ROW, saved and sent): story.obj { to, do, k, line, want } - the objective (want: the want it follows);
+     story.said { id: times };
      story.say { id, txt, who, n, L: [{ id, txt, who }] } - what's on screen, as it was made when it was said (L: every sentence of it; id /
      txt / who: its first).
    - Drawn (this screen's): the black story screen - the text in the middle, its keywords in their colours (a destination orange,
@@ -81386,20 +81391,21 @@ function slWantOf(c) {
     if (warn || F) {
       const d = stDays(c), n = Math.max(0, Math.ceil(d - 1e-6)), gd = String(CARGO_LAB[N.k] || N.k).toUpperCase();
       // (user Nov 20 14:10: "I need medicine or I will die in 5 days") the sentence by what ON EMPTY does (NEED_OUT - DEATH the only one)
-      const w = { id: 'w:need:' + c.id + ':' + N.k, who: c.id, txt: 'I NEED ' + gd + ' OR I WILL DIE IN ' + n + (n === 1 ? ' DAY.' : ' DAYS.'), d, k: N.k, to: '', do: 'go', quiet: !warn };
+      const key = 'w:need:' + c.id + ':' + N.k, w = { id: key, key, who: c.id, txt: 'I NEED ' + gd + ' OR I WILL DIE IN ' + n + (n === 1 ? ' DAY.' : ' DAYS.'), d, k: N.k, to: '', do: 'go', quiet: !warn };
       out.push(w);
       if (F) {
         const cur = storyCur(), hx = (home || { x: 0 }).x, x = cur ? (cur.v ? cur.v.x : cur.o ? cur.o.x : hx) : hx;
         const S0 = (famSteps('player', F, story.coins, slCarry(N.k), slCarry('fish'), x) || [])[0];
         if (S0) Object.assign(w, S0.do === 'hunt' ? { to: 'k:' + S0.sv, do: 'hunt', k: S0.k, n: S0.n } : { to: 's:' + S0.at, do: S0.do, k: S0.k, n: S0.do === 'collect' ? 0 : S0.n });
+        const sk = slStepKey(S0); w.id = key + ':' + sk;   // (what they say is about this step: a new step, new to say - with what goes with it)
         // (user 14:10: "below, we should see the line about going to fish because they know what your profession is and you have access to the boat")
         // what they'd tell you to do: the first step (famSteps), or why there's none
         // (user Nov 20 23:26: "The two opening lines are missing the part of saying 'You need x coins to buy medicine'. Otherwise you dont understand why you
         // have to fish") short of its price - none carried, too few coins: why the first step is earning, said before it
         const pr = cargoBuyPrice(N.k);
-        if (!slCarry(N.k) && (story.coins || 0) < pr) out.push({ id: 'w:cost:' + c.id + ':' + N.k, who: c.id, txt: 'YOU NEED ' + pr + ' COINS TO BUY ' + gd + '.', d: d + 5e-7, k: N.k, to: '', do: 'go', quiet: !warn });
+        if (!slCarry(N.k) && (story.coins || 0) < pr) out.push({ id: 'w:cost:' + c.id + ':' + N.k + ':' + sk, who: c.id, txt: 'YOU NEED ' + pr + ' COINS TO BUY ' + gd + '.', d: d + 5e-7, k: N.k, to: '', do: 'go', quiet: !warn });
         const h = slHow(S0, N.k);
-        if (h) out.push({ id: 'w:how:' + c.id + ':' + h, who: c.id, txt: h, d: d + 1e-6, k: N.k, to: '', do: 'go', quiet: !warn });
+        if (h) out.push({ id: 'w:how:' + c.id + ':' + N.k + ':' + sk, who: c.id, txt: h, d: d + 1e-6, k: N.k, to: '', do: 'go', quiet: !warn });
       }
     }
   }
@@ -81410,6 +81416,8 @@ function slWantOf(c) {
   }
   return out;
 }
+// a step as a key: what's done, where, with what ('none': no way to get it)
+const slStepKey = S0 => !S0 ? 'none' : [S0.do, S0.at || S0.sv || '', S0.k || ''].join('.');
 // (user Nov 20 12:40: "What do I see when I return to the grandfather with the medicine?") a need just met at place o with good k: the first who
 // lives there and needs it says how long it lasts them now; null - nobody there needs it
 function slThanks(o, k) {
@@ -81439,21 +81447,23 @@ function slWantsAt(o) {
 function slAutoObj() {
   if (story.obj) return; let best = null;
   for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id)) for (const w of slWantOf(c)) if (w.to && (!best || w.d < best.d)) best = w;
-  if (best) { story.obj = { to: best.to, do: best.do, k: best.k, n: best.n || 0, line: best.id }; OBJFLY.t = -9; }
+  if (best) { story.obj = slObjOf(best); OBJFLY.t = -9; }
 }
+// a want's objective: its step, and the want it follows (slObjFollow)
+const slObjOf = w => ({ to: w.to, do: w.do, k: w.k || '', n: w.n || 0, line: w.id, want: w.key || null });
 // (the simulation) wants said together: on screen, each counted, the objective the most pressing one that sets one
 function slineSay(l, o) { slineSayAll([l], o); }
 function slineSayAll(W, o) {
   if (!W.length) return;
   for (const l of W) story.said = Object.assign({}, story.said, { [l.id]: ((story.said || {})[l.id] || 0) + 1 });
   const g = W.filter(l => l.to).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9))[0];
-  if (g) story.obj = { to: g.to, do: g.do, k: g.k || '', n: g.n || 0, line: g.id };
+  if (g) story.obj = slObjOf(g);
   const L = W.map(l => ({ id: l.id, txt: l.txt, who: l.who }));
   story.say = { id: L[0].id, txt: L[0].txt, who: L[0].who, L, at: o.id, n: ((story.say && story.say.n) || 0) + 1, open: 1 };
 }
-// a place's line, if it has one to say (fresh: only one it hasn't said, or a new objective)
+// a place's lines (TALK, at an objective's destination): all it has to say, at once, as arriving (fresh: only those it hasn't said, or a new objective)
 function slinePlay(o, fresh) { if (!STORY || !o || (story.say && story.say.open) || edTesting()) return false;   // (the editor's PLAY, a test: no lines - 50-zzz-world-ed.js edTesting)
- const l = slineFor(o, fresh); if (!l) return false; slineSay(l, o); return true; }
+ const W = slWantsAt(o).filter(l => !fresh || slineFresh(l)); if (!W.length) return false; slineSayAll(W, o); return true; }
 // arriving somewhere: every fresh want of the place and of the ones it connects to, at once (but: those just read - not again straight away)
 function slineArrive(o, but) {
   if (!o || !STORY || (story.say && story.say.open) || edTesting()) return;
@@ -81483,9 +81493,17 @@ function slHere(to) {
 function storyObjStep() {
   if (STORY && !story.obj && !(story.say && story.say.open) && !story.wake) slAutoObj();
   const g = story.obj; if (!STORY || !g || (story.say && story.say.open) || story.wake) return;
-  if (g.do === 'collect' || g.do === 'hunt') { if (g.k && slCarry(g.k) >= Math.max(1, g.n || 0) && (g.to[0] !== 'k' || storyVehs().some(v => storyYours(v) && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) slObjDone(); return; }
-  if (!slHere(g.to)) return;
-  if (g.do === 'go') slObjDone();
+  if (g.do === 'collect' || g.do === 'hunt') { if (g.k && slCarry(g.k) >= Math.max(1, g.n || 0) && (g.to[0] !== 'k' || storyVehs().some(v => storyYours(v) && v.sv === g.to.slice(2) && cargoN(v, g.k) > 0))) { slObjDone(); return; } }
+  else if (g.do === 'go' && slHere(g.to)) { slObjDone(); return; }
+  slObjFollow(g);
+}
+// a want's objective, as things are now: its first step again (coins earned another way, a good bought, carried, handed in); the want gone
+// (met, or no way to it) - none, and the next is picked (slAutoObj). An objective of something else's (a job's - tk) is its own.
+function slObjFollow(g) {
+  const key = g.want || (/^w:need:[^:]+:[^:]+/.exec(g.line || '') || [])[0]; if (!key || g.tk) return;   // (an objective from before Nov 21: its line was the key)
+  let w = null; for (const c of OWNERS) if (slHousehold(c) && !stGone(c.id)) { w = slWantOf(c).find(q => q.key === key && q.to); if (w) break; }
+  if (!w) { story.obj = null; return; }
+  if (w.to !== g.to || w.do !== g.do || (w.k || '') !== (g.k || '') || (w.n || 0) !== (g.n || 0) || w.id !== g.line) { story.obj = slObjOf(w); OBJFLY.t = -9; }
 }
 
 // ---- the story screen (this screen's): the line in the middle on black, its keywords coloured; A: it fades, the destination and
