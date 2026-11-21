@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1282;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 17:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1283;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 18:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71300,7 +71300,11 @@ function sfxSiren() {
    world's own weather. The editor: WORLD EDITOR > WEATHER AREAS - each area a band in its colour, its name in a strip at the top (pick it
    there, drag it to move it), picked: a handle at each edge to stretch it; ADD AREA; a preset applied or saved from an area. (This file's
    name puts it before the other editor files: its strips and handles are pressed before a thing standing under them - window listeners run
-   in the order they were added.) ---- */
+   in the order they were added.)
+   (user Nov 21 17:09: "I should be able to see the weather areas and the atmosphere areas, even if I'm not in the menu to edit them. And when I
+   select one, it opens their tab") the bands and strips show whenever the GAME EDITOR is open, whatever its tab (fainter off WEATHER AREAS); a
+   press on a strip picks its area and opens WEATHER AREAS (wxaPickArea). A press in a band picks it only on WEATHER AREAS - elsewhere a band is
+   most of the world, and a press there is the other tabs'. ---- */
 const WXA_FW = 150;                                               // (a new area's EDGE BLEND, metres each side of an edge)
 const WXA_AREA0 = { sky: 0.2, fog: 0, rain: 0, sea: 0.18, wind: 0.15, fade: 30 };   // (a fair day, as a new game starts - freshWeather)
 const WXA_KEYS = [['sky', 'SKY', 0, 1, 0.01, 'Cloud cover'], ['fog', 'FOG', 0, 1, 0.01, 'Fog thickness'], ['rain', 'RAIN', 0, RAIN_MAX, 0.01, 'Rain - past 1 a thunderstorm'],
@@ -71384,7 +71388,15 @@ const wxaLimit = (A, side) => { let l = side > 0 ? WORLD_W : 0; for (const [s, t
 // ---- the editor (WORLD EDITOR > WEATHER AREAS)
 const WXE = { sel: null, drag: null, ui: {} };   // (sel: the picked area's id, 'base' for EVERYWHERE ELSE, null none)
 const wxaOpen = () => NSKY.editor.TUNE.world() && NSKY.editor.TUNE.page === 'WEATHER AREAS';
+const wxaShown = () => NSKY.editor.TUNE.open;   // (seen - and their strips picked - on any tab)
 const wxaSel = () => WXE.sel === 'base' ? WXA.base : WXA.areas.find(a => a.id === WXE.sel) || null;
+// an area picked (id, 'base' for EVERYWHERE ELSE): the one selection - what else was picked let go - and its tab open; the view shows its weather
+function wxaPickArea(id) {
+  const T = NSKY.editor.TUNE;
+  for (const k in WK) if (k !== 'wxarea') WK[k].clear();
+  WXE.sel = id; if (T.page !== 'WEATHER AREAS') T.show('WEATHER AREAS');
+  wxaSync(); wxaPreview(); wedSync();
+}
 function wxaChanged() { wxaSave(); wxaSync(); skyEdRefresh(); }   // (the sky held in the editor taken again from the view: the weather there now - 41-sky-new.js)
 // (the editor's view shows the picked area's weather as you set it: its world is held, so the sky takes the values at once)
 function wxaPreview() { const a = wxaSel(); if (!a || !NSKY.editor.TUNE.open) return; env.weather = a.sky; env.fog = a.fog; env.rain = a.rain; env.sea = a.sea; env.wind = a.wind; computeEnv(); if (NSKY.snap) NSKY.snap(); }
@@ -71419,12 +71431,13 @@ function wxaHit(ev) {
   if (Y >= G.t - 4 * G.q && Y <= G.t + G.h + 4 * G.q) { const a = wxaIn(X); if (a) return { k: 'strip', a }; }
   return { k: 'band', a: wxaIn(X) };
 }
-ED_PICKS.weather = ev => { if (!wxaOpen()) return null; const H = wxaHit(ev); return H.k === 'band' ? null : [0, 0]; };   // (its ends and its strip at the top: handles - the one pick, 18-zz-photo.js; a press in a band picks it and lets what stands there take the press too)
+ED_PICKS.weather = ev => { if (!wxaShown()) return null; const H = wxaHit(ev); return H.k === 'band' ? null : [0, 0]; };   // (its ends and its strip at the top: handles - the one pick, 18-zz-photo.js; a press in a band picks it and lets what stands there take the press too)
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaOpen() || onEdUI(ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaShown() || onEdUI(ev)) return;
   const H = wxaHit(ev), [X] = wxaPtr(ev);
+  if (H.k === 'band' && !wxaOpen()) return;                  // (off its tab a band is the other tabs' - only its strip and handles are its own)
   if (H.k !== 'band' && edPickLost('weather', ev)) return;   // (its ends and strip: only when nothing nearer is under the press - edPickOf; a band is picked always, below)
-  WXE.sel = H.a ? H.a.id : 'base'; wxaSync(); wxaPreview();
+  if (H.k === 'band') { WXE.sel = H.a ? H.a.id : 'base'; wxaSync(); wxaPreview(); } else wxaPickArea(H.a.id);
   if (H.k === 'edge') WXE.drag = { id: ev.pointerId, a: H.a, s: H.s, lim: wxaLimit(H.a, H.s) };
   else if (H.k === 'strip') WXE.drag = { id: ev.pointerId, a: H.a, off: X - H.a.x0, x0: H.a.x0, x1: H.a.x1 };
   else { edClaim('wxarea'); return; }                         // (a press in a band picks it - a thing standing there, pressed after, takes the press: things over weather, as the World Plan's)
@@ -71447,15 +71460,15 @@ const wxaRGB = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), p
 // dashed, its name in a strip at the top over everything; the picked one brighter, white edges, an orange handle with a white ring and
 // a white <-> at each edge, under its strip (the World Plan's handles - its dotAt)
 function wxaEdDraw() {
-  if (!wxaOpen()) return;
-  const G = WXA_STRIP(), q = G.q, dash = 10 * q, H = bh;
+  if (!wxaShown()) return;
+  const G = WXA_STRIP(), q = G.q, dash = 10 * q, H = bh, tab = wxaOpen();   // (off its tab: fainter, no EDGE BLEND lines)
   const vdash = (X, col, w) => { C.fillStyle = col; for (let y = 0; y < H; y += dash * 2) C.fillRect(X - (w >> 1), y, w, dash); };
   for (const a of WXA.areas) {
     const X0 = Math.round(PX(a.x0)), X1 = Math.round(PX(a.x1)); if (X1 < -20 || X0 > VWP + 20) continue;
     const pk = a.id === WXE.sel;
-    C.fillStyle = a.col; C.globalAlpha = pk ? 0.15 : 0.08; C.fillRect(X0, 0, X1 - X0, H); C.globalAlpha = 1;
+    C.fillStyle = a.col; C.globalAlpha = (pk ? 0.15 : 0.08) * (tab ? 1 : 0.5); C.fillRect(X0, 0, X1 - X0, H); C.globalAlpha = 1;
     for (const X of [X0, X1]) vdash(X, pk ? '#ffffff' : a.col, pk ? 2 * q : q);
-    const F = a.fw * UPM;                                       // (its EDGE BLEND, faint: how far in and out each edge blends)
+    const F = a.fw * UPM; if (!tab) continue;                   // (its EDGE BLEND, faint: how far in and out each edge blends)
     C.globalAlpha = 0.35; for (const x of [a.x0 - F, a.x0 + F, a.x1 - F, a.x1 + F]) { const X = Math.round(PX(x)); if (X > -5 && X < VWP + 5) C.fillRect(X, 0, Math.max(1, q >> 1), H); } C.globalAlpha = 1;
   }
   for (const a of WXA.areas) {                                  // the strips, over everything
@@ -71552,28 +71565,42 @@ NSKY.editor.TUNE.pane('WEATHER AREAS', (pane, el) => {
    visually versus just using the sliders"). Each layer the SKY EDITOR's sliders set (STRATOSPHERE, UPPER ATMOSPHERE, OUTER
    SPACE - metres over the sea; atmoSync, 50-land-space.js) is a line across the view while the editor is open, its name
    and height on it. Press near one and drag it up or down: the value goes through its own slider (the same value: the
-   slider moves, it's saved, the sky follows), each kept over the one below it. ---- */
-const ATMO_MARKS = [['strat', 'STRATOSPHERE', [120, 200, 255], /STRATOSPHERE/], ['upper', 'UPPER ATMOSPHERE', [190, 150, 255], /UPPER ATMOSPHERE/], ['space', 'OUTER SPACE', [255, 140, 200], /OUTER SPACE/]];
-const AMK = { drag: null };
+   slider moves, it's saved, the sky follows), each kept over the one below it.
+   (user Nov 21 17:09: "I should be able to see the weather areas and the atmosphere areas, even if I'm not in the menu to edit them. And when I
+   select one, it opens their tab") shown whenever the GAME EDITOR is open, whatever its tab; a press on one picks it (white) and opens its tab -
+   WORLD PROPERTIES > BACKGROUND > ALTITUDES, its slider in view (atmoPick; WK.atmo, 50-zzz-world-ed.js) - and drags it. ---- */
+const ATMO_MARKS = [['strat', 'STRATOSPHERE', [120, 200, 255]], ['upper', 'UPPER ATMOSPHERE', [190, 150, 255]], ['space', 'OUTER SPACE', [255, 140, 200]]];
+const AMK = { drag: null, sel: null };   // (sel: the picked layer's key)
+const atmoShown = () => NSKY.editor.TUNE.open;
 const atmoY = k => WATER_Y - (NSKY.P[k] || 0) * UPM;
+// a layer's row in the SKY EDITOR's ALTITUDES (its slider), or null before it's built
+// (by its key - TUNE.rows: its label on screen is ED_SHORT's, UPPER AIR / SPACE, so the old match by name missed two of the three)
+const atmoRow = k => { const R = NSKY.editor.TUNE.rows[k], inp = R && R.inp; return inp && inp.isConnected ? inp.closest('.row') || inp : null; };
+// a layer picked: the one selection (what else was picked let go), its tab open and its slider in view
+function atmoPick(k) {
+  const T = NSKY.editor.TUNE;
+  for (const id in WK) if (id !== 'atmo') WK[id].clear();
+  AMK.sel = k; if (T.page !== 'ATMOSPHERE') T.show('ATMOSPHERE');
+  const r = atmoRow(k); if (r) r.scrollIntoView({ block: 'nearest' });
+  wedSync();
+}
 // a layer's height set: through its slider when the editor has built it (its row, its saving, the sky's refresh), else straight
 function atmoSet(k, m) {
   const i = ATMO_MARKS.findIndex(a => a[0] === k), lo = i > 0 ? NSKY.P[ATMO_MARKS[i - 1][0]] + 10 : 50, hi = i < ATMO_MARKS.length - 1 ? NSKY.P[ATMO_MARKS[i + 1][0]] - 10 : 20000;
   const v = Math.round(clamp(m, lo, hi) / 10) * 10;
-  const row = [...document.querySelectorAll('#skyEd .row')].find(r => { const l = r.querySelector('label'), inp = r.querySelector('input[type=range]'); return l && inp && ATMO_MARKS[i][3].test(l.textContent) && +inp.max === 20000; });
-  const inp = row && row.querySelector('input[type=range]');
+  const R = NSKY.editor.TUNE.rows[k], inp = R && R.inp && R.inp.isConnected ? R.inp : null;
   if (inp) { inp.value = v; inp.dispatchEvent(new Event('input', { bubbles: true })); }
   else { NSKY.P[k] = v; NSKY.saveP(); }
   atmoSync();
 }
-ED_PICKS.atmo = ev => { if (!NSKY.editor.TUNE.world()) return null; const [, Y, r] = vehWorld(ev); let bd = r * 1.2, hit = false; for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; hit = true; } } return hit ? [1, bd] : null; };   // (the air's layers: lines - the one pick, 18-zz-photo.js)
+ED_PICKS.atmo = ev => { if (!atmoShown()) return null; const [, Y, r] = vehWorld(ev); let bd = r * 1.2, hit = false; for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; hit = true; } } return hit ? [1, bd] : null; };   // (the air's layers: lines - the one pick, 18-zz-photo.js)
 window.addEventListener('pointerdown', ev => {
-  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !NSKY.editor.TUNE.world() || onEdUI(ev) || edPickLost('atmo', ev)) return;
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !atmoShown() || onEdUI(ev) || edPickLost('atmo', ev)) return;
   const [, Y, r] = vehWorld(ev);
   let best = null, bd = r * 1.2;
   for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; best = k; } }
   if (!best) return;
-  AMK.drag = { id: ev.pointerId, k: best, dy: atmoY(best) - Y };
+  AMK.drag = { id: ev.pointerId, k: best, dy: atmoY(best) - Y }; atmoPick(best);
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('none');
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', ev => {
@@ -71584,13 +71611,13 @@ window.addEventListener('pointermove', ev => {
 const amkUp = ev => { if (AMK.drag && AMK.drag.id === ev.pointerId) { AMK.drag = null; ev.stopImmediatePropagation(); } };
 window.addEventListener('pointerup', amkUp, { capture: true });
 window.addEventListener('pointercancel', amkUp, { capture: true });
-// drawn over the world while the editor is open (from vehEdDraw, each view): the line across the view, dashed, its label
+// drawn over the world while the editor is open (from vehEdDraw, each view): the line across the view, dashed, its label; the picked one white
 function atmoMarksDraw() {
-  if (!NSKY.editor.TUNE.world()) return;
+  if (!atmoShown()) return;
   const q = Math.max(1, Math.round(2 * dpr / PIXW)), dash = 12 * q;
   for (const [k, lab, c] of ATMO_MARKS) {
     const Y = Math.round(PY(atmoY(k))); if (Y < -20 || Y > bh + 20) continue;
-    const on = AMK.drag && AMK.drag.k === k, w = on ? q + 1 : q;
+    const on = (AMK.drag && AMK.drag.k === k) || AMK.sel === k, w = on ? q + 1 : q;
     C.fillStyle = '#04070f'; for (let x = 0; x < VWP; x += dash * 2) C.fillRect(x, Y - w, dash, w * 2 + 1);
     C.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; for (let x = 0; x < VWP; x += dash * 2) C.fillRect(x, Y - (w >> 1), dash, w);
     drawText(C, lab + ' ' + Math.round(NSKY.P[k]) + ' M', 8 * q, Y - 9 * q, on ? [255, 255, 255] : c, q, 'left');
@@ -77322,6 +77349,12 @@ const WK = {
     clear() { if (WXE.sel != null) { WXE.sel = null; wxaSync(); } },
     del: () => wxaDelete(),
     el: () => WXE.ui.box,
+  },
+  atmo: {                                                 // (the air's layers - their lines, 50-zz-atmo-marks.js: picked, WORLD PROPERTIES > BACKGROUND > ALTITUDES)
+    tab: 'ATMOSPHERE',
+    items: () => AMK.sel ? [{ noun: (ATMO_MARKS.find(a => a[0] === AMK.sel) || [, 'LAYER'])[1], del: false }] : [],
+    clear() { AMK.sel = null; },
+    el: () => atmoRow(AMK.sel),
   },
   nature: {                                               // (the creature areas - fish, sharks, whales: OBJECTS > MISC, 50-zz-nature.js)
     tab: 'OBJECTS',
@@ -83920,8 +83953,9 @@ const edIssueOn = I => I.s != null ? SE.sel.length === 1 && SE.sel[0] === I.s : 
 function edIssuesSync() {
   const U = ISS.ui; if (!U) return;
   const T = NSKY.editor.TUNE; if (!T.open || !T.world()) return;
-  // its place: under the WORLD gear - under its sliders while they're open (topLayout's units to the page's)
-  { const L = topLayout(), k = innerHeight / ubh, y = ui.settings ? L.panel.y + SLIDERS.length * L.panel.rowH + 8 : L.gear[1] + 50, top = Math.round(y * k) + 'px', left = Math.round(L.gear[0] * k) + 'px';
+  // its place: under the WORLD gear and the weather areas' strip with its handles (shown on every tab - 50-zz-a-weather-areas.js); under the gear's
+  // sliders while they're open (topLayout's units and the view's pixels to the page's)
+  { const L = topLayout(), k = innerHeight / ubh, G = WXA_STRIP(), strip = (G.hy + G.hr) * PIXW / dpr + 6, y = Math.max(strip, (ui.settings ? L.panel.y + SLIDERS.length * L.panel.rowH + 8 : L.gear[1] + 50) * k), top = Math.round(y) + 'px', left = Math.round(L.gear[0] * k) + 'px';
     if (U.box.style.top !== top) U.box.style.top = top; if (U.box.style.left !== left) U.box.style.left = left; }
   const A = edIssues(), key = JSON.stringify(A.map(I => [I.t, I.why, I.s != null ? I.s : vehName(I.v), edIssueOn(I)]));
   if (key === ISS.key) { U.rows.forEach((r, i) => { if (A[i]) r._I = A[i]; }); return; }   // (the same list: each row's place kept fresh for its press)
@@ -83966,28 +84000,31 @@ function edIssuesSync() {
 //@src 50-zzzzzz-map-edit.js:1
 /* ---- THE MAP EDITS WHAT'S SEEN ZOOMED OUT: THE WEATHER AREAS AND THE AIR'S LAYERS (user Nov 21 16:33: "when I zoom out, I should be able to see the
    weather zones and edit them there in the zoomed out simplified map. Same with the stratosphere, atmosphere areas. Since we zoom out to see them
-   clearly"). In the GAME EDITOR the map (50-zzzzz-story-map.js) shows them as the view does, the same when and the same presses, drawn in the map's
-   own look:
-   - the air's layers (STRATOSPHERE, UPPER ATMOSPHERE, OUTER SPACE - the SKY EDITOR's sliders; on WORLD EDITOR, as atmoMarksDraw): a dashed line across
-     the map at its height, its name and metres at its right end; a press near one drags it up or down - through its slider (atmoSet, 50-zz-atmo-marks.js).
-   - the weather areas (on WEATHER AREAS, as wxaEdDraw): each a band the map's height in its colour, its name in a strip at the top; the picked one
-     white edged with a handle under its strip at each edge. A press on a strip picks the area and drags it along (let go over another: into the free
-     space nearest - wxaFit), on a handle stretches it to its neighbour (wxaLimit); a tap in a band where there's no place or vehicle picks it, between
-     the bands EVERYWHERE ELSE - the panel's SELECTED shows it (wxaSync), the sky the picked weather (wxaPreview). Each change saved and in UNDO.
+   clearly"; 17:09: "I should be able to see the weather areas and the atmosphere areas, even if I'm not in the menu to edit them. And when I select
+   one, it opens their tab"). In the GAME EDITOR the map (50-zzzzz-story-map.js) shows them as the view does - on any tab - with the same presses, drawn
+   in the map's own look:
+   - the air's layers (STRATOSPHERE, UPPER ATMOSPHERE, OUTER SPACE - the SKY EDITOR's sliders, as atmoMarksDraw): a dashed line across the map at its
+     height, its name and metres at its right end; a press near one picks it (white) and opens its tab (atmoPick) and drags it up or down - through
+     its slider (atmoSet, 50-zz-atmo-marks.js).
+   - the weather areas (as wxaEdDraw - fainter off WEATHER AREAS): each a band the map's height in its colour, its name in a strip at the top; the
+     picked one white edged with a handle under its strip at each edge. A press on a strip picks the area and opens WEATHER AREAS (wxaPickArea) and
+     drags it along (let go over another: into the free space nearest - wxaFit), on a handle stretches it to its neighbour (wxaLimit); on WEATHER
+     AREAS a tap in a band where there's no place or vehicle picks it, between the bands EVERYWHERE ELSE - the panel's SELECTED shows it (wxaSync), the
+     sky the picked weather (wxaPreview). Each change saved and in UNDO.
    Everything else on the map stays read only (user Nov 20 20:15). ---- */
 const SMED = { drag: null };
-const smedOn = () => !smapPlay() && PHOTO.on && !!PHOTO.ed && NSKY.editor.TUNE.world();
+const smedOn = () => !smapPlay() && PHOTO.on && !!PHOTO.ed && NSKY.editor.TUNE.open;
 const SMED_STRIP = { t: 40, h: 20 };                                  // (CSS px: the weather strip's top, under the map's head, and its height)
 const SMED_HY = () => SMED_STRIP.t + SMED_STRIP.h + 16, SMED_HR = 9;   // (the picked area's edge handles: their middle's y, their radius)
 // drawn on the map (drawStoryMap, inside its clip - under the places and vehicles): V = { g, X, Y, MW, mh, text }
 function smapEdDraw(V) {
   if (!smedOn()) return;
   const { g, X, MW, mh } = V;
-  if (wxaOpen()) {
+  { const tab = wxaOpen();
     for (const a of WXA.areas) {
       const x0 = X(a.x0), x1 = X(a.x1); if (x1 < -20 || x0 > MW + 20) continue;
       const pk = a.id === WXE.sel;
-      g.fillStyle = a.col; g.globalAlpha = pk ? 0.2 : 0.12; g.fillRect(x0, 0, x1 - x0, mh); g.globalAlpha = 1;
+      g.fillStyle = a.col; g.globalAlpha = (pk ? 0.2 : 0.12) * (tab ? 1 : 0.5); g.fillRect(x0, 0, x1 - x0, mh); g.globalAlpha = 1;
       g.save(); g.setLineDash([8, 7]); g.lineWidth = pk ? 2 : 1; g.strokeStyle = pk ? SMAP_C.sel : a.col;
       for (const x of [x0, x1]) { g.beginPath(); g.moveTo(Math.round(x) + 0.5, 0); g.lineTo(Math.round(x) + 0.5, mh); g.stroke(); }
       g.restore();
@@ -83996,7 +84033,7 @@ function smapEdDraw(V) {
   // the air's layers: a dashed line across, its name and height at the right end
   for (const [k, lab, c] of ATMO_MARKS) {
     const y = V.Y(atmoY(k)); if (y < -10 || y > mh + 10) continue;
-    const on = SMED.drag && SMED.drag.k === k, col = `rgb(${c[0]},${c[1]},${c[2]})`;
+    const on = (SMED.drag && SMED.drag.k === k) || AMK.sel === k, col = `rgb(${c[0]},${c[1]},${c[2]})`;
     g.save(); g.setLineDash([12, 10]); g.lineWidth = 4; g.strokeStyle = 'rgba(20,20,20,0.6)'; g.beginPath(); g.moveTo(0, y); g.lineTo(MW, y); g.stroke();
     g.lineWidth = on ? 3 : 2; g.strokeStyle = on ? SMAP_C.sel : col; g.beginPath(); g.moveTo(0, y); g.lineTo(MW, y); g.stroke(); g.restore();
     V.text(lab + '  ' + Math.round(NSKY.P[k]) + ' M', MW - 14, y - 11, on ? SMAP_C.sel : col, 13, 'right', true, true);
@@ -84004,7 +84041,7 @@ function smapEdDraw(V) {
 }
 // over everything on the map (after the places and vehicles, still in its clip): the weather areas' strips and the picked one's handles
 function smapEdDrawTop(V) {
-  if (!smedOn() || !wxaOpen()) return;
+  if (!smedOn()) return;
   const { g, X, MW } = V, T = SMED_STRIP.t, H = SMED_STRIP.h;
   for (const a of WXA.areas) {
     const x0 = Math.max(0, X(a.x0)), x1 = Math.min(MW, X(a.x1)); if (x1 - x0 < 2) continue;
@@ -84028,7 +84065,7 @@ function smedHit(x, y) {
   if (!smedOn()) return null;
   const L = smapLayout(); if (x >= L.MW || y >= L.footY) return null;
   const X = wx => innerWidth / 2 + (wx - SMAP.cx) / SMAP.z, Y = wy => innerHeight / 2 + (wy - SMAP.cy) / SMAP.z;
-  if (wxaOpen()) {
+  {
     const A = wxaSel();
     if (A && A !== WXA.base && Math.abs(y - SMED_HY()) < SMED_HR * 2) for (const s of [-1, 1]) if (Math.abs(x - X(s < 0 ? A.x0 : A.x1)) < SMED_HR * 1.8) return { k: 'edge', a: A, s };
     if (y >= SMED_STRIP.t - 3 && y <= SMED_STRIP.t + SMED_STRIP.h + 3) { const a = wxaIn(smedWorld(x, y)[0]); if (a) return { k: 'strip', a }; }
@@ -84042,7 +84079,7 @@ function smapEdDown(e, x, y) {
   if (e.pointerType === 'mouse' && e.button !== 0) return false;
   const H = smedHit(x, y); if (!H) return false;
   const [wx, wy] = smedWorld(x, y);
-  if (H.k === 'atmo') SMED.drag = { id: e.pointerId, k: H.at, dy: atmoY(H.at) - wy };
+  if (H.k === 'atmo') { SMED.drag = { id: e.pointerId, k: H.at, dy: atmoY(H.at) - wy }; atmoPick(H.at); }
   else {
     smedPick(H.a.id);
     SMED.drag = H.k === 'edge' ? { id: e.pointerId, a: H.a, s: H.s, lim: wxaLimit(H.a, H.s) } : { id: e.pointerId, a: H.a, off: wx - H.a.x0, x0: H.a.x0, x1: H.a.x1 };
@@ -84073,8 +84110,8 @@ function smapEdTap(x, y) {
   const a = wxaIn(smedWorld(x, y)[0]); smedPick(a ? a.id : 'base');
   return true;
 }
-// an area picked from the map: the one selection, as a press on it in the view (wedAfter) - what else was picked let go
-function smedPick(id) { for (const k in WK) if (k !== 'wxarea') WK[k].clear(); WXE.sel = id; wxaSync(); wxaPreview(); wedSync(); }
+// an area picked from the map: as a press on it in the view (wxaPickArea - the one selection, its tab open)
+const smedPick = id => wxaPickArea(id);
 
 //@src 51-audio-kraken.js:1
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
