@@ -5763,6 +5763,8 @@ const ctlPick = [0, 1].map(i => CTLS.includes((PREFS0.ctl || [])[i]) ? PREFS0.ct
 const cpuLvSide = [0, 1].map(i => { const v = (PREFS0.cpuLv || [])[i]; return v === 0 || v === 2 ? v : v === 1 ? 1 : PREFS0.cpuLevel === 0 || PREFS0.cpuLevel === 2 ? PREFS0.cpuLevel : 1; });
 let STORY_LV = PREFS0.storyLv === 0 || PREFS0.storyLv === 2 ? PREFS0.storyLv : 1;
 const TVT_MARGIN = 900;                                 // (TANK VS TANK: its land runs on this far past each end of the field, off the screen - user Nov 16 20:54, no cut at the corners; PLAY_L / PLAY_R)
+// a press on the STORY MAP's own canvas (50-zzzzz-story-map.js): the map's, never a story line's, the opening shot's or the wake screen's
+const smapOwns = ev => !!(ev && ev.target && ev.target.id === 'smapC');
 let PLAYERS = 2, STORY = false, SWAP = false, LAND = false, TVT = false, PLACED_ONLY = false;   // (TVT: TANK VS TANK, user Nov 16 - 50-zzzz-tvt.js)   // (LAND: LAND TEST, user Oct 25)
 let ENDLESS = false;   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js; set by applyMode)
 // (user Oct 29, 14:39) every mode plays the Open World's map - its ground, sea floor, islands, caves, sky and look. BATTLE plays on it by
@@ -12968,8 +12970,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1243;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 22:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1244;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 22:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70796,7 +70798,7 @@ ACTS.storySleep = p => storySleep(p);
 function storyWake(p) { if (!STORY || !story.wake) return; story.wake = 0; }
 ACTS.storyWake = p => storyWake(p);
 function storyWakePress(ev) {
-  if (!STORY || ui.title || !story.wake || NSKY.editor.TUNE.open) return false;
+  if (!STORY || ui.title || !story.wake || NSKY.editor.TUNE.open || smapOwns(ev)) return false;
   act(0, 'storyWake'); sound('click', 0); ev.stopImmediatePropagation(); ev.preventDefault(); return true;
 }
 window.addEventListener('pointerdown', ev => { storyWakePress(ev); }, { capture: true, passive: false });
@@ -78709,7 +78711,7 @@ function drawStoryOpen() {
 // a press while the name is up: it goes quickly, and the press is only that
 function storyOpenSkip() { if (!storyOpenHides() || coverUp()) return false; STORY_OPEN.skip = true; return true; }
 function storyOpenPress(ev) {
-  if (NSKY.editor.TUNE.open || !storyOpenSkip()) return;
+  if (smapOwns(ev) || NSKY.editor.TUNE.open || !storyOpenSkip()) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
 }
 if (typeof window !== 'undefined' && !SW_IN_WORKER) {
@@ -81156,7 +81158,7 @@ function drawStorySay() {
 function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid'); sound('click', 0); return true; }
 // a line just put up: when it started (its fade in)
 function slSayWatch() { if (story.say && story.say.open && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }
-window.addEventListener('pointerdown', ev => { if (!slSayUp()) return; slSayNext(); ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
+window.addEventListener('pointerdown', ev => { if (!slSayUp() || smapOwns(ev)) return; slSayNext();   /* (a press on the STORY MAP is the map's - 1243 a line up ate them) */ ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
 window.addEventListener('keydown', ev => {
   if (!slSayUp() || ev.repeat) return;
   if (['Space', 'Enter', 'NumpadEnter', 'KeyE', 'Escape', 'KeyB'].includes(ev.code)) slSayNext();
@@ -81182,6 +81184,44 @@ function drawStoryObj() {
 }
 // (tools) the lines and the objective
 window.__slines = { obj: () => story.obj, say: () => story.say, at: id => { const o = slStr(id); return o ? (slineFor(o) || {}).id || null : null; } };
+
+//@src 50-zzzzz-story-map-icons.js:1
+/* ---- THE MAP'S ICONS (user Nov 20 21:51: "the structure should have icons, just like the world map. So when we're zoomed out, we see the icons and understand
+   clearly what structure it is"): the World Plan's own structure icons (tools/world-plan/plan.html - icon(), its 'structure' drawings, copied as they are:
+   the plan is its own page, not built with the game) - lines in one colour, standing on the place's foot, r its half-width. A place's key is its kind and
+   its name (lighthouse, crane, terminal, market, hospital, church, school, station, garage...); the map's own few the plan has no drawing for (a dock, a
+   parking, a mechanic) drawn as the plan's dock, a sign, its garage ---- */
+function smapIcon(c, n, x, fy, r, col) {
+  const M = (a, b) => c.moveTo(a, b), T = (a, b) => c.lineTo(a, b), R = (a, b, w, h) => c.rect(a, b, w, h), O = (a, b, rr) => { c.moveTo(a + rr, b); c.arc(a, b, rr, 0, 7); };
+  const has = w => n.includes(w), house = (w, h) => { R(x - w, fy - h, w * 2, h); M(x - w * 1.15, fy - h); T(x, fy - h - r * .6); T(x + w * 1.15, fy - h); };
+  c.strokeStyle = col; c.fillStyle = col; c.lineWidth = Math.max(1.3, r / 9); c.lineJoin = 'round'; c.lineCap = 'round'; c.beginPath();
+  if (has('dock') || has('pier') || has('landing') || has('jetty')) {   // (the plan's Dock: its deck, pillars, a mooring post)
+    R(x - r * 1.5, fy - r * .3, r * 3, r * .22); for (const u of [-1, 0, 1]) { M(x + u * r, fy - r * .08); T(x + u * r, fy + r * .9); } M(x + r * 1.2, fy - r * .3); T(x + r * 1.2, fy - r * .6);
+    c.stroke(); return;
+  }
+  if (has('parking')) { M(x, fy); T(x, fy - r * 1.3); R(x - r * .45, fy - r * 2.1, r * .9, r * .8); M(x - r * .15, fy - r * 1.4); T(x - r * .15, fy - r * 1.95); T(x + r * .12, fy - r * 1.95); c.quadraticCurveTo(x + r * .3, fy - r * 1.8, x + r * .12, fy - r * 1.65); T(x - r * .15, fy - r * 1.65); c.stroke(); return; }
+  if (has('mechanic')) n += ' garage';
+  if(has('lighthouse')){M(x-r*.38,fy);T(x-r*.22,fy-r*1.35);T(x+r*.22,fy-r*1.35);T(x+r*.38,fy);c.closePath();M(x-r*.3,fy-r*.55);T(x+r*.3,fy-r*.55);R(x-r*.26,fy-r*1.7,r*.52,r*.35);M(x-r*.3,fy-r*1.7);T(x,fy-r*2);T(x+r*.3,fy-r*1.7);
+    M(x-r*.3,fy-r*1.55);T(x-r*1.1,fy-r*1.8);M(x+r*.3,fy-r*1.55);T(x+r*1.1,fy-r*1.8)}
+  else if(has('crane')){M(x-r*.4,fy);T(x-r*.4,fy-r*1.9);M(x-r*.8,fy-r*1.75);T(x+r*1,fy-r*1.75);M(x+r*.75,fy-r*1.75);T(x+r*.75,fy-r*.9);M(x+r*.6,fy-r*.9);T(x+r*.9,fy-r*.9);M(x-r*.4,fy-r*1.9);T(x+r*1,fy-r*1.75)}
+  else if(has('shipyard')){M(x-r*.9,fy);T(x-r*.9,fy-r*1.8);T(x+r*.6,fy-r*1.8);M(x+r*.4,fy-r*1.8);T(x+r*.4,fy-r*1.2);M(x-r*.5,fy-r*.6);T(x+r*1,fy-r*.6);T(x+r*.75,fy);T(x-r*.3,fy);c.closePath()}
+  else if(has('hangar')){M(x-r*1.1,fy);c.quadraticCurveTo(x,fy-r*2.6,x+r*1.1,fy);R(x-r*.45,fy-r*.9,r*.9,r*.9);M(x,fy-r*.9);T(x,fy)}
+  else if(has('storage')||has('terminal')||has('container')){for(const[a,b]of[[-1,0],[0,0],[-.5,1],[.5,0]])R(x+a*r*1.0-r*.05,fy-(b+1)*r*.6,r*.95,r*.55)}
+  else if(has('control')||has('tower')){M(x-r*.38,fy);T(x-r*.2,fy-r*1.3);M(x+r*.38,fy);T(x+r*.2,fy-r*1.3);M(x-r*.3,fy-r*1.3);T(x-r*.58,fy-r*1.78);T(x+r*.58,fy-r*1.78);T(x+r*.3,fy-r*1.3);c.closePath();M(x-r*.46,fy-r*1.62);T(x+r*.46,fy-r*1.62);for(const k of[-.2,.2]){M(x+k*r,fy-r*1.33);T(x+k*r*1.7,fy-r*1.76)}R(x-r*.48,fy-r*1.93,r*.96,r*.15);M(x,fy-r*1.93);T(x,fy-r*2.3);M(x-r*.25,fy-r*.6);T(x+r*.25,fy-r*.6)} // airport control tower: shaft, slanted glass cab, roof, antenna
+  else if(has('helipad')){M(x-r*1.1,fy);T(x+r*1.1,fy);M(x-r*.35,fy-r*1.2);T(x-r*.35,fy-r*.3);M(x+r*.35,fy-r*1.2);T(x+r*.35,fy-r*.3);M(x-r*.35,fy-r*.75);T(x+r*.35,fy-r*.75)}
+  else if(has('market')){R(x-r*.9,fy-r*.62,r*1.8,r*.62);M(x-r*.8,fy-r*.62);T(x-r*.8,fy-r*1.32);M(x+r*.8,fy-r*.62);T(x+r*.8,fy-r*1.32);M(x-r*1.02,fy-r*1.32);T(x-r*.8,fy-r*1.75);T(x+r*.8,fy-r*1.75);T(x+r*1.02,fy-r*1.32);for(let k=0;k<5;k++){const a=x-r*1.02+k*r*.408;c.quadraticCurveTo(a+r*.204,fy-r*1.1,a+r*.408,fy-r*1.32)}for(let k=1;k<5;k++){M(x-r*.8+k*r*.32,fy-r*1.75);T(x-r*1.02+k*r*.408,fy-r*1.32)}for(const k of[-.45,0,.45]){O(x+k*r,fy-r*.76,r*.13)}} // market stand: counter, posts, striped scalloped awning, goods
+  else if(has('factory')){R(x-r*1.1,fy-r*.8,r*2.2,r*.8);for(let k=0;k<3;k++){const a=x-r*1.1+k*r*.6;M(a,fy-r*.8);T(a,fy-r*1.25);T(a+r*.6,fy-r*.8)}R(x+r*.72,fy-r*1.95,r*.26,r*1.15);O(x+r*.98,fy-r*2.2,r*.13);O(x+r*1.25,fy-r*2.45,r*.18);for(let k=0;k<3;k++)R(x-r*.92+k*r*.5,fy-r*.58,r*.3,r*.22)} // factory: sawtooth roof, chimney and smoke, windows
+  else if(has('hospital')||has('pharmacy')){house(r*.8,r*.95);M(x,fy-r*.8);T(x,fy-r*.2);M(x-r*.3,fy-r*.5);T(x+r*.3,fy-r*.5)}
+  else if(has('church')){house(r*.6,r*.9);M(x,fy-r*1.5);T(x,fy-r*2.1);M(x-r*.2,fy-r*1.9);T(x+r*.2,fy-r*1.9)}
+  else if(has('school')){house(r*.85,r*.85);M(x+r*.85,fy-r*1.2);T(x+r*.85,fy-r*2);T(x+r*1.3,fy-r*1.85);T(x+r*.85,fy-r*1.7)}
+  else if(has('station')||has('garage')){R(x-r*1,fy-r*1.1,r*2,r*1.1);R(x-r*.6,fy-r*.75,r*1.2,r*.75);for(let k=1;k<4;k++){M(x-r*.6,fy-r*.75+k*r*.19);T(x+r*.6,fy-r*.75+k*r*.19)}}
+  else if(has('building')){R(x-r*.55,fy-r*2,r*1.1,r*2);for(let a=0;a<2;a++)for(let b=0;b<3;b++)R(x-r*.35+a*r*.45,fy-r*1.75+b*r*.5,r*.25,r*.25)}
+  else if(has('airport')){R(x-r*1.2,fy-r*.7,r*2.4,r*.7);M(x+r*.6,fy-r*.7);T(x+r*.6,fy-r*1.4);R(x+r*.35,fy-r*1.75,r*.5,r*.35)}
+  else if(has('taxi stand')){M(x,fy);T(x,fy-r*1.6);R(x-r*.1,fy-r*1.9,r*.9,r*.45)}
+  else if(has('hut')){M(x-r*.8,fy);T(x-r*.8,fy-r*.6);T(x,fy-r*1.4);T(x+r*.8,fy-r*.6);T(x+r*.8,fy);c.closePath()}
+  else house(r*.75,r*.9);
+  c.stroke();
+}
 
 //@src 50-zzzzz-story-map.js:1
 /* ================================================================
@@ -81210,9 +81250,11 @@ const smapVehs = () => smapPlay() ? storyVehs() : vehAll().filter(e => e.v && Nu
 const smapKey = v => v.sid != null ? v.sid : v.placed != null ? 'p' + v.placed : null;
 function smapToggle() {
   if (!smapWhere()) return;
-  SMAP.on = !SMAP.on; SMAP.ptr.clear(); SMAP.pinch = null;
+  SMAP.on = !SMAP.on;
+  if (SMAP.on) { SMAP.ptr.clear(); SMAP.pinch = null; SMAP.hand = null; }
+  else { if (SMAP.cv && !SMAP.ptr.size) SMAP.cv.style.pointerEvents = 'none'; const P = [...SMAP.ptr.values()]; SMAP.hand = SMAP.pinch && P.length >= 2 ? { d: Math.max(10, Math.hypot(P[0].x - P[1].x, P[0].y - P[1].y)), z0: PHOTO.on ? 0 : zoomTarget(0) } : null; SMAP.pinch = null; }   // (user 21:50: "the moment it transitions, it does not keep zooming in. It holds" - the same pinch goes on zooming the view: smapHandMove)
   if (SMAP.on) { SMAP.sel = null; const c = smapPlay() ? storyCur() : null; if (c) { SMAP.sel = c.v ? { v: c.v.sid } : { o: c.o.id }; } const V = smapViewNow(); SMAP.cx = V.cx; SMAP.cy = V.cy; SMAP.zIn = SMAP.z = V.z; }
-  else if (PHOTO.on) { PHOTO.x = clamp(SMAP.cx, 0, WORLD_W); PHOTO.y = SMAP.cy; PHOTO.z = Math.max(PHOTO.z, SMAP_ED_Z()); }   // (back into the editor exactly where the map was: its middle the window's)
+  else if (PHOTO.on) { PHOTO.x = clamp(SMAP.cx, 0, WORLD_W); PHOTO.y = SMAP.cy; PHOTO.z = clamp(dpr / (PIXW * S * Math.max(1e-6, SMAP.z)), SMAP_ED_Z(), ZOOM_TOP); }   // (back into the editor exactly where the map was: its middle the window's)
   if (!Number.isFinite(SMAP.cx) || !Number.isFinite(SMAP.cy)) { SMAP.cx = WORLD_W / 2; SMAP.cy = WATER_Y; }
   sound('click', 0);
 }
@@ -81260,18 +81302,18 @@ const smapTrip = v => { const T = FOLK.v[v.sid]; return T ? T.x : null; };
    Plan's font and colours (tools/world-plan/plan.html): its grey, its cream ink, its panels, each land in its biome's colour, the sea blue. REPORT, the version
    and the FPS stay in sight in their corner (it's cut out of the map - --below-corner, 18-top-ui-perf.js); the GAME EDITOR's bar stays over its foot. A bug
    report's picture has it (bugGrab). ---- */
-const SMAP_C = { bg: '#4b4b4b', ui: '#2f2f2f', ui2: '#3a3a3a', line: '#5c5c5c', ink: '#f1e7c8', sea: '#3d6f9a', cave: '#2a2a2a', res: '#6db8ff', work: '#ff8a5c', dock: '#c9ced3', other: '#e8e8e8', mine: '#ffd36b', folk: '#f1e7c8', wv: '#6fd3ff', trip: '#8fe3a8', sel: '#ffffff', dim: '#bdb6a6', go: '#2f6fae', enter: '#2f8a45' };
+const SMAP_C = { bg: '#4b4b4b', ui: '#2f2f2f', ui2: '#3a3a3a', line: '#5c5c5c', ink: '#f1e7c8', sea: '#3d6f9a', seaDeep: '#1f416b', deep: '#0f2240', cave: '#2a2a2a', res: '#6db8ff', work: '#ff8a5c', dock: '#c9ced3', other: '#e8e8e8', mine: '#ffd36b', folk: '#f1e7c8', wv: '#6fd3ff', trip: '#8fe3a8', sel: '#ffffff', dim: '#bdb6a6', go: '#2f6fae', enter: '#2f8a45' };
 const SMAP_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
-const SMAP_BIOME = { forest: '#3f9a52', tropical: '#2fd06a', sea: '#f2d36b', desert: '#e4a55a', mountain: '#a3a8ad', ice: '#c4ecfa', swamp: '#8a9a42', volcanic: '#c4553c' };
-const SMAP_BED = '#8f7d5c';   // (the sea's floor)
-const smapBiomeCol = x => SMAP_BIOME[biomeAtX(clamp(x, 0, WORLD_W - 1))] || SMAP_BIOME.forest;
-// a terrain shape's colour: its points' skins (BIOME_OF_SKIN), the most of them; a point with none (AUTO) the biome where it is - kept till the shape changes
-const SMAP_SHC = new WeakMap();
-function smapShapeCol(I) {
-  const key = I.p.length + ':' + I.p[0][0] + ':' + I.p[0][2], h = SMAP_SHC.get(I); if (h && h.key === key) return h.col;
-  const n = {}; for (const q of I.p) { const b = typeof q[2] === 'string' ? BIOME_OF_SKIN[q[2]] : biomeAtX(clamp(q[0], 0, WORLD_W - 1)); if (b) n[b] = (n[b] || 0) + 1; }
-  let best = 'forest', bn = -1; for (const t in n) if (n[t] > bn) { bn = n[t]; best = t; }
-  const col = SMAP_BIOME[best] || SMAP_BIOME.forest; SMAP_SHC.set(I, { key, col }); return col;
+// a ground's colour by its skin (GND_SK: F forest, D desert, S sand, T tropical, M mountain, I ice, W swamp, V volcanic) - the bare ground, no vegetation: the
+// forests and the tropics their earth
+const SMAP_SKIN = { S: '#f2d36b', D: '#e4a55a', M: '#a3a8ad', I: '#c4ecfa', V: '#c4553c', W: '#8a8456', F: '#9c7a52', T: '#9c7a52' };
+const SMAP_SK_OF = { forest: 'F', tropical: 'T', sea: 'S', desert: 'D', mountain: 'M', ice: 'I', swamp: 'W', volcanic: 'V' };
+// a shape's skin at x: the ground's own (groundSkinAt) for the ground; else the piece of its line over x (its nearest marked piece round the loop - islSkinAt's
+// rule, for this shape); none marked: the biome there (AUTO)
+function smapSkinAt(I, Q, x) {
+  if (I.gnd) { try { const k = groundSkinAt(x); if (k) return k; } catch (e) { } }
+  else { const q = shpSpansAt(Q, x); if (q.s.length) { const P = I.p, n = P.length, k = q.e[0]; if (P[k] && P[k][2]) return P[k][2]; for (let d = 1; d < n; d++) { const a = P[(k - d + n) % n], b = P[(k + d) % n]; if (a[2]) return a[2]; if (b[2]) return b[2]; } } }
+  return SMAP_SK_OF[biomeAtX(clamp(x, 0, WORLD_W - 1))] || 'F';
 }
 const SMAP_LISTS = ['PLACES', 'VEHICLES', 'CHARACTERS'];
 const SMAP_LW = 280, SMAP_ROW = 36, SMAP_TAB = 44, SMAP_FOOT = 68;   // (CSS px: the lists' column, a row, the tabs, the foot - a finger's size, as the World Plan's)
@@ -81283,12 +81325,14 @@ function smapCanvas() {
   document.body.appendChild(c); smapWire(c); return (SMAP.cv = c);
 }
 function smapLayout() {
-  const W = innerWidth, ed = document.getElementById('skyEd'), eb = ed && !ed.hidden && getComputedStyle(ed).display !== 'none' ? ed.getBoundingClientRect() : null;
-  const H = Math.max(200, eb && eb.height > 0 ? Math.round(eb.top) : innerHeight);   // (the GAME EDITOR's bar over its foot: the map ends above it)
+  const W = innerWidth, H = innerHeight, ed = document.getElementById('skyEd'), eb = ed && !ed.hidden && getComputedStyle(ed).display !== 'none' ? ed.getBoundingClientRect() : null;
+  // (user Nov 20 21:44: under the map the game showed through - "you see the same background offset": the map stopped at the editor's bar's top while the bar
+  // wasn't there to cover the rest) the map the window's whole height; the GAME EDITOR's bar, where it shows, over it - its foot just above the bar
+  const barTop = eb && eb.height > 0 && eb.top < H - 4 && (() => { const el = document.elementFromPoint(W / 2, Math.min(H - 2, eb.top + 6)); return !!(el && el.closest && el.closest('#skyEd')); })() ? Math.round(eb.top) : H;
   const cTop = Math.max(0, (CORNER.css || 0)), cL = Number.isFinite(CORNER.cssL) ? CORNER.cssL : W - 150;   // (REPORT, the version, the FPS: their corner)
   const LW = Math.min(SMAP_LW, Math.round(W * 0.4)), MW = W - LW;
-  let fx = 16; for (const el of document.querySelectorAll('#vegEdBtn, #vehEdBtn, #skyEdBtn')) { const r = el.getBoundingClientRect(); if (r.width && r.bottom > H - SMAP_FOOT && r.top < H && r.left < W / 3) fx = Math.max(fx, r.right + 14); }   // (the GAME EDITOR's buttons pinned over its foot: its words start past them)
-  return { W, H, LW, MW, cTop, cL, listTop: cTop + 4, footY: H - SMAP_FOOT, fx };
+  let fx = 16; for (const el of document.querySelectorAll('#vegEdBtn, #vehEdBtn, #skyEdBtn')) { const r = el.getBoundingClientRect(); if (r.width && r.bottom > barTop - SMAP_FOOT && r.top < barTop && r.left < W / 3) fx = Math.max(fx, r.right + 14); }   // (the GAME EDITOR's buttons pinned over its foot: its words start past them)
+  return { W, H, LW, MW, cTop, cL, listTop: cTop + 4, footY: Math.max(120, barTop - SMAP_FOOT), fx, barTop };
 }
 function drawStoryMap() {
   SMAP.a = clamp(SMAP.a + (SMAP.on ? 1 : -1) * frameDt / 0.3, 0, 1);       // (fading in and out: smoothly - user 19:17)
@@ -81297,7 +81341,7 @@ function drawStoryMap() {
   if (!SMAP.a) { if (cv.style.display !== 'none') cv.style.display = 'none'; return; }
   const L = smapLayout(), dp = Math.min(2, devicePixelRatio || 1), pw = Math.round(L.W * dp), ph = Math.round(L.H * dp);
   if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; cv.style.width = L.W + 'px'; cv.style.height = L.H + 'px'; }
-  cv.style.display = ''; cv.style.opacity = String(SMAP.a);
+  cv.style.display = ''; cv.style.opacity = String(SMAP.a); cv.style.pointerEvents = SMAP.on || SMAP.ptr.size ? 'auto' : 'none';   // (closed: the game's at once - but fingers still down on it are kept till they lift, their pinch zooming the view on)
   cv.style.clipPath = `polygon(0 0, ${L.cL}px 0, ${L.cL}px ${L.cTop}px, 100% ${L.cTop}px, 100% 100%, 0 100%)`;   // (the corner left to REPORT, the version, the FPS)
   const g = cv.getContext('2d'); g.setTransform(dp, 0, 0, dp, 0, 0);
   const W = L.W, H = L.H, MW = L.MW, play = smapPlay();
@@ -81312,24 +81356,49 @@ function drawStoryMap() {
   g.save(); g.beginPath(); g.rect(0, 0, MW, mh); g.clip();
   // the sea; the ground's floor line column by column (above the water its biome, under it the sea's floor); then the world's terrain shapes as they are (user
   // 19:17: "the shape of the terrain should be closer to the real shape") - the back's before their layers, each in its biome's colour, the caves dark over them
-  { const sea = Y(WATER_Y); if (sea < mh) { g.fillStyle = SMAP_C.sea; g.fillRect(0, Math.max(0, sea), MW, mh); } }
-  for (let sx = 0; sx < MW; sx += 3) { const x = SMAP.cx + (sx - MW / 2) * z; if (x < 0 || x > WORLD_W) continue; const t = landTop(clamp(x, 0, WORLD_W - 1), 0); if (!Number.isFinite(t)) continue; const y = Math.max(-1, Y(t)); if (y >= mh) continue; const w = clamp(Y(WATER_Y), y, mh); if (w > y) { g.fillStyle = smapBiomeCol(x); g.fillRect(sx, y, 3, w - y); } g.fillStyle = SMAP_BED; g.fillRect(sx, w, 3, mh - w); }
+  // (user Nov 20 21:50: "the background sky should match the blue color of the sky at the moment I'm zooming out, instead of being gray") the hour's sky as the
+  // game has it (skyAt - the GAME EDITOR's gradient by the hour): its top colour down to its horizon's at the water's line
+  { const sea = Y(WATER_Y); if (sea > 0) { const [top, hor] = skyAt(E.hour != null ? E.hour : env.time), gr = g.createLinearGradient(0, Math.min(0, sea - 600), 0, sea); gr.addColorStop(0, rgbs(top)); gr.addColorStop(1, rgbs(hor)); g.fillStyle = gr; g.fillRect(0, 0, MW, Math.min(mh, sea)); }
+    if (sea < mh) { const gr = g.createLinearGradient(0, sea, 0, sea + Math.max(200, 3000 / z)); gr.addColorStop(0, SMAP_C.sea); gr.addColorStop(1, SMAP_C.seaDeep); g.fillStyle = gr; g.fillRect(0, Math.max(0, sea), MW, mh); } }
+  // (user Nov 20 21:45, a picture circling a copy of an island beside it: the ground's own grid read column by column - landTop - is the land as built near
+  // you, not the world: offset and cut off. The shapes are the world - the ground is one of them - so only they are drawn)
   { const S = (typeof ISLANDS !== 'undefined' ? ISLANDS : []).filter(I => I && !I.t && Array.isArray(I.p) && I.p.length >= 3);
-    const poly = (I, col) => { const P = I.p; let lo = Infinity, hi = -Infinity; for (const q of P) { if (q[0] < lo) lo = q[0]; if (q[0] > hi) hi = q[0]; } if (X(hi) < 0 || X(lo) > MW) return; g.fillStyle = col; g.beginPath(); P.forEach((q, i) => { const sx = X(q[0]), sy = Y(WATER_Y + q[1]); if (i) g.lineTo(sx, sy); else g.moveTo(sx, sy); }); g.closePath(); g.fill(); };
-    for (const I of S.filter(I => shpK(I) !== 'H').sort((a, b) => shpLay(a) - shpLay(b))) poly(I, smapShapeCol(I)); for (const I of S) if (shpK(I) === 'H') poly(I, SMAP_C.cave); }
+    // (user Nov 20 21:51: "each island cutout should match the color of its section. So yellow for beach, dark blue for deep sea, gray for mountains, and we don't
+    // want vegetation") each shape filled column by column in the colour of its ground there (its section's skin - the piece of its line over that x, as the
+    // game skins it: smapSkinAt), under the water's line dark blue; the caves dark over them
+    const path = I => { g.beginPath(); I.p.forEach((q, i) => { const sx = X(q[0]), sy = Y(WATER_Y + q[1]); if (i) g.lineTo(sx, sy); else g.moveTo(sx, sy); }); g.closePath(); };
+    const wy = Y(WATER_Y);
+    const fillShape = I => {
+      let lo = Infinity, hi = -Infinity, top = Infinity, bot = -Infinity; for (const q of I.p) { if (q[0] < lo) lo = q[0]; if (q[0] > hi) hi = q[0]; const y = Y(WATER_Y + q[1]); if (y < top) top = y; if (y > bot) bot = y; }
+      const s0 = Math.max(0, Math.floor(X(lo))), s1 = Math.min(MW, Math.ceil(X(hi))); if (s1 <= s0 || bot < 0 || top > mh) return;
+      g.save(); path(I); g.clip();
+      const Q = shpPoly(I), yb = Math.min(bot, wy);
+      if (yb > top) { let run = s0, col = null; for (let sx = s0; sx <= s1; sx += 3) { const c = sx < s1 ? SMAP_SKIN[smapSkinAt(I, Q, SMAP.cx + (sx + 1.5 - hx) * z)] || SMAP_SKIN.F : null; if (c !== col) { if (col) { g.fillStyle = col; g.fillRect(run, top, sx - run, yb - top); } run = sx; col = c; } } }
+      if (bot > wy) { g.fillStyle = SMAP_C.deep; g.fillRect(s0, Math.max(top, wy), s1 - s0, bot - Math.max(top, wy)); }
+      g.restore();
+    };
+    for (const I of S.filter(I => shpK(I) !== 'H').sort((a, b) => shpLay(a) - shpLay(b))) fillShape(I);
+    g.fillStyle = SMAP_C.cave; for (const I of S) if (shpK(I) === 'H') { path(I); g.fill(); } }
   g.fillStyle = SMAP_C.line; for (const e of [0, WORLD_W]) { const sx = X(e); if (sx > 0 && sx < MW) g.fillRect(Math.round(sx), 0, 1, mh); }   // (the world's ends)
   // every place: a box in its kind's colour; its name over it where there's room (names never drawn over each other - the picked one first), its stock closer in
   const labs = [], free = (x0, y0, x1, y1) => !labs.some(r => x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]);
   const places = strsUsed().map(o => { const B = strBox(o); return { o, x0: X(B.x0), x1: X(B.x1), y0: Y(B.top), y1: Y(B.foot) }; }).filter(P => P.x1 > -60 && P.x0 < MW + 60);
   const isSel = P => SMAP.sel && SMAP.sel.o === P.o.id; places.sort((a, b) => isSel(b) - isSel(a));
+  // (user Nov 20 21:51: "the structure should have icons, just like the world map") each place its World Plan icon (smapIcon - 50-zzzzz-story-map-icons.js)
+  // standing on its foot in its kind's colour, over a dark edge to read on any ground; its box only once it's bigger than its icon. Icons never over each
+  // other (the picked one first, the rest as they come); its name over it where there's room
   for (const P of places) {
     const { o } = P, col = strIsRes(o) ? SMAP_C.res : strWork(o) ? SMAP_C.work : (STR_KINDS[o.k] || {}).water || o.k === 'parking' ? SMAP_C.dock : SMAP_C.other, on = isSel(P);
-    const w = Math.max(5, P.x1 - P.x0), h = Math.max(5, P.y1 - P.y0);
-    g.fillStyle = 'rgba(25,25,25,0.45)'; g.fillRect(P.x0, P.y0, w, h); g.lineWidth = on ? 3 : 1.5; g.strokeStyle = on ? SMAP_C.sel : col; g.strokeRect(P.x0, P.y0, w, h);
-    SMAP.hot.push({ o: o.id, x0: P.x0 - 4, x1: P.x0 + w + 4, y0: P.y0 - 4, y1: P.y0 + h + 4 });
-    if (w > 26 || on) { const nm = strPlayName(o); g.font = font(13, on); const tw = g.measureText(nm).width, cx = P.x0 + w / 2, ty = P.y0 - 11; if (on || free(cx - tw / 2 - 3, ty - 9, cx + tw / 2 + 3, ty + 9)) { labs.push([cx - tw / 2 - 3, ty - 9, cx + tw / 2 + 3, ty + 9]); text(nm, cx, ty, on ? SMAP_C.sel : SMAP_C.ink, 13, 'center', on, true); } }
-    if (w > 70 || on) { const G = stGoods(o); if (G) { const t = Object.keys(G).filter(q => G[q] > 0).map(q => (CARGO_LAB[q] || q) + ' ' + Math.floor(G[q])).join('   '); if (t) { g.font = font(12); const tw = g.measureText(t).width, cx = P.x0 + w / 2, ty = P.y1 + 11; if (free(cx - tw / 2, ty - 8, cx + tw / 2, ty + 8)) { labs.push([cx - tw / 2, ty - 8, cx + tw / 2, ty + 8]); text(t, cx, ty, SMAP_C.dim, 12, 'center', false, true); } } } }
+    const w = Math.max(2, P.x1 - P.x0), h = Math.max(2, P.y1 - P.y0), ir = on ? 12 : 10, cx = P.x0 + w / 2, fy = P.y1;
+    const ib = [cx - ir * 1.6, fy - ir * 2.3, cx + ir * 1.6, fy + ir * 0.4], big = w > ir * 3.4;
+    if (big || on) { g.lineWidth = on ? 3 : 1.2; g.strokeStyle = on ? SMAP_C.sel : col; g.globalAlpha = on ? 1 : 0.55; g.strokeRect(P.x0, P.y0, w, h); g.globalAlpha = 1; }
+    let shown = on || free(...ib);
+    if (shown) { labs.push(ib); const key = (String(o.k || '') + ' ' + strPlayName(o)).toLowerCase(); smapIcon(g, key, cx, fy, ir, 'rgba(20,20,20,0.75)'); g.lineWidth *= 2.6; g.stroke(); smapIcon(g, key, cx, fy, ir, on ? SMAP_C.sel : col); }
+    SMAP.hot.push({ o: o.id, x0: Math.min(P.x0, ib[0]) - 3, x1: Math.max(P.x0 + w, ib[2]) + 3, y0: Math.min(P.y0, ib[1]) - 3, y1: Math.max(P.y1, ib[3]) + 3 });
+    if (shown && (w > 26 || on)) { const nm = strPlayName(o); g.font = font(13, on); const tw = g.measureText(nm).width, ty = Math.min(P.y0, ib[1]) - 10; if (on || free(cx - tw / 2 - 3, ty - 9, cx + tw / 2 + 3, ty + 9)) { labs.push([cx - tw / 2 - 3, ty - 9, cx + tw / 2 + 3, ty + 9]); text(nm, cx, ty, on ? SMAP_C.sel : SMAP_C.ink, 13, 'center', on, true); } }
+    if (w > 70 || on) { const G = stGoods(o); if (G) { const t = Object.keys(G).filter(q => G[q] > 0).map(q => (CARGO_LAB[q] || q) + ' ' + Math.floor(G[q])).join('   '); if (t) { g.font = font(12); const tw = g.measureText(t).width, ty = fy + ir * 0.4 + 11; if (free(cx - tw / 2, ty - 8, cx + tw / 2, ty + 8)) { labs.push([cx - tw / 2, ty - 8, cx + tw / 2, ty + 8]); text(t, cx, ty, SMAP_C.dim, 12, 'center', false, true); } } } }
   }
+
   // every vehicle: a dot (yours yellow, a character's cream, a work vehicle blue); on a trip, a dashed line to where it's going and what it'll do there
   for (const v of smapVehs()) {
     if (isPierCrane(v)) continue;
@@ -81350,7 +81419,7 @@ function drawStoryMap() {
   { const x0 = MW, top = L.listTop, tw = L.LW / 3;
     g.fillStyle = SMAP_C.ui; g.fillRect(x0, 0, L.LW, H); g.fillStyle = SMAP_C.line; g.fillRect(x0, 0, 1, H);
     SMAP_LISTS.forEach((t, i) => { const on = (SMAP.list || 0) === i, bx = x0 + i * tw + 3; g.fillStyle = on ? SMAP_C.ink : SMAP_C.ui2; smapRound(g, bx, top, tw - 6, SMAP_TAB - 8, 8); g.fill(); text(fit(trText(t), 12, tw - 12, true), bx + (tw - 6) / 2, top + (SMAP_TAB - 8) / 2, on ? '#222' : SMAP_C.ink, 12, 'center', true); SMAP.hot.push({ list: i, x0: bx, x1: bx + tw - 6, y0: top, y1: top + SMAP_TAB - 8 }); });
-    const R = smapListRows(SMAP.list || 0), y0 = top + SMAP_TAB, vis = H - y0, maxS = Math.max(0, R.length * SMAP_ROW - vis); SMAP.ls = clamp(SMAP.ls || 0, 0, maxS); SMAP.listBox = [x0, y0, L.LW, vis];
+    const R = smapListRows(SMAP.list || 0), y0 = top + SMAP_TAB, vis = L.barTop - y0, maxS = Math.max(0, R.length * SMAP_ROW - vis); SMAP.ls = clamp(SMAP.ls || 0, 0, maxS); SMAP.listBox = [x0, y0, L.LW, vis];
     g.save(); g.beginPath(); g.rect(x0, y0, L.LW, vis); g.clip();
     const i0 = Math.floor(SMAP.ls / SMAP_ROW);
     for (let i = i0; i < R.length && i * SMAP_ROW - SMAP.ls < vis; i++) { const Q = R[i], y = y0 + i * SMAP_ROW - SMAP.ls, on = SMAP.sel && ((Q.v != null && SMAP.sel.v === Q.v) || (Q.o != null && SMAP.sel.o === Q.o));
@@ -81362,7 +81431,7 @@ function drawStoryMap() {
     if (maxS > 0) { const th = Math.max(30, vis * vis / (R.length * SMAP_ROW)), ty = y0 + (vis - th) * SMAP.ls / maxS; g.fillStyle = 'rgba(241,231,200,0.25)'; smapRound(g, x0 + L.LW - 6, ty, 4, th, 2); g.fill(); }
     g.restore(); }
   // the foot: what's picked (ENTER AS / GO THERE while playing), the day and the speed
-  { const fy = L.footY; g.fillStyle = SMAP_C.ui; g.fillRect(0, fy, MW, H - fy); g.fillStyle = SMAP_C.line; g.fillRect(0, fy, MW, 1);
+  { const fy = L.footY; g.fillStyle = SMAP_C.ui; g.fillRect(0, fy, MW, SMAP_FOOT); g.fillStyle = SMAP_C.line; g.fillRect(0, fy, MW, 1);
     const S = SMAP.sel; let t1 = trText('NOTHING PICKED - PRESS A DOT OR A PLACE'), t2 = '';
     if (S && S.v != null) { const v = smapVeh(S.v); if (v) { const who = folkWho(v), c = who != null ? charOf(who) : null; t1 = smapVehLine(v, c); t2 = c && c !== PLAYER_C ? trText(smapDoing(c.id)) : ''; const g2 = v.goods ? Object.keys(v.goods).filter(q => v.goods[q] > 0).map(q => (CARGO_LAB[q] || q) + ' ' + Math.floor(v.goods[q])).join('  ') : ''; if (g2) t2 = (t2 ? t2 + '   ' : '') + trText('CARRIES *').replace('*', g2); } }
     else if (S && S.o != null) { const o = strsUsed().find(q => q.id === S.o); if (o) { t1 = strPlayName(o); t2 = [...residents(o), ...workers(o)].map(c => c === PLAYER_C ? trText('PLAYER') : String(c.name).toUpperCase()).join(', '); } }
@@ -81397,11 +81466,12 @@ function smapWire(c) {
     stop(e); if (!SMAP.on) return; try { c.setPointerCapture(e.pointerId); } catch (x) { }
     const [x, y] = pt(e), B = SMAP.listBox, inList = !!(B && x >= B[0] && y >= B[1]);
     SMAP.ptr.set(e.pointerId, { x, y, x0: x, y0: y, moved: false, inList, pan: e.pointerType === 'mouse' && e.button !== 0, cx: SMAP.cx, cy: SMAP.cy, ls: SMAP.ls });
-    if (SMAP.ptr.size === 2) { const [a, b] = [...SMAP.ptr.values()]; SMAP.pinch = { d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), z0: SMAP.z }; for (const q of SMAP.ptr.values()) q.moved = true; }
+    if (SMAP.ptr.size === 2) { const [a, b] = [...SMAP.ptr.values()]; SMAP.pinch = { d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), z0: SMAP.z }; smapRegrab(); }
   });
   c.addEventListener('pointermove', e => {
     const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e);
     const [x, y] = pt(e); p.x = x; p.y = y;
+    if (!SMAP.on) { smapHandMove(); return; }
     if (SMAP.pinch && SMAP.ptr.size >= 2) { const [a, b] = [...SMAP.ptr.values()], mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2; smapZoomTo(SMAP.pinch.z0 * SMAP.pinch.d0 / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), mx, my); return; }
     if (!p.moved && Math.hypot(x - p.x0, y - p.y0) > 8) { p.moved = true; p.x0 = x; p.y0 = y; p.cx = SMAP.cx; p.cy = SMAP.cy; p.ls = SMAP.ls; if (!p.inList) SMAP.sel = null; }   // (a drag: what's picked let go - the map stays where it is and moves with the finger)
     if (!p.moved) return;
@@ -81409,8 +81479,8 @@ function smapWire(c) {
     else { SMAP.cx = p.cx - (x - p.x0) * SMAP.z; SMAP.cy = p.cy - (y - p.y0) * SMAP.z; }
   });
   const up = e => {
-    const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e); SMAP.ptr.delete(e.pointerId);
-    if (SMAP.ptr.size < 2) SMAP.pinch = null;
+    const p = SMAP.ptr.get(e.pointerId); if (!p) return; stop(e); SMAP.ptr.delete(e.pointerId); if (!SMAP.on) { if (SMAP.ptr.size < 2) SMAP.hand = null; return; }
+    if (SMAP.ptr.size < 2 && SMAP.pinch) { SMAP.pinch = null; smapRegrab(); }   // (user 21:46: lifting one finger of a pinch snapped the map to where the other first touched)
     if (e.type === 'pointerup' && !p.moved && !p.pan && SMAP.on) smapTap(p.x, p.y);
   };
   c.addEventListener('pointerup', up); c.addEventListener('pointercancel', up);
@@ -81420,6 +81490,15 @@ function smapWire(c) {
     smapZoomTo(SMAP.z * Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), x, y);
   }, { passive: false });
 }
+// the map closed by a pinch still going: the same fingers zoom the view on (the editor's zoom by how much they moved since; the game's from where it was)
+function smapHandMove() {
+  const H = SMAP.hand, P = [...SMAP.ptr.values()]; if (!H || P.length < 2) return;
+  const d = Math.max(10, Math.hypot(P[0].x - P[1].x, P[0].y - P[1].y));
+  if (PHOTO.on) { photoZoom(d / H.d); H.d = d; }
+  else { if (!H.d0) H.d0 = H.d; asSlot(0, q => setZoom(q, H.z0 * d / H.d0)); }
+}
+// every finger still down starts its drag again from where it is and the map is now (a pinch begun or ended) - and is no tap
+function smapRegrab() { for (const q of SMAP.ptr.values()) { q.moved = true; q.x0 = q.x; q.y0 = q.y; q.cx = SMAP.cx; q.cy = SMAP.cy; q.ls = SMAP.ls; } }
 // a tap: what's under it (the last drawn first - the foot's buttons, the list, the dots, then the places); nothing - what's picked let go
 function smapTap(x, y) {
   const h = SMAP.hot.slice().reverse().find(q => x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1);
