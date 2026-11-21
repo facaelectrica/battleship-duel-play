@@ -3305,7 +3305,7 @@ function swHold(why) {
       const s = await swAsk('tables');
       SW.worker.postMessage({ t: 'in', hold: true });
       SW.snaps.length = 0;
-      if (!mine) { tablesLoad(JSON.parse(s)); computeEnv(); }
+      if (!mine) { const S = JSON.parse(s); if (S && S.tables) for (const k of SW_LOCAL) delete S.tables[k]; tablesLoad(S); computeEnv(); }   // (the page's own tables - its camera - are never taken back: the worker's is the copy it was sent, a step behind - Nov 21, the new home's zoom undone by the save on arriving)
       SW.liveGen = SW.gen;
     } catch (e) { swFail(e); }
     finally { SWB.taking = null; }
@@ -12975,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1261;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 11:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1262;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 12:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -48979,6 +48979,15 @@ function fireworkLaunch(c) {
   sound('fwLaunch', x, fireworks.hAt(fireworks.length - 1).fuse);
   return true;
 }
+/* ---- THE NEW HOME'S ROCKET (user Nov 21 10:53: "every time you enter a lighthouse to make it your new home, let's have a flare that shoots out into the
+   sky and lights up the night"; 11:02: "it should feel more like a firework. After it explodes, it disappears") - one of the fireworks: shot up from
+   a lighthouse's lantern (storyGo, 50-story.js), bursting a gold chrysanthemum some 20 m over it, its light thrown round it as every young burst's is
+   (drawFireworks: the light pass's big glow). */
+function homeRocket(x, y) {
+  if (SIM_ONLY) return;
+  fireworks.addRow({ st: 'up', x, y, vx: fwRnd(-8, 8), vy: -fwRnd(196, 206), t: 0, fuse: 0.9, kind: 'chrys', col: FW_COLS[3], ci: 3, seed: fwksR() * 1000, sparkT: 0 });
+  sound('fwLaunch', x, 0.9);
+}
 // it bursts: its stars laid out, a little smoke left at the centre, the birds near it scared off, its bang to come
 function fwBurst(f) {
   const P = FW_K[f.kind];
@@ -49039,6 +49048,8 @@ function drawFireworks(x0, x1) {
   let bits = 0; { const c = fwBits.c; for (let i = 0; i < fwBits.n; i++) if (c.t[i] >= 0 && !offViewR(c.x[i], 2, x0, x1)) bits++; }
   if (!list.length && !bits) return;
   // (for the colour grade: a young burst at night a bright light)
+  // (user Nov 21 10:53: "lights up the night") a young burst's light thrown round it - the light pass's big warm glow (airLamps)
+  for (const f of list) if (f.st === 'burst' && f.t < 1.6) airLamp(PX(f.x), PY(f.y), 0.7 * night * Math.pow(1 - f.t / 1.6, 1.2), Math.max(10, Math.round(f.R * 1.4 * SV)));
   for (const f of list) if (f.st === 'burst' && f.t < 1.2) brightLights[viewIdx].push(PX(f.x) + VSX + SHX, PY(f.y) + SHY, 0.45 * night * (1 - f.t / 1.2), Math.max(1, Math.round(f.R * 2.2 * SV)));
   fwLate[viewIdx].push(() => {
     const q = Math.max(1, Math.round(SV * 0.8)), sq = v => Math.floor(v / q) * q;
@@ -70478,9 +70489,9 @@ function storySubs(dt) {
 const story = { coins: 0, at: 0, saveN: 0, wake: 0, cp: 0, cpk: null, dead: 0, inv: {}, cook: true, light: true, lh: {}, obj: null, said: {}, say: null, car: '' };   // (car: the player's own car as picked at a CAR STAND - 50-zzzzz-car-stand.js)   // (cook / light: the home you're in - its smoke and lights; lh: lighthouses' LIGHT / ANGLE by structure id - 50-zzzz-struct-act.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (cp: the checkpoint - the lighthouse last entered, where the story was saved and resumes; dead: how many times you've died - 50-story-saves.js)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
 const storyR = sysRng('story');
 const STORY_ROW = worldRow({ go: [() => story.go || 0, v => { story.go = v || 0; }], rate: [() => story.rate || 1, v => { story.rate = v > 1 ? v : 1; }], swaps: [() => story.swaps || [], v => { lifeSwapsApply(v); }], coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], cpk: [() => story.cpk, v => { story.cpk = v && typeof v === 'object' ? v : null; }],   // (cpk: your things as they were at the checkpoint - storyDie)
- inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }], car: [() => story.car || '', v => { story.car = typeof v === 'string' ? v : ''; }] });   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
+ inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }], car: [() => story.car || '', v => { story.car = typeof v === 'string' ? v : ''; }], homeN: [() => story.homeN || 0, v => { story.homeN = v || 0; }], cars: [() => story.cars || {}, v => { story.cars = v && typeof v === 'object' ? v : {}; }] });   // (cars: each island's car's type, by its land's shape id - a car stand's pick there; keptVehStep)   // (homeN: how many times a lighthouse became your home - storyGo)   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = PLAYER_C.coins || 0; story.inv = Object.assign({}, PLAYER_C.inv || {});   /* (the player's COINS and START goods - STORY > CHARACTERS > PLAYER, as every character's) */ story.at = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
+function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = PLAYER_C.coins || 0; story.inv = Object.assign({}, PLAYER_C.inv || {});   /* (the player's COINS and START goods - STORY > CHARACTERS > PLAYER, as every character's) */ story.at = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; story.cars = {}; story.homeN = 0; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // (user Nov 19 20:54: "when the game starts, you and the grandfather live in the lighthouse") where you live: the player's HOME (STORY >
 // CHARACTERS - PLAYER_C, 50-zz-struct.js); a new story opens there, you sleep there
 const storyHome = () => PLAYER_C.home != null ? strsUsed().find(o => o.id === PLAYER_C.home) || null : null;
@@ -70510,6 +70521,10 @@ function storyGo(p, id, any, glide, quiet) {   // (quiet: put back there - no ch
   // (user Nov 9: "Every time you enter a location ... the game gets saved there, and that's your checkpoint. If you die or quit the game, it
   // will resume from that checkpoint"; Nov 19: "lighthouses are the only place where you can save your progress") the one moment a story is
   // saved: arriving at a lighthouse, whoever's it is - 50-story-saves.js
+  // (user Nov 21 10:53: "every time you enter a lighthouse to make it your new home, let's have a flare ... This won't happen if it's already your home")
+  // a lighthouse that wasn't your checkpoint becomes your home: a rocket goes up from its lantern (homeRocket, 50-land-fireworks.js), and homeN - the
+  // screen's shot of it (storyHomeShot, 50-zzzz-story-open.js)
+  if (arrived && !quiet && strIsLh(o) && story.cp && story.cp !== o.id) { const B = strBox(o); homeRocket(o.x, B.top + 2 * UPM); story.homeN = (story.homeN || 0) + 1; }
   if (arrived && !quiet && strIsLh(o)) { story.cp = o.id; story.saveN++; storyCpKeep(); }   // (and your things as they are now: what you come back with after a death)
   if (storyHomeOf(o) && arrived) { story.cook = true; story.light = true; }   // (Nov 7: in a home of yours, its stove and lights on as you come in - COOK / LIGHT)   // (user Nov 4 17:28 / Nov 7: a home of yours entered is your CURRENT one - the save checkpoint, saved every time you enter it)
   const c = crew[p], B = strBox(o); c.mode = 'dock'; c.watch = null; c.look = { x: o.x, y: (B.top + B.foot) / 2 };
@@ -70943,10 +70958,11 @@ function storyZoom(dt) {
   // when the player changes it") zoomed by hand, the zoom is the player's from then on - the next structure or vehicle no longer
   // takes it back (it did: every new vehicle or structure the automatic zoom set its own again). A new story starts automatic
   // (storyReset). One rule for Story played from the menu and from the GAME EDITOR's PLAY
-  if (Z.lv != null && scopes[0].level !== Z.lv) Z.manual = true;
+  const homeShot = STORY_OPEN.on && STORY_OPEN.home;
+  if (Z.lv != null && scopes[0].level !== Z.lv) { Z.manual = true; if (homeShot) { STORY_OPEN.lv0 = null; storyOpenEnd(); return; } }   // (zoomed by hand during the new home's shot: it ends there)
   const lvOf = storyLvOf;
-  // zoomed by hand: never wider than what you're in allows (storyFarWidth) - pulled back to it; the opening shot is its own
-  if (Z.manual) { const lo = storyFarLv(); if (scopes[0].level < lo) setScope(0, lo); return; }
+  // zoomed by hand: never wider than what you're in allows (storyFarWidth) - pulled back to it; the opening shot is its own (and the new home's - 50-zzzz-story-open.js)
+  if (Z.manual && !homeShot) { const lo = storyFarLv(); if (scopes[0].level < lo) setScope(0, lo); return; }
   const v = c.mode === 'civ' ? c.civ : null, fast = !!v && Math.abs(v.vDrive || 0) > (v.v || 60) * 0.15;
   if (fast !== Z.moving) { Z.mv += dt; if (Z.mv > 0.8) { Z.moving = fast; Z.mv = 0; } } else Z.mv = 0;
   const w = storyZoomWidth(); if (!w) return;
@@ -70956,7 +70972,7 @@ function storyZoom(dt) {
   lv = Math.max(1, lv);
   // (user Nov 2: stopped <-> moving "too aggressive ... almost feels like a snap") the change between Close and Medium in the same
   // vehicle eases slowly (ZOOM_EASE_AUTO, 39-camera.js), centred on her; a new vehicle or structure keeps the quick one
-  if (scopes[0].level !== lv) { if (Z.lv != null) zoomSlow(0); setScope(0, lv); }
+  if (scopes[0].level !== lv) { if (Z.lv != null && !homeShot) zoomSlow(0); setScope(0, lv); }   // (the new home's shot: out at once, its rocket bursting in under a second)
   // (user Nov 2 15:34: "When the game starts, it should be zoomed at the right level at the right vehicle. Right now the zoom is far
   // and does this super zoom in") the story opens already at its zoom, on what you control: no ease in from the menu's far view
   if (Z.snap) { Z.snap = false; for (const i of [0, 1]) { cam.zt[i] = cam.zt[0]; cam.za[i] = cam.zt[0]; ZE.from[i] = ZE.to[i] = cam.zt[0]; ZE.t[i] = 1; } cutTo(0); }
@@ -78849,16 +78865,27 @@ function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edV
    with it. A press, a key or a pad's button while the name is up takes it away quickly and is only that (as waking from sleep - storyWakePress);
    zooming by hand, picking something or leaving the structure ends the shot there.
    This screen's own presentation, run as it's drawn (as storyZoom): nothing of it is the simulation's.
+   THE NEW HOME'S SHOT (user Nov 21 10:53: "every time you enter a lighthouse to make it your new home, let's have a flare that shoots out into the sky
+   and lights up the night. The camera zooms out and you understand that this is now your new home"; 11:02: "the camera zooms out slightly so we see the
+   firework and the lighthouse"): the same shot, home: true - no name, the controls kept, framed to take the burst over it (HOME_UP m over its top, its foot HOME_FOOT down the screen) - held HOME s
+   while its rocket goes up and bursts (homeRocket), then eased back; started when story.homeN goes up (storyGo). It zooms out even when the
+   zoom is the player's: his own level is put back after (lv0); zooming by hand meanwhile ends it there.
    ================================================================ */
-const STOPEN = { HOLD: 1, FADE: 2, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
+const STOPEN = { HOLD: 1, FADE: 2, HOME: 4.5, HOME_UP: 46, HOME_FOOT: 0.9, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
   BOX: { cx: 0.613, cy: 0.467, w: 0.5438 * 0.78, h: 0.7049 * 0.78 }, PAD: 8, GAP: 0.04 };   // (BOX: the name's box, in the screen's fractions - the mockup's made 0.78 the size and its middle a little left and down: user Nov 13 16:05, his picture of it in the game, "a bit too big" and touching the lighthouse; PAD: the picture's margin round it; GAP: the least room between the structure's right side and the name, of the screen's width)
-const STORY_OPEN = { on: false, t: 0, skip: false };
+const STORY_OPEN = { on: false, t: 0, skip: false, home: false, lv0: null, seen: null };   // (home: the new home's shot; lv0: the player's own zoom level to put back; seen: story.homeN as last seen)
 // a story opened from its slots: the shot, from the loading screen's lift
-function storyOpenAsk() { STORY_OPEN.on = true; STORY_OPEN.t = 0; STORY_OPEN.skip = false; }
-const storyOpenEnd = () => { STORY_OPEN.on = false; };
-const stopenTitleT = () => STOPEN.HOLD + STOPEN.FADE;
+function storyOpenAsk() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: false, lv0: null, seen: null }); }
+// a lighthouse made your home: its shot (its rocket going up)
+function storyHomeShot() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: true, lv0: STORY_ZOOM.manual ? scopes[0].level : null }); }
+function storyOpenEnd() {
+  const O = STORY_OPEN; if (!O.on) return; O.on = false;
+  if (O.home && O.lv0 != null && STORY) { zoomSlow(0); setScope(0, O.lv0); STORY_ZOOM.lv = O.lv0; }   // (the player's own zoom back)
+  O.lv0 = null;
+}
+const stopenTitleT = () => STORY_OPEN.home ? STOPEN.HOME : STOPEN.HOLD + STOPEN.FADE;
 // the name on the screen: the controls hidden, presses only take it away
-const storyOpenHides = () => STORY && STORY_OPEN.on && !ui.title && STORY_OPEN.t < stopenTitleT();
+const storyOpenHides = () => STORY && STORY_OPEN.on && !STORY_OPEN.home && !ui.title && STORY_OPEN.t < stopenTitleT();
 const storyOpenAlpha = () => storyOpenHides() ? 1 - clamp((STORY_OPEN.t - STOPEN.HOLD) / STOPEN.FADE, 0, 1) : 0;
 // the structure framed: the one you're at, while you're in it and nothing's picked
 function stopenO() {
@@ -78869,23 +78896,28 @@ function stopenO() {
 const stopenK = () => 1 - smooth01(clamp((STORY_OPEN.t - stopenTitleT()) / STOPEN.MOVE, 0, 1));
 // each frame (storyFrameStep): the clock - only once the loading screen is gone; the ends
 function storyOpenStep(dt) {
-  const O = STORY_OPEN; if (!O.on) return;
+  const O = STORY_OPEN, n = STORY ? story.homeN || 0 : 0;
+  if (O.seen == null || n < O.seen) O.seen = n; else if (n > O.seen) { O.seen = n; if (!ui.title && !coverUp()) storyHomeShot(); }   // (a new home: its shot)
+  if (!O.on) return;
   if (!STORY) { O.on = false; return; }
   if (coverUp()) return;
-  if (STORY_ZOOM.manual || storySel || crew[0].mode !== 'dock') { storyOpenEnd(); return; }
+  if ((STORY_ZOOM.manual && !O.home) || storySel || crew[0].mode !== 'dock') { storyOpenEnd(); return; }
   O.t += dt * (O.skip && O.t < stopenTitleT() ? STOPEN.SKIP : 1);
-  if (O.t >= stopenTitleT() + STOPEN.MOVE) storyOpenEnd();
+  if (O.t >= stopenTitleT() + (O.home && O.lv0 != null ? 0 : STOPEN.MOVE)) storyOpenEnd();   // (the player's own zoom: eased straight back to it)
 }
 // the automatic zoom's width while the shot frames the structure (storyZoomWidth): as tall as 1 / H of it; once the name's gone, Story's own
 function storyOpenWidth() {
   const o = stopenO(); if (!o || STORY_OPEN.t >= stopenTitleT()) return null;
-  const B = strBox(o); return Math.max(1, B.foot - B.top) / STOPEN.H * VIEW_W / VIEW_H;
+  const B = strBox(o); return (STORY_OPEN.home ? stopenHomeH(B) : Math.max(1, B.foot - B.top) / STOPEN.H) * VIEW_W / VIEW_H;
 }
+// the new home's shot: as tall as the lighthouse and the sky its rocket bursts in, its foot HOME_FOOT down the screen (Y: its middle's place)
+const stopenHomeH = B => (Math.max(1, B.foot - B.top) + STOPEN.HOME_UP * UPM) / (STOPEN.HOME_FOOT - 0.04);
+const stopenHomeY = B => STOPEN.HOME_FOOT - Math.max(1, B.foot - B.top) / (2 * stopenHomeH(B));
 // the camera's aim (camFocus0, 39-camera.js): Story's own on the structure (storyGo's look) moved by the shot's offset at the zoom drawn
 function storyOpenFocus() {
   const o = stopenO(); if (!o) return null;
   const B = strBox(o), my = (B.top + B.foot) / 2, z = cam.za[0] || cam.zt[0] || 1, k = stopenK();
-  return [o.x + k * (0.5 - 1 / 3) * VIEW_W / z, my + k * (0.5 - STOPEN.Y) * VIEW_H / z, 0, 0, null];
+  return [o.x + k * (0.5 - 1 / 3) * VIEW_W / z, my + k * (0.5 - (STORY_OPEN.home ? stopenHomeY(B) : STOPEN.Y)) * VIEW_H / z, 0, 0, null];
 }
 // the name, in the controls' layer (render, 48-render.js): in its box, and never nearer the structure than GAP (user Nov 13 16:05: "a bit of
 // padding between the home structure and the title") - moved right if it would be, made smaller only if that would take it off the screen
@@ -79916,9 +79948,10 @@ function standHere() {
 ACTS.standPick = (p, sv) => {
   if (p !== 0 || !STORY) return;
   const H = standHere(); if (!H || !standCars().includes(sv) || H.v.sv === sv) return;
-  const { v, o } = H; story.car = sv;
+  const { v, o } = H, isle = isleCarOf(v);   // (an island's car: that island's changes - user Nov 21 11:03, 50-zzzzz-story-work.js)
+  if (isle != null) story.cars = Object.assign({}, story.cars, { [isle]: sv }); else story.car = sv;
   storyLeave(0, v); workVehGone(v);
-  const made = workVehMake(o, 'player', sv, { cv: 1 }), nv = made && folkSid(made.sid); if (!nv) return;   // (its row in the table - what was made is copied in)
+  const made = workVehMake(o, 'player', sv, { cv: isle != null ? CV_ISLE + isle : 1 }), nv = made && folkSid(made.sid); if (!nv) return;   // (its row in the table - what was made is copied in)
   storyEnterVeh(0, nv); storyArrive(o.id);
 };
 /* ---- THE SHOWROOM (this screen's: opening, fading, which car is shown) ---- */
@@ -82202,11 +82235,25 @@ function workVehGone(v) { const t = tableOf(v); if (t) emit('tableRemove', { t, 
    put away, unless it's out. ---- */
 const keptMissing = L => !L.some(v => v.state === 'run') && !L.some(v => v.state !== 'run' && (v.lostDay === W.day || env.time < STORY_WAKE_H));   // (lost: the next morning)
 const whoOf = c => c === PLAYER_C ? 'player' : c.id;
+/* (user Nov 21 10:58-11:03: "I don't want spawned cars or bringing your own car ... you get a different car per island ... there's always a car waiting for you per
+   location"; "All docks must have a parking. There's just going to be a car there for you ... if that island has a stand, you can swap it") THE ISLAND'S
+   CAR: on every land but your home's that has a dock, one car is yours - kept at the parking of its first dock (the dock's VEHICLES KEPT AT > PARKING - lotOf;
+   a dock without one is red: NEEDS PARKING, lotNeeds), there from the story's start, the same car always (left wherever you leave it; lost - a new one
+   the next morning, as every kept vehicle). Its type: the one last picked at a car stand on that land (story.cars), else your own car's. Marked cv 10 + the
+   land's shape id (your home's own car cv 1) */
+const CV_ISLE = 10;
+const isleCarOf = v => v && v.cv >= CV_ISLE ? v.cv - CV_ISLE : null;   // (the land - its shape id - an island's car is kept on; null: not one)
+function playerIsles() {   // [land shape, the parking its car is kept at] - each land with a dock, your home's left out
+  const H = storyHome(), home = H ? strLand(H) : null, out = new Map();
+  for (const d of strsUsed().filter(o => o.k === 'dock').sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => Math.abs(b.x - d.x) < Math.abs(a.x - d.x) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
+  return [...out];
+}
 function keptVehStep() {
   for (const c of charsAll()) {
     if (c !== PLAYER_C && stGone(c.id)) continue;
     const who = whoOf(c), H = stHome(c), veh = (c === PLAYER_C && story.car) || c.veh;   // (the player's own car: the one picked at a CAR STAND - 50-zzzzz-car-stand.js)
-    if (veh && STR_VEHS[veh] && H && !strDown(H) && keptMissing(ownVehsOf(who))) workVehMake(H, who, veh, { cv: 1 });
+    if (veh && STR_VEHS[veh] && H && !strDown(H) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) == null))) workVehMake(H, who, veh, { cv: 1 });
+    if (c === PLAYER_C) for (const [I, lot] of playerIsles()) { const sv = (story.cars || {})[I.id] || veh; if (sv && STR_VEHS[sv] && !strDown(lot) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) === I.id))) workVehMake(lot, who, sv, { cv: CV_ISLE + I.id }); }
     for (const W0 of c === PLAYER_C ? playerWorks() : [workOf(c)]) if (W0 && !strDown(W0) && workVehD(W0) && keptMissing(workVehsOf(who).filter(v => v.wk === W0.id))) workVehMake(W0, who);   // (the player: one at each place he's signed up at - 50-zzzzz-story-signup.js)
   }
   for (const v of [...storyCars, ...jetboats]) if (v.wk != null && v.state === 'run' && v.driven == null && !folkTrip(v) && !folkMine(v)) {
@@ -82648,6 +82695,7 @@ function lotNeeds(o) {
   const add = (sv, W) => { const D = STR_VEHS[sv]; if (!D || !LOT_FAMS[D.fam] || F.has(D.fam) || workTakes(o, sv, D.fam, W)) return; F.set(D.fam, sv); };
   for (const c of charsAll()) if (c.veh && (c.home === o.id || c.work === o.id) && (c === PLAYER_C || !stGone(c.id))) add(c.veh, null);
   if (workVehD(o)) add(o.wv, o);
+  if (o.k === 'dock') add(PLAYER_C.veh || 'suv', null);   // (user Nov 21 11:03: "All docks must have a parking. There's just going to be a car there for you" - the island's car, keptVehStep)
   if (strWork(o)) add('suv', null);   // (user 11:37: "The fishery should also complaint if it doesnt have a parking lot close to it. Otherwise how will someone get to it?" - every workplace: its workers drive there)
   return F;
 }
