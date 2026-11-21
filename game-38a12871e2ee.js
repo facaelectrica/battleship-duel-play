@@ -12975,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1254;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 00:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1255;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 00:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79919,7 +79919,7 @@ function folkPierCrane(c, S, v, J, T) {
     if (Q.far) { if (time < Q.until) return 1; folkJob(c, S, v, J, T); }
     else if (cr && cr.crj && !cr.crj.done) return 1;
     else folkLog({ t: 'job', who: c.id, verb: 'BACK ABOARD', k: J.k, n: (cr && cr.crj && cr.crj.got) || 0, at: slPlaceName(T.o) });
-    if (cr) cr.crj = null; v.crj = null; S.j++; return 1;
+    const moved = !Q.far && (J.do === 'deliver' || !!(cr && cr.crj && cr.crj.got > 0)); if (cr) cr.crj = null; v.crj = null; rtStep(S, J, T.o, v, moved); return 1;   // (a COLLECT / DELIVER of every good: the next good, while one's left)
   }
   // a pier with a crane over the door: tied up there
   let cr = pierCraneFor(v, D);
@@ -80246,7 +80246,7 @@ function folkCrane(c, S, v, J, T) {
     if (Q.far) { if (time < Q.until) return 1; folkJob(c, S, v, J, T); }
     else if (!Q.done) return 1;
     else folkLog({ t: 'job', who: c.id, verb: J.do === 'collect' ? 'CRANED ABOARD' : 'CRANED ASHORE', k: J.k, n: Q.got || 0, at: slPlaceName(T.o) });
-    v.crj = null; S.j++; return 1;
+    v.crj = null; rtStep(S, J, T.o, v, !Q.far && (J.do === 'deliver' || Q.got > 0)); return 1;   // (a COLLECT / DELIVER of every good: the next good, while one's left)
   }
   const reach = q => Math.abs(q - D.cx) < K.jib * UPM * 0.9;          // (a tie-up whose spot has the door in her jib's reach)
   const here = v.berth != null ? slStr(v.berth) : null;
@@ -80822,21 +80822,25 @@ const folkTaken = (c, V) => V.some(q => FOLK.st[q.sid] || (q.driven != null));
 function folkWait(c, S, V) { if (!folkTaken(c, V)) return false; if (!S.wait) folkLog({ t: 'wait', who: c.id }); S.wait = 1; S.nx = time + 1; return true; }
 // a COLLECT / DELIVER done from vehicle v at its place (beside it, or inside it through its door)
 function folkJob(c, S, v, J, T) {
+  if (rtAll(J)) { for (const k of rtGoodsNow(J, T.o, v, null)) folkJob(c, S, v, Object.assign({}, J, { k, all: 0, n: 0, pay: J.do === 'collect' ? (folkSoldAt(Object.assign({}, J, { k })) ? -1 : 0) : J.pay }), T); return; }   // (a ROUTINE's COLLECT / DELIVER: every good - 50-zzzzz-story-work.js rtAll)
   if (J.do === 'collect') { let n = Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)); if (J.pay < 0) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(J.k))); S.k = (S.k || 0) - n * cargoBuyPrice(J.k); } if (n > 0) { stAdd(T.o, J.k, -n); cargoAdd(v, J.k, n); } folkLog({ t: 'job', who: c.id, verb: J.pay < 0 ? 'BUY' : 'COLLECT', k: J.k, n, at: slPlaceName(T.o) }); }   // (BUY: as many as their coins pay for)
   else if (J.do === 'deliver') { const n = folkN(J, cargoN(v, J.k)); if (n > 0) { const pay = J.pay > 0 ? folkSellPay(T.o, J.k, n) : stPays(T.o, J.k, n, c.id); cargoAdd(v, J.k, -n); stHand(T.o, J.k, n); S.k = (S.k || 0) + pay; }   /* (paid as the player is: a SELL at its price, a delivery of what the place takes - stPays) */ folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); }   // (SELL: paid)
 }
+// whether vehicle q can do job J at target T: get there (a fish area: a fishing boat); a COLLECT / DELIVER also from the place's own DOCK / PARKING for it
+// (its lot) - a ship and a cargo terminal on land (user Nov 20 23:05)
+const folkCan = (q, J, T) => (folkReach(q, q.x, T.x) || (!!J && RT_GOODS.includes(J.do) && !!T.o && (Lt => !!Lt && folkReach(q, q.x, Lt.x))(lotOf(T.o, civCat(q))))) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
 // one decision for character c: what they do next, from where they are (they act only between trips)
 function folkPlan(c, S) {
-  const jobs = folkJobs(c), J = S.j >= 0 && S.j < jobs.length ? jobs[S.j] : null, T = folkTarget(c, J);
+  const jobs = folkJobs(c), T = folkTarget(c, S.j >= 0 && S.j < jobs.length ? jobs[S.j] : null);
   if (!T) { S.j = -1; return; }
-  const V = folkVehs(c), v = S.in ? V.find(q => q.sid === S.in) : null; if (S.wait) folkLog({ t: 'unwait', who: c.id }); S.wait = 0; S.duty = 0; const wasStuck = S.stuck; S.stuck = 0;
+  const V = folkVehs(c), v = S.in ? V.find(q => q.sid === S.in) : null, J = S.j >= 0 && S.j < jobs.length ? rtFor(jobs[S.j], T.o, v, folkHand(S)) : null; if (S.wait) folkLog({ t: 'unwait', who: c.id }); S.wait = 0; S.duty = 0; const wasStuck = S.stuck; S.stuck = 0;   // (a COLLECT / DELIVER with no good: the first it moves now - rtFor)
   if (S.in && !v) { const u = folkSid(S.in); if (!u || u.state !== 'run' || u.hp <= 0) { folkDie(c, S); return; } S.in = 0; S.wk = 0; S.at = (stHome(c) || {}).id || 0; S.j = -1; return; }   // (their vehicle lost with them in it: dead till the next morning - 50-zzzzz-story-death.js; else no longer theirs: home, the day over)
   const foot = !J || J.do === 'clockin' || J.do === 'clockout';   // (home, START WORK, END WORK: there on foot - 50-zzzzz-story-work.js)
   if (v) {
     if (FOLK.v[v.sid]) return;                                             // (on its way)
     const here = v.berth != null ? slStr(v.berth) : null;
     // there: the job done from the vehicle (at the place or one joined to it), or out of it at the place
-    const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));   // (a fish area: a fishing boat)
+    const can = q => folkCan(q, J, T);   // (a fish area: a fishing boat; a COLLECT / DELIVER from the place's lot too)
     if (J && J.do === 'hunt') { if (cargoN(v, J.k || 'fish') >= folkN(J, NETP.HOLD)) { S.j++; return; } if (can(v)) { folkGo(v, T.x, null, true); FOLK.v[v.sid].n = folkN(J, NETP.HOLD); return; } }   // (the hold full: the catch is done)
     // COLLECT / DELIVER from the vehicle stopped beside the place (as a market's sellers - it needn't be put away there)
     if (J && T.o && !foot) {
@@ -80847,6 +80851,9 @@ function folkPlan(c, S) {
         folkJob(c, S, v, J, T); S.j++; return;
       }
       if (can(v)) { folkGo(v, T.x, null, false, T.o); return; }
+      // (user Nov 20 23:05, the CAPTAIN's cargo ship and a cargo terminal on land) a place it can't come beside: from the place's own DOCK / PARKING for it (its
+      // lot - lotOf), tied up there - the job done from it, as a market's sellers do beside it
+      { const Lt = lotOf(T.o, civCat(v)); if (Lt && here === Lt) { folkJob(c, S, v, J, T); S.j++; return; } if (Lt && folkReach(v, v.x, Lt.x)) { folkGo(v, Lt.x, Lt); return; } }
     }
     // home (or the workplace, on foot): put away where it's taken nearest it, then a hop
     if (foot) {
@@ -80865,10 +80872,15 @@ function folkPlan(c, S) {
   if (T.o && folkAtPlace(P, T)) { if (!J) { S.j = -1; S.at = T.o.id; folkLog({ t: 'home', who: c.id }); return; }   // (home: at home - from a place joined to it)
     if (J.do === 'clockin') { workIn(c, S, T.o); S.j++; return; }
     if (J.do === 'clockout') { if (S.g && S.g.pri === 'work' && workAgain(c, S, T.o)) return; workOut(c, S, T.o); S.j++; return; }
-    const H = folkHand(S); if (J.do === 'deliver' && H && H[J.k] > 0) { const n = folkN(J, H[J.k]); S.k = (S.k || 0) + (J.pay > 0 ? folkSellPay(T.o, J.k, n) : stPays(T.o, J.k, n, c.id)); stHand(T.o, J.k, n); H[J.k] -= n; if (!Object.values(H).some(q => q > 0)) S.carry = null; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k: J.k, n, at: slPlaceName(T.o) }); } S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
+    // (on foot at the place or one joined to it - a COLLECT at the terminal next door, user Nov 20 23:05) what it has into their hands - loaded into the vehicle they
+    // take next (folkLoad; what doesn't fit stays in hand); where its market sells it, as many as their coins pay for
+    if (J.do === 'collect') { for (const k of rtAll(J) ? goodKs() : [J.k]) { let n = rtAll(J) ? stN(T.o, k) : folkN(J, stN(T.o, k)); const buy = J.pay < 0 || folkSoldAt(Object.assign({}, J, { k })); if (buy) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(k))); S.k = (S.k || 0) - n * cargoBuyPrice(k); }
+        if (n > 0) { stAdd(T.o, k, -n); const H = folkHand(S) || (S.carry = {}); H[k] = (H[k] || 0) + n; folkLog({ t: 'job', who: c.id, verb: buy ? 'BUY' : 'COLLECT', k, n, at: slPlaceName(T.o) }); } } S.j++; return; }
+    const H = folkHand(S); if (J.do === 'deliver' && H) for (const k of rtAll(J) ? Object.keys(H) : [J.k]) if (H[k] > 0) { const n = rtAll(J) ? H[k] : folkN(J, H[k]); S.k = (S.k || 0) + (J.pay > 0 ? folkSellPay(T.o, k, n) : stPays(T.o, k, n, c.id)); stHand(T.o, k, n); H[k] -= n; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k, n, at: slPlaceName(T.o) }); }
+    if (H && !Object.values(H).some(q => q > 0)) S.carry = null; S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
-  const can = q => folkReach(q, q.x, T.x) && (!T.a || (folkBoat(q) && q.kind === 'fish'));
+  const can = q => folkCan(q, J, T);
   const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkHops(B, slStr(u.berth)); })()));
   if (go && S.wk && workShort(c, S, J, jobs, go)) return;                       // (at work: nothing leaves without its MIN CARGO - they wait on duty - 50-zzzzz-story-work.js)
   if (go && S.wk && signHold(c, S, J)) return;                                    // (a task held for the player signed up here: they wait for it to start - 50-zzzzz-story-signup.js)
@@ -80956,7 +80968,7 @@ function storySim(days) {
 function folkNext(o, k) {
   let best = null;
   for (const c of OWNERS) {
-    if (stGone(c.id)) continue; const jobs = folkRoutine(c), i = jobs.findIndex(J => J.do === 'deliver' && J.k === k && J.at === o.id); if (i < 0) continue;
+    if (stGone(c.id)) continue; const jobs = folkRoutine(c), i = jobs.findIndex(J => J.do === 'deliver' && (J.k === k || rtAll(J)) && J.at === o.id); if (i < 0) continue;
     const S = FOLK.c[c.id], out = S && S.j >= 0 && S.j <= i + 1, later = !(S && S.day === W.day) && env.time < placeH(workOf(c))[0];   // (+1: START WORK first)
     const d = out || later ? 0 : 1; if (best == null || d < best) best = d;
   }
@@ -81702,7 +81714,7 @@ const clockAt = s => (env.time + s * clockRate(env.time)) % 24;
 const hhmm = h => { const H = Math.floor(h) % 24, M = Math.floor((h - Math.floor(h)) * 60); return H + ':' + String(M).padStart(2, '0'); };
 // (folkPlan: worker c about to take a vehicle out at work for job J, its MIN CARGO there) held for you: true - they wait for it, parked
 function signHold(c, S, J) {
-  if (!STORY || FOLK_FAST || !J || !RT_GOODS.includes(J.do) || !J.k) return false;
+  if (!STORY || FOLK_FAST || !J || !RT_GOODS.includes(J.do) || !(J.k || rtAll(J))) return false;
   const W0 = slStr(S.wk); if (!W0) return false;
   const T = FOLK.tk;
   if (T && T.at === W0.id && T.who === c.id) {
@@ -81714,17 +81726,21 @@ function signHold(c, S, J) {
   const su = signs()[W0.id]; if (!su || !su.w || actAlways(W0)) return false;
   if ((crew[0].mode !== 'civ' && crew[0].mode !== 'dock') || story.wake) return false;
   const L = strLand(W0); if (!L || L !== playerLand()) return false;                                 // (not on that island: no warning)
-  const n = Math.min(rtWaiting(W0, J, null), J.n > 0 ? J.n : Infinity), lead = signLead(W0);
+  const all = rtAll(J), g = {}; for (const k of all ? goodKs() : [J.k]) { const q = Math.min(rtWaiting(W0, Object.assign({}, J, { k, all: 0 }), null), !all && J.n > 0 ? J.n : Infinity); if (q > 0) g[k] = q; }   // (a COLLECT / DELIVER with no good: every good waiting - rtAll)
+  const n = Object.values(g).reduce((s, q) => s + q, 0), lead = signLead(W0);
   if (!(n > 0)) return false;
   FOLK.tkN = (FOLK.tkN || 0) + 1;
-  FOLK.tk = { id: FOLK.tkN, at: W0.id, who: c.id, do: J.do, k: J.k, n, to: J.at, start: time + lead, h: clockAt(lead), day: W.day, mine: 0 };
-  folkLog({ t: 'job', who: c.id, verb: 'HELD FOR YOU TILL ' + hhmm(FOLK.tk.h) + ':', k: J.k, n, at: slPlaceName(W0) });
+  FOLK.tk = { id: FOLK.tkN, at: W0.id, who: c.id, do: J.do, k: all ? '' : J.k, g, n, to: J.at, start: time + lead, h: clockAt(lead), day: W.day, mine: 0 };
+  folkLog({ t: 'job', who: c.id, verb: 'HELD FOR YOU TILL ' + hhmm(FOLK.tk.h) + ':', k: FOLK.tk.k, n, at: slPlaceName(W0) });
   S.duty = 1; S.nx = time + 1; return true;
 }
 // goods of task T from place F into your vehicle v; your objective then to hand them over at D
+// (a task with no good - T.k '': every good there, as much as fits - T.g what was loaded)
+const signKs = T => T.k ? [T.k] : Object.keys(T.g || {});
 function signLoad(T, F, v, D) {
-  const n = Math.min(stN(F, T.k), T.n > 0 ? T.n : Infinity, vehRoom(v, T.k)); if (!(n > 0)) return false;
-  stAdd(F, T.k, -n); cargoAdd(v, T.k, n); T.n = n; T.got = 1;
+  const g = {}; for (const k of T.k ? [T.k] : goodKs()) { const n = Math.min(stN(F, k), T.k && T.n > 0 ? T.n : Infinity, vehRoom(v, k)); if (n > 0) { stAdd(F, k, -n); cargoAdd(v, k, n); g[k] = n; } }
+  const n = Object.values(g).reduce((s, q) => s + q, 0); if (!(n > 0)) return false;
+  T.g = g; T.n = n; T.got = 1;
   story.obj = { to: 's:' + D.id, do: 'deliver', k: T.k, n, line: null, tk: T.id }; OBJFLY.t = -9;
   sound('click', 0); return true;
 }
@@ -81748,7 +81764,7 @@ function signStep() {
   }
   const V = workVehsOf('player').filter(q => q.wk === W0.id), F = slStr(T.to);
   if (T.do === 'collect' && !T.got) { const v = V.find(q => F && q.state === 'run' && storyStill(q) && folkBeside(q, F)); if (v) signLoad(T, F, v, W0); return; }   // (a COLLECT: stopped beside the place, its goods aboard - then home with them)
-  if (!V.some(q => cargoN(q, T.k) > 0)) { if (story.obj && story.obj.tk === T.id) story.obj = null; FOLK.tk = null; }   // (yours: done once what you took is handed over)
+  if (!V.some(q => signKs(T).some(k => cargoN(q, k) > 0))) { if (story.obj && story.obj.tk === T.id) story.obj = null; FOLK.tk = null; }   // (yours: done once what you took is handed over)
 }
 // ---- the commands
 ACTS.phoneMine = (p, id) => { const T = FOLK.tk; if (p !== 0 || !STORY || !T || T.id !== id || T.mine) return; story.obj = { to: 's:' + T.at, do: 'go', k: '', n: 0, line: null, tk: T.id }; OBJFLY.t = -9; };
@@ -81785,8 +81801,8 @@ function phoneWatch() {
 function phoneRowsOf() {
   const T = FOLK.tk, R = [];
   if (PHN.view === 'task' && T) {
-    const W0 = slStr(T.at), D = slStr(T.to), g = String(CARGO_LAB[T.k] || T.k).toUpperCase();
-    R.push({ t: W0 ? slPlaceName(W0) : '', head: 1 }, { t: (T.do === 'collect' ? 'COLLECT ' : 'DELIVER ') + T.n + ' ' + g }, { t: (T.do === 'collect' ? 'AT ' : 'TO ') + (D ? slPlaceName(D) : '?') }, { t: 'STARTS AT ' + hhmm(T.h) }, { t: 'PAYS ' + cargoCoins(T.k, T.n) + ' COINS' });
+    const W0 = slStr(T.at), D = slStr(T.to), G = T.g && Object.keys(T.g).length ? T.g : { [T.k]: T.n };   // (every good of a task with none: a row each)
+    R.push({ t: W0 ? slPlaceName(W0) : '', head: 1 }, ...Object.entries(G).map(([k, n]) => ({ t: (T.do === 'collect' ? 'COLLECT ' : 'DELIVER ') + n + ' ' + String(CARGO_LAB[k] || k).toUpperCase() })), { t: (T.do === 'collect' ? 'AT ' : 'TO ') + (D ? slPlaceName(D) : '?') }, { t: 'STARTS AT ' + hhmm(T.h) }, { t: 'PAYS ' + Object.entries(G).reduce((s, [k, n]) => s + cargoCoins(k, n), 0) + ' COINS' });
     if (T.mine) R.push({ t: 'YOUR TASK', head: 1 }, { t: 'BACK', go: () => { PHN.view = 'list'; PHN.sel = 0; } });
     else R.push({ t: 'MAKE IT MY TASK', go: () => { act(0, 'phoneMine', T.id); phoneClose(); } }, { t: 'IGNORE', go: () => phoneClose() });
     return R;
@@ -81945,7 +81961,7 @@ function stTakes(o, who = 'player', paid) {
   if (M) for (const q of (cargoKind(M.k).needs || [])) if (cargoKind(q.k)) K.add(q.k);
   for (const c of stNeedy()) if (c.home === o.id && !stGone(c.id) && c.id !== who && !(paid && famOf(who, c.id))) K.add(c.needs.k);
   // (user Nov 20 21:16: "every delivery, you get paid") what a workplace's routine DELIVERs here: the task's pay, whoever brings it - a worker, the player
-  for (const W of strsUsed()) if (strWork(W) && !strDown(W)) for (const J of workJobs(W)) if (J.k && cargoKind(J.k) && ((J.do === 'deliver' && J.at === o.id) || (J.do === 'collect' && W === o && !(strMarket(slStr(J.at)) && marketSells(slStr(J.at)).includes(J.k))))) K.add(J.k);   // (and what its own routine COLLECTs - brought back to it; not what it buys at a market)
+  for (const W of strsUsed()) if (strWork(W) && !strDown(W)) for (const J of workJobs(W)) for (const k of rtAll(J) ? goodKs() : [J.k]) if (k && cargoKind(k) && ((J.do === 'deliver' && J.at === o.id) || (J.do === 'collect' && W === o && !(strMarket(slStr(J.at)) && marketSells(slStr(J.at)).includes(k))))) K.add(k);   // (a COLLECT / DELIVER with no good: every good - rtAll)   // (and what its own routine COLLECTs - brought back to it; not what it buys at a market)
   for (const k of CARGO_KINDS.map(q => q[0])) if (!K.has(k) && strWork(o) && !strDown(o) && workBuysOwn(o, k)) K.add(k);   // (what its own routine HUNTs / SELLs here: it buys it from whoever brings it - buysHere, folkSellPay)
   return [...K];
 }
@@ -82123,25 +82139,40 @@ function workAgain(c, S, W0) {
      a few seconds (workShort); the day's HOURS still end it. Every vehicle with a routine - cars, boats - one rule. ---- */
 const rtMin = J => Math.max(1, J && J.min | 0);
 const RT_GOODS = ['collect', 'deliver'];
-// how many of job J's good wait for a vehicle setting out from workplace W0 (in hand: what the worker carries)
+/* (user Nov 20 23:16: "It should just be COLLECT + location without any descrimination of what it collects. Its everything the location has. Same with
+   delivery. Its whatever its carrying to the target cargo terminal") A ROUTINE's COLLECT and DELIVER name no good and no HOW MANY: a COLLECT takes
+   everything its place has, as much as fits (vehRoom); a DELIVER hands over everything carried - and, setting out from the workplace, loads everything
+   stored there (workLoad). A step with a good is only one worked out for a need (famSteps: medicine to buy). One rule for a character and the player's
+   task (50-zzzzz-story-signup.js); the cranes take one good at a time and the step goes on while another is left (rtStep). */
+const rtAll = J => !!J && RT_GOODS.includes(J.do) && (!J.k || !!J.all);
+const goodKs = () => CARGO_KINDS.map(q => q[0]);
+// the goods a step with no good moves now: a COLLECT, what place o has that vehicle v has room for; a DELIVER, what v carries (and what's in hand)
+const rtGoodsNow = (J, o, v, hand) => goodKs().filter(k => J.do === 'collect' ? !!o && stN(o, k) > 0 && (!v || vehRoom(v, k) > 0) : (!!v && cargoN(v, k) > 0) || (!!hand && hand[k] > 0));
+// (folkPlan) a step with no good as it's done now: the first good it moves, all: 1 (folkJob moves them all; a crane one at a time)
+function rtFor(J, o, v, hand) { if (!rtAll(J) || J.all) return J; const k = rtGoodsNow(J, o, v, hand)[0] || ''; return Object.assign({}, J, { k, all: 1, n: 0, pay: J.do === 'collect' && k && folkSoldAt(Object.assign({}, J, { k })) ? -1 : J.pay }); }
+// (a crane's step with no good, one good done - moved: it moved something) on to the next step, unless another good is left to move here
+function rtStep(S, J, o, v, moved) { if (J && J.all && moved && rtGoodsNow(J, o, v, null).filter(k => k !== J.k || J.do === 'collect').length) return; S.j++; }
+// how many wait for a vehicle setting out from workplace W0 for job J (in hand: what the worker carries) - every good for a step with none
 function rtWaiting(W0, J, hand) {
+  if (rtAll(J)) return goodKs().reduce((s, k) => s + rtWaiting(W0, Object.assign({}, J, { k, all: 0 }), hand), 0);
   if (J.do === 'deliver') return ((hand && hand[J.k]) || 0) + (W0 ? stN(W0, J.k) : 0);
   const T = J.at != null ? slStr(J.at) : null; return T ? stN(T, J.k) : 0;
 }
 // (folkPlan, about to take a vehicle out at work for job J) too few for its MIN CARGO: on duty, a look again in 5 s (true: waiting)
 // (v: the vehicle it would take - what it can carry counts: a liquid only in a tank, a hold's containers - vehRoom; a MIN over what it can take: full is enough)
 function workShort(c, S, J, jobs, v) {
-  if (!J || !RT_GOODS.includes(J.do) || !J.k) { S.cw = 0; return false; }
-  const W0 = slStr(S.wk), fit = v ? cargoN(v, J.k) + vehRoom(v, J.k) : Infinity, n = Math.min(rtWaiting(W0, J, folkHand(S)), fit), min = Math.max(1, Math.min(rtMin(J), fit));
+  if (!J || !RT_GOODS.includes(J.do) || !(J.k || rtAll(J))) { S.cw = 0; return false; }
+  const W0 = slStr(S.wk), ks = rtAll(J) ? goodKs() : [J.k], fitK = k => v ? cargoN(v, k) + vehRoom(v, k) : Infinity;
+  const n = ks.reduce((s, k) => s + Math.min(rtWaiting(W0, Object.assign({}, J, { k, all: 0 }), folkHand(S)), fitK(k)), 0), fit = ks.reduce((s, k) => s + fitK(k), 0), min = Math.max(1, Math.min(rtMin(J), fit));
   if (n >= min) { S.cw = 0; return false; }
-  if (!S.cw) folkLog({ t: 'job', who: c.id, verb: 'WAITS FOR ' + min + ', HAS', k: J.k, n, at: J.do === 'deliver' && W0 ? slPlaceName(W0) : slPlaceName(slStr(J.at)) });
+  if (!S.cw) folkLog({ t: 'job', who: c.id, verb: 'WAITS FOR ' + min + ', HAS', k: rtAll(J) ? '' : J.k, n, at: J.do === 'deliver' && W0 ? slPlaceName(W0) : slPlaceName(slStr(J.at)) });
   S.cw = 1; S.duty = 1; S.nx = time + 5; return true;
 }
 // (folkPlan, a work vehicle just taken out) the DELIVERs from job S.j on, in a row: their goods from the workplace into it
 function workLoad(S, v, jobs) {
   const W0 = slStr(S.wk); if (!W0) return;
   const want = {};   // (good -> how many in all - Infinity: all there is)
-  for (let i = Math.max(0, S.j); i < jobs.length && jobs[i].do === 'deliver'; i++) { const J = jobs[i]; if (J.k) want[J.k] = (want[J.k] || 0) + (J.n > 0 ? J.n : Infinity); }
+  for (let i = Math.max(0, S.j); i < jobs.length && jobs[i].do === 'deliver'; i++) { const J = jobs[i]; if (rtAll(J)) { for (const k of goodKs()) want[k] = Infinity; continue; } if (J.k) want[J.k] = (want[J.k] || 0) + (J.n > 0 ? J.n : Infinity); }   // (a DELIVER with no good: everything stored here)
   for (const k in want) { const n = Math.min(stN(W0, k), want[k] - cargoN(v, k), vehRoom(v, k)); if (n > 0) { stAdd(W0, k, -n); cargoAdd(v, k, n); folkLog({ t: 'job', who: folkWho(v), verb: 'LOAD', k, n, at: slPlaceName(W0) }); } }
 }
 // ---- each step (STORY)
@@ -82158,7 +82189,7 @@ function workVehStep() {
 const WORK_KEYS = ['work', 'wv', 'rt'];
 // (user Nov 20 21:16: stealing gone - TOW, ANSWER THEFTS with it) a routine step of an older world with either: dropped as it loads
 const RT_GONE = ['tow', 'theft'];
-const rtLive = L => (Array.isArray(L) ? L : []).filter(J => J && !RT_GONE.includes(J.do));
+const rtLive = L => (Array.isArray(L) ? L : []).filter(J => J && !RT_GONE.includes(J.do)).map(J => { if (RT_GOODS.includes(J.do) || J.do === 'buy') { delete J.k; delete J.n; } return J; });   // (and a COLLECT / DELIVER's good and HOW MANY - every good since Nov 20 23:16)
 // (user Nov 20 13:56-13:58: "You're not going to collect something from your own location"; "Sell, it's also always at the current place. And delivery
 // can never be to your own place") where a step is done is its verb's: SELL here (a catch sold to its own workplace); DELIVER, COLLECT, BUY, GO TO another
 // place - each placed one sets which (rtAt); FISH the nearest fish area. No choice on the type.
@@ -82268,17 +82299,17 @@ function workPrefabBox(p, el, css, ed, self) {   // (self: its type's kind - THI
   { const r = row(); r.append(L('ROUTINE', 'Its jobs in order, again through the day')); if (!(p.rt || []).length) r.appendChild(W_('NONE: ON DUTY HERE', 'Workers stay here till the day ends')); }
   (p.rt || []).forEach((J, i) => {
     const r = row(); r.style.paddingLeft = '14px';
-    r.append(L(String(i + 1), 'Done in this order'), S(VERBS, J.do, v => { J.do = v; delete J.at; if (v === 'hunt' && !HUNT_GOODS.includes(J.k)) J.k = HUNT_GOODS[0]; J.to = rtTo({ do: v }) || 'self'; }, 130, 'What they do'));
+    r.append(L(String(i + 1), 'Done in this order'), S(VERBS, J.do, v => { J.do = v; delete J.at; if (v === 'hunt' && !HUNT_GOODS.includes(J.k)) J.k = HUNT_GOODS[0]; if (RT_GOODS.includes(v)) { delete J.k; delete J.n; } J.to = rtTo({ do: v }) || 'self'; }, 130, 'What they do'));
     if (J.do === 'hunt') { r.append(S(HUNT_GOODS.map(k => [k, CARGO_LAB[k] || k]), J.k, v => { J.k = v; }, 90, 'What they hunt')); const a = (NAT_KINDS[J.k] || {}).lab || J.k, w = W_('AT THE NEAREST ' + a, 'Brought back here, paid its price for each'); if (!NATURE.some(q => q.k === J.k)) { w.textContent = 'NO ' + a; w.title = 'Place one in the WORLD EDITOR (OBJECTS)'; w.style.color = '#ff6a5a'; } r.append(w); }
-    else { if (J.do !== 'go') r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); { const here = rtTo(J) === 'self', w = W_(here ? 'HERE' : 'AT A PLACE SET ON EACH', here ? 'Its workers sell it to this place - paid its price for each' : 'Each placed one sets where (WORLD EDITOR)');
+    else { if (J.do !== 'go' && !RT_GOODS.includes(J.do)) r.append(S([['', '-'], ...CARGO.map(C => [C.k, C.name])], J.k || '', v => { J.k = v; }, 90, 'Which good')); { const here = rtTo(J) === 'self', w = W_(here ? 'HERE' : 'AT A PLACE SET ON EACH', here ? 'Its workers sell it to this place - paid its price for each' : 'Each placed one sets where (WORLD EDITOR)');
         if (!here && !can(J)) { w.textContent = 'NOWHERE CAN'; w.title = 'No place stores it'; w.style.color = '#ff6a5a'; } r.append(w); } }
-    if (J.do !== 'go') { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; ed(); }; r.append(n); }
+    if (J.do !== 'go' && !RT_GOODS.includes(J.do)) { const n = el('input'); n.type = 'number'; n.min = '0'; n.step = '1'; n.value = String(J.n || 0); n.style.cssText = css + ';width:56px'; n.title = 'How many (0: all - a full hold, all there is)'; n.onchange = () => { const v = Math.max(0, Math.floor(+n.value || 0)); if (v) J.n = v; else delete J.n; ed(); }; r.append(n); }
     if (RT_GOODS.includes(J.do)) { const m = el('input'); m.type = 'number'; m.min = '1'; m.step = '1'; m.value = String(rtMin(J)); m.style.cssText = css + ';width:56px'; m.title = J.do === 'deliver' ? 'Min units stored here to leave' : 'Min units waiting there to leave';
       m.onchange = () => { const v = Math.max(1, Math.floor(+m.value || 1)); if (v > 1) J.min = v; else delete J.min; ed(); }; r.append(W_('MIN', 'Min cargo: never leaves with less'), m); }
     const x = el('button', '', 'X'); x.title = 'Remove this job'; x.onclick = () => { p.rt.splice(i, 1); if (!p.rt.length) delete p.rt; ed(); }; r.append(x);
   });
   const aj = el('button', '', '+ JOB'); aj.title = 'Another job in its routine'; aj.style.marginLeft = '14px';
-  aj.onclick = () => { const L = p.rt || (p.rt = []); L.push({ id: rtNewId(L), do: 'collect', k: (CARGO[0] || {}).k || '', to: 'pick' }); ed(); };
+  aj.onclick = () => { const L = p.rt || (p.rt = []); L.push({ id: rtNewId(L), do: 'collect', to: 'pick' }); ed(); };
   c.appendChild(aj);
   return c;
 }
