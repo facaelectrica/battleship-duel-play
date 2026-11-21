@@ -12975,8 +12975,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1259;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 21 00:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1260;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 21 01:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17007,7 +17007,7 @@ function harbourTop(x, y = -1e9) {
   const d = harbourAt(x);
   if (d) {
     const dy = pierDeckY(d);                                                           // (its deck: a wooden dock's its own height, any other's at its water's - 50-zz-structh)
-    return y <= dy + 2 ? dy : Infinity;
+    return y <= dy + 2 ? pierDeckAt(d, x) : Infinity;                                  // (its top there: a pier's ramp up to the land - pierExt)
   }
   return Infinity;
 }
@@ -75549,35 +75549,60 @@ function harbourCraneS(d) {
 // the harbours and the piers of their own: everything whose pillars a torpedo or a shell can break
 const pierHosts = () => HARB.free.length ? docks.concat(HARB.free) : docks;
 // a pier of its own: its deck over x (standing, not where a span has fallen); a shot at x, y on that deck
-const pierDeckOver = (p, x) => { if (p.pierGone) return false; if (x >= p.px0 && x <= p.px0 + p.pl) return !deckGone(p, x); const E = p.look === 'wood' || p.so ? pierExt(p) : null; return !!E && x >= E[0] && x <= E[1]; };
+const pierDeckOver = (p, x) => { if (p.pierGone) return false; const E = p.look === 'wood' || p.so ? pierExt(p) : null; if (x >= p.px0 && x <= p.px0 + p.pl) return !deckGone(p, x); return !!E && x >= E[0] && x <= E[1]; };   // (its ends worked out first: a ramp's top is asked of its deck too - pierDeckAt)
 /* (user Nov 2 14:54: "A dock should go deeper into the terrain so we don't see a gap"; "when I drive a car from land to a dock, its
    hitting the water and bouncing around. The collision system should make a smooth surface") a pier of its own runs on at either
    end into the ground there: from its end outward, as far as the first ground that reaches its deck (pillarFloor - the land, an
    island, a rock), and PIER_INTO on into it - drawn with its pillars before the ground (drawPierPosts), so the ground covers it, and
    solid as its deck (pierDeckOver, harbourTop; on land too - groundBelow's deckOn). Where no ground comes up to it within
-   PIER_REACH (an end out at sea), it stops as drawn. [x0, x1]: its deck's whole span; made once its floor is there */
-const PIER_REACH = 14 * UPM, PIER_INTO = 1.5 * UPM;
+   PIER_REACH (an end out at sea), it stops as drawn. [x0, x1]: its deck's whole span; made once its floor is there.
+   (user Nov 20 23:47, bug-20261120-233300-v1254 - the BUG blew up driving from PIER up onto the land 2.8 m above its deck, a 45° bank
+   with a lip at the joint: "Deck ramps up") WHERE THE GROUND IT RUNS INTO STANDS ABOVE ITS DECK, ITS DECK RAMPS UP TO IT: from its own
+   deck, rising PIER_RAMP a unit along, to where it meets the ground's top - the lowest such line that stays over the ground all the way
+   (the line of that rise from below touching the ground's outline: its end where the ground beyond rises less steeply than the ramp).
+   Solid as its deck (pierDeckAt - the wedge under it too), drawn as its deck along the slope (pierRampDraw), its lamps on it. E.ramp:
+   [left end's, right end's] - { xa, ya: its foot on the deck, xb, yb: its top on the ground } or null. A ramp longer than the pier
+   leaves the bank as it is */
+const PIER_REACH = 14 * UPM, PIER_INTO = 1.5 * UPM, PIER_RAMP = 0.2, PIER_SKY = 60 * UPM;
 function pierExt(p) {
   if (p._ext) return p._ext;
-  const a = p.px0, b = p.px0 + p.pl, dy = pierDeckY(p); p._ext = [a, b];
+  const a = p.px0, b = p.px0 + p.pl, dy = pierDeckY(p); p._ext = [a, b];   // (while it's worked out: its deck as drawn - the ground under it asked through deckOn)
   if (typeof land === 'undefined' || !land.cell) { p._ext = null; return [a, b]; }
-  const reach = dir => { const x0 = dir < 0 ? a : b; for (let u = 2; u <= PIER_REACH; u += 2) { const x = clamp(x0 + dir * u, 0, WORLD_W - 1); if (pillarFloor(x, dy - 60) <= dy + 3) return x0 + dir * Math.min(u + PIER_INTO, PIER_REACH); } return x0; };
-  const E = [reach(-1), reach(1)]; p._ext = E; return E;
+  const fl = x => pillarFloor(clamp(x, 0, WORLD_W - 1), dy - PIER_SKY), ramps = [null, null];
+  const end = (dir, i) => {
+    const x0 = dir < 0 ? a : b; let ug = -1;
+    for (let u = 2; u <= PIER_REACH; u += 2) if (fl(x0 + dir * u) <= dy + 3) { ug = u; break; }
+    if (ug < 0) return x0;
+    const into = x0 + dir * Math.min(ug + PIER_INTO, PIER_REACH);
+    // the ramp: of the ground standing above its deck (h, from its own deck - u < 0 - to PIER_REACH past where the ground meets it), the point
+    // the line of PIER_RAMP's rise touches first from below (the least u - h / PIER_RAMP)
+    let best = Infinity, u1 = 0, h1 = 0;
+    for (let u = -p.pl; u <= ug + PIER_REACH; u++) { const h = dy - fl(x0 + dir * u); if (h > 1 && u - h / PIER_RAMP < best) { best = u - h / PIER_RAMP; u1 = u; h1 = h; } }
+    if (!h1 || best < -(p.pl - 4 * UPM)) return into;                // (the ground no higher than its deck: it runs into it; a ramp longer than the pier: none)
+    const r = { xa: x0 + dir * best, ya: dy, xb: x0 + dir * u1, yb: dy - h1 }, o = ramps[1 - i];
+    if (o && Math.min(r.xa, r.xb) < Math.max(o.xa, o.xb) && Math.max(r.xa, r.xb) > Math.min(o.xa, o.xb)) return into;   // (the other end's ramp there already)
+    ramps[i] = r; return dir < 0 ? Math.min(x0, r.xb) : Math.max(x0, r.xb);
+  };
+  const E = [end(-1, 0), end(1, 1)]; E.ramp = ramps; p._ext = E;
+  if (p.lamps) { p.lamps0 ||= p.lamps.map(q => q.slice()); p.lamps = p.lamps0.map(q => { const d = q.length < 4 ? 0 : pierDeckAt(p, q[2]) - dy; return d ? [q[0], q[1] + d, q[2], q[3] + d] : q; }); }   // (its lamps standing on a ramp stand on it)
+  return E;
 }
 // a free pier's deck over x, on land too (where its end runs into the ground): its top, or Infinity
 const pierDeckY = p => p.deckY != null ? p.deckY : DECK_Y + dkY(p);   // (its deck: a wooden dock's its own, a steel one's at its water's)
-function deckOn(x, y) { if (!HARB.on) return Infinity; for (const p of HARB.free) if (pierDeckOver(p, x)) { const dy = pierDeckY(p); return y <= dy + 2 ? dy : Infinity; } return Infinity; }
-const pierDeckHit = (p, x, y) => pierDeckOver(p, x) && y >= pierDeckY(p) - 1 && y < waterLv(clamp(x, 0, WORLD_W - 1)) + 2;   // (down to its own water's level)
+// its deck's top at x: its deck, or its ramp's where one runs up to the ground (pierExt)
+function pierDeckAt(p, x) { const dy = pierDeckY(p), R = p._ext && p._ext.ramp; if (R) for (const r of R) if (r && (x - r.xa) * (x - r.xb) <= 0) return r.ya + (r.yb - r.ya) * (x - r.xa) / (r.xb - r.xa); return dy; }
+function deckOn(x, y) { if (!HARB.on) return Infinity; for (const p of HARB.free) if (pierDeckOver(p, x)) return y <= pierDeckY(p) + 2 ? pierDeckAt(p, x) : Infinity; return Infinity; }   // (from above its deck: its top there - a ramp's wedge solid under it)
+const pierDeckHit = (p, x, y) => pierDeckOver(p, x) && y >= pierDeckAt(p, x) - 1 && y < waterLv(clamp(x, 0, WORLD_W - 1)) + 2;   // (down to its own water's level)
 // a pier on its own: its picture where its structure is (its pillars break and it falls as a harbour's does - pierHosts)
 // (part 'posts': its pillars, drawn before the ground - drawPierPosts; else its deck)
 function drawFreePiers(x0, x1, part, lake = false) {
   const posts = part === 'posts', own = thingsOwn();
   for (const p of HARB.free) {
     if (!!p.lake !== lake) continue;                    // (the sea's in the sea's pass, a lake's in the lake's)
-    if (offView(p.px0, p.px0 + p.pl, x0, x1)) continue;
+    const E = pierExt(p); if (offView(Math.min(p.px0, E[0]), Math.max(p.px0 + p.pl, E[1]), x0, x1)) continue;
     if (posts && !p.pierGone) pierExtDraw(p);           // (its deck on into the ground at its ends - pierExt)
     pierDraw(p, posts);
-    if (!posts && !p.pierGone) drawDockLamps(p.lamps, pierK(p), dockLampFlip(p));   // (its lamps on its deck - 50-zz-docklamp.js)
+    if (!posts && !p.pierGone) { pierRampDraw(p); drawDockLamps(p.lamps, pierK(p), dockLampFlip(p)); }   // (its ramps up to the land over its deck; its lamps on its deck - 50-zz-docklamp.js)
   }
   if (own) thingsEnd();
 }
@@ -75630,8 +75655,8 @@ function pierExtDraw(p) {
   const E = pierExt(p), a = p.px0, b = p.px0 + p.pl; if (E[0] >= a && E[1] <= b) return;
   const L = pierVis(p); if (!L) return;
   const K = pierK(p), W = p.ppx, sw = Math.min(W, Math.max(8, Math.round(W / 4))), s0 = Math.floor((W - sw) / 2), R = pierRows(p), Y0 = PY(pierTop(p)), s = K * SV;
-  const D = pierWin(L, s0, 0, s0 + sw, R);
-  for (const [x0, x1] of [[E[0], a], [b, E[1]]]) {
+  const D = pierWin(L, s0, 0, s0 + sw, R), RP = E.ramp || [];
+  for (const [x0, x1] of [RP[0] ? [a, a] : [E[0], a], RP[1] ? [b, b] : [b, E[1]]]) {   // (an end that ramps up: its ramp, in the deck's turn - pierRampDraw)
     for (let x = x0; x < x1 - 1e-6;) {
       const w = Math.min(sw * K, x1 - x), m = thgTranslate(thgCur(), PX(x), Y0);
       if (p.dir < 0) thgScale(thgTranslate(m, w * SV, 0), -1, 1);   // (its picture's own way round)
@@ -75639,6 +75664,40 @@ function pierExtDraw(p) {
       x += w;
     }
   }
+}
+// (user Nov 20 23:47) a free pier's ramps up to the land (pierExt): its deck's slab - the same middle stretch of it as its ends' (pierExtDraw), from
+// its deck's top down while every column of it is solid (pierSlab) - laid again and again along the ramp from its foot on the deck to its top on
+// the ground, in the deck's turn: over its own deck and in front of the bank it lies on
+function pierRampDraw(p) {
+  const RP = pierExt(p).ramp; if (!RP || !(RP[0] || RP[1])) return;
+  const L = pierVis(p); if (!L) return;
+  const K = pierK(p), W = p.ppx, sw = Math.min(W, Math.max(8, Math.round(W / 4))), s0 = Math.floor((W - sw) / 2), R = pierRows(p), s = K * SV;
+  const r0 = Math.round((pierDeckY(p) - pierTop(p)) / K), r1 = pierSlab(p, L, s0, sw, r0, R), D = pierWin(L, s0, r0, s0 + sw, r1);
+  for (const r of RP) {
+    if (!r) continue;
+    const [xl, yl, xr, yr] = r.xa < r.xb ? [r.xa, r.ya, r.xb, r.yb] : [r.xb, r.yb, r.xa, r.ya], ang = Math.atan2(yr - yl, xr - xl), ca = Math.cos(ang), n = Math.hypot(xr - xl, yr - yl);
+    for (let t = 0; t < n - 1e-6;) {
+      const w = Math.min(sw * K, n - t), x = xl + t * ca, y = yl + t * Math.sin(ang);
+      if (x >= p.px0 && x <= p.px0 + p.pl && deckGone(p, x)) { t += w; continue; }   // (a span fallen under it: that piece of the ramp with it)
+      const m = thgRotate(thgTranslate(thgCur(), PX(x), PY(y)), ang); thgTranslate(m, 0, -r0 * s);
+      if (p.dir < 0) thgScale(thgTranslate(m, w * SV, 0), -1, 1);   // (its picture's own way round)
+      pierQuads(p, pierWin(D, s0, r0, s0 + w / K, r1), m, s, s0, 0, 0);
+      t += w;
+    }
+  }
+}
+// its deck's slab in the stretch [s0, s0 + sw) of its picture's parts L: the row under its top (r0) where a column first opens - its beams and posts
+// below it; once a picture (made on the page: drawing only)
+function pierSlab(p, L, s0, sw, r0, R) {
+  const PP = pierParts(p); if (!PP) return R; if (PP.slab != null) return PP.slab;
+  let r1 = R;
+  try {
+    const cv = makeCanvas(sw, R), x = cv.getContext('2d');
+    for (const q of pierWin(L, s0, 0, s0 + sw, R)) x.drawImage(PP.P, q[0], q[1], q[2], q[3], q[4] - s0, q[5], q[2], q[3]);
+    const d = x.getImageData(0, 0, sw, R).data;
+    for (let y = r0; y < R; y++) { let all = true; for (let i = 0; i < sw && all; i++) all = d[(y * sw + i) * 4 + 3] > 0; if (!all) { r1 = y; break; } }
+  } catch (e) { }
+  return (PP.slab = Math.max(r0 + 1, r1));
 }
 // every dock's pillars (the harbours' piers, the piers of their own, the wooden docks), before the ground they go into
 function drawPierPosts(x0, x1, lake = false) {
@@ -76237,7 +76296,7 @@ const SHORE_R = 2000;                                       // (world units: how
 function vehDeck(x, y) {
   const roof = hangarRoofUnder(x, y - RIDE_T);
   if (roof < Infinity && Math.abs(roof - y) <= RIDE_T) { const h = docks.find(q => !q.noHangar && hangarRoofAt(q, x) === roof); if (h && h.so) return h.so; }
-  const d = harbourAt(x); if (d && d.so && Math.abs(pierDeckY(d) - y) <= RIDE_T) return d.so;
+  const d = harbourAt(x); if (d && d.so && Math.abs(pierDeckAt(d, x) - y) <= RIDE_T) return d.so;
   const rw = strRunwayAt(x); if (rw && Math.abs(strRunwayBox(rw).top - y) <= RIDE_T) return rw;
   return null;
 }
