@@ -12968,8 +12968,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1241;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 20 21:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1242;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 20 22:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14580,12 +14580,12 @@ const edHandle = (px = 4.5, room = Infinity) => Math.max(ED_HANDLE_MIN, Math.min
 function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
 // (user Oct 29: "Editor or World mode - infinite zoom and panning up and down"; while playing the play's levels are the limit)
 const PHOTO_ZMIN = ZOOM_MIN * 0.8 / 400, PHOTO_Y = 5e6;
-// (user Nov 20 20:15: "the game editor is the same thing, you zoom in and you zoom out the same way") in the GAME EDITOR, out past the game's farthest
-// (ZOOM_MIN) the MAP opens and goes on (50-zzzzz-story-map.js); open, the zoom is the map's. Photo mode, playing: its own far zoom (PHOTO_ZMIN)
+// (user Nov 20 20:15: "the game editor is the same thing, you zoom in and you zoom out the same way") in the GAME EDITOR, out past twice the game's farthest
+// (SMAP_ED_Z - user 21:01: "at least half earlier") the MAP opens and goes on (50-zzzzz-story-map.js); open, the zoom is the map's. Photo mode, playing: its own far zoom (PHOTO_ZMIN)
 function photoZoom(f) {
   if (PHOTO.ed && SMAP.on) { smapZoomBy(f); return; }
-  if (PHOTO.ed && f < 1 && PHOTO.z * f < ZOOM_MIN) { PHOTO.z = ZOOM_MIN; smapZoomOut(); return; }
-  PHOTO.z = clamp(PHOTO.z * f, PHOTO.ed ? ZOOM_MIN : PHOTO_ZMIN, ZOOM_TOP);
+  if (PHOTO.ed && f < 1 && PHOTO.z * f < SMAP_ED_Z()) { smapZoomOut(); return; }   // (the map on the view as it's drawn now - user 21:01: seamless)
+  PHOTO.z = clamp(PHOTO.z * f, PHOTO.ed ? SMAP_ED_Z() : PHOTO_ZMIN, ZOOM_TOP);
 }
 function photoPan(dxPx, dyPx) {          // (screen pixels dragged: the world follows the finger)
   const k = dpr / PIXW / (S * PHOTO.z);                         // (world units a screen point)
@@ -15798,7 +15798,7 @@ function pointerMove(e) {
     if (a && b) { const zz = pz.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pz.d0;
       // (the STORY MAP: pinched out past the farthest level it opens, and the same pinch goes on zooming it - by how much the fingers moved since - user Nov 20 20:42)
       if (SMAP.on) { if (pz.last) smapZoomBy(zz / pz.last); pz.last = zz; }
-      else if (STORY && !ui.title && zz < ZOOM_LEVELS[storyFarLv() - 1] * 0.8) { smapZoomOut(); pz.last = zz; }
+      else if (STORY && !ui.title && zz < ZOOM_LEVELS[smapStoryLv() - 1] * 0.85) { smapZoomOut(); pz.last = zz; }
       else asSlot(p.half, q => setZoom(q, zz)); }
   }
 }
@@ -15869,7 +15869,7 @@ function wheelZoom(p, d) {
   const n = Math.trunc(wheelAcc[p] / WHEEL_STEP); if (!n) return;
   wheelAcc[p] -= n * WHEEL_STEP;
   if (crew[p]) crew[p].zoomOwn = true;
-  if (STORY && n < 0 && scopes[p].level <= storyFarLv()) { smapZoomOut(); return; }   // (past the farthest: the STORY MAP, smoothly - 50-zzzzz-story-map.js)
+  if (STORY && n < 0 && scopes[p].level <= smapStoryLv()) { smapZoomOut(); return; }   // (past the farthest: the STORY MAP, smoothly - 50-zzzzz-story-map.js)
   setScope(p, scopes[p].level + clamp(n, -2, 2));
 }
 
@@ -16250,7 +16250,7 @@ function pollPads(dt) {
         // the D-pad zooms, a step at a time while held
         const z = (btn(12) || btn(15) ? 1 : 0) - (btn(13) || btn(14) ? 1 : 0);
         if (!z) st.zT = 0;
-        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; if (STORY && z < 0 && scopes[p].level <= storyFarLv()) smapZoomOut(); else setScope(p, scopes[p].level + z); st.zT = 0.28; }   // (past the farthest: the STORY MAP)
+        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p) && !menuNoZoom()) { crew[p].zoomOwn = true; if (STORY && z < 0 && scopes[p].level <= smapStoryLv()) smapZoomOut(); else setScope(p, scopes[p].level + z); st.zT = 0.28; }   // (past the farthest: the STORY MAP)
         // the right stick: angle (left / right) and power (up / down), smoothly, in every vehicle (user Oct 29); in the tower the left stick as
         // well (user Oct 24: it has nothing else to do there)
         const rx = ax(2) || (m === 'tower' ? lx : 0), ry = ax(3) || (m === 'tower' ? ly : 0);
@@ -81211,8 +81211,8 @@ const smapKey = v => v.sid != null ? v.sid : v.placed != null ? 'p' + v.placed :
 function smapToggle() {
   if (!smapWhere()) return;
   SMAP.on = !SMAP.on; SMAP.ptr.clear(); SMAP.pinch = null;
-  if (SMAP.on) { SMAP.sel = null; const c = smapPlay() ? storyCur() : null; if (c) { SMAP.sel = c.v ? { v: c.v.sid } : { o: c.o.id }; } const p = smapSelPos(); if (p) { SMAP.cx = p[0]; SMAP.cy = p[1]; } else if (PHOTO.on) { SMAP.cx = PHOTO.x; SMAP.cy = PHOTO.y; } else { SMAP.cx = cam.view[0].l + halfWorldW(cam.view[0].z); SMAP.cy = cam.fyi ? cam.fyi[0] : WATER_Y; } SMAP.zIn = smapViewZ(); SMAP.z = SMAP.zIn * 1.5; }
-  else if (PHOTO.on) { PHOTO.x = clamp(SMAP.cx, 0, WORLD_W); PHOTO.y = SMAP.cy; PHOTO.z = Math.max(PHOTO.z, ZOOM_MIN); }   // (back into the editor where the map was)
+  if (SMAP.on) { SMAP.sel = null; const c = smapPlay() ? storyCur() : null; if (c) { SMAP.sel = c.v ? { v: c.v.sid } : { o: c.o.id }; } const V = smapViewNow(); SMAP.cx = V.cx; SMAP.cy = V.cy; SMAP.zIn = SMAP.z = V.z; }
+  else if (PHOTO.on) { PHOTO.x = clamp(SMAP.cx, 0, WORLD_W); PHOTO.y = SMAP.cy; PHOTO.z = Math.max(PHOTO.z, SMAP_ED_Z()); }   // (back into the editor exactly where the map was: its middle the window's)
   if (!Number.isFinite(SMAP.cx) || !Number.isFinite(SMAP.cy)) { SMAP.cx = WORLD_W / 2; SMAP.cy = WATER_Y; }
   sound('click', 0);
 }
@@ -81220,8 +81220,21 @@ function smapToggle() {
 // continue scrolling") the view's scale as world units a CSS pixel (the screen's width in the world over the window's width); past the farthest zoom out the
 // map opens at it and goes on; zoomed in past it, it closes. (1240 read the whole world's width here - VIS_R - VIS_L: endless in Story, Infinity - and the map's
 // every position came out not a number: nothing drawn, on the iPad 20:42)
-function smapViewZ() { const z = PHOTO.on ? PHOTO.z : cam.view[0].z, k = VIEW_W / Math.max(1e-6, z) / Math.max(1, innerWidth); return Number.isFinite(k) && k > 0 ? clamp(k, 0.05, 400) : 10; }
-function smapZoomOut() { if (SMAP.on || !smapWhere()) return; smapToggle(); SMAP.z = SMAP.zIn * 1.05; }
+// (user Nov 20 21:01: "Is it possible that it zooms out sooner? Like at least half earlier than when it zooms now? And it matches 100% the shape you're seeing
+// before. So the transition is practically seamless") it opens at twice the farthest zoom (half as far out: SMAP_EARLY - the GAME EDITOR's SMAP_ED_Z,
+// Story's smapStoryLv), and opens on the view exactly as it is: the world point at the window's middle and the world's units a CSS pixel read from the
+// camera itself (screenToWorld - what the game draws where), so every shape is where it was; what's picked eases to the map's middle after
+const SMAP_EARLY = 2;
+const SMAP_ED_Z = () => ZOOM_MIN * SMAP_EARLY;
+function smapViewNow() {
+  const z = cam.view[0].z, k = dpr / (PIXW * S * Math.max(1e-6, z)), o = screenToWorld(0, 0);   // (the camera as last drawn - the editor's zoom may have moved since, in this same pinch)
+  const V = { z: k, cx: o[0] + innerWidth / 2 * k, cy: o[1] + innerHeight / 2 * k };
+  if (!Number.isFinite(V.z) || V.z <= 0) V.z = 10; if (!Number.isFinite(V.cx) || !Number.isFinite(V.cy)) { V.cx = WORLD_W / 2; V.cy = WATER_Y; }
+  return V;
+}
+// Story play: the level zooming out past which the map opens - twice the farthest Story allows (storyFarLv) in zoom, its nearest level at or in from that
+const smapStoryLv = () => clamp(zoomLevelOf(Math.min(ZOOM_TOP, ZOOM_LEVELS[storyFarLv() - 1] * SMAP_EARLY)), 1, ZN);
+function smapZoomOut() { if (SMAP.on || !smapWhere()) return; smapToggle(); }
 // what's picked, and where it is now (null: gone)
 const smapVeh = k => smapVehs().find(v => smapKey(v) === k) || null;
 function smapSelPos() {
@@ -81286,9 +81299,9 @@ function drawStoryMap() {
   cv.style.clipPath = `polygon(0 0, ${L.cL}px 0, ${L.cL}px ${L.cTop}px, 100% ${L.cTop}px, 100% 100%, 0 100%)`;   // (the corner left to REPORT, the version, the FPS)
   const g = cv.getContext('2d'); g.setTransform(dp, 0, 0, dp, 0, 0);
   const W = L.W, H = L.H, MW = L.MW, play = smapPlay();
-  { const p = smapSelPos(); if (p) { SMAP.cx = p[0]; SMAP.cy = p[1]; } else if (SMAP.sel) SMAP.sel = null; }   // (following what's picked)
+  { const p = smapSelPos(); if (p) { const t = smapFollowAt(p, L), e = Math.min(1, frameDt * 6); SMAP.cx += (t[0] - SMAP.cx) * e; SMAP.cy += (t[1] - SMAP.cy) * e; } else if (SMAP.sel) SMAP.sel = null; }   // (following what's picked)
   if (!Number.isFinite(SMAP.cx) || !Number.isFinite(SMAP.cy) || !Number.isFinite(SMAP.z)) { SMAP.cx = WORLD_W / 2; SMAP.cy = WATER_Y; SMAP.z = 20; }
-  const z = SMAP.z, mh = L.footY, X = x => MW / 2 + (x - SMAP.cx) / z, Y = y => mh / 2 + (y - SMAP.cy) / z;
+  const z = SMAP.z, mh = L.footY, hx = innerWidth / 2, hy = innerHeight / 2, X = x => hx + (x - SMAP.cx) / z, Y = y => hy + (y - SMAP.cy) / z;   // (the window's middle: the game's view and the map's the same - the lists over its right side)
   const font = (px, b) => (b ? '600 ' : '') + px + 'px ' + SMAP_FONT;
   const text = (t, x, y, col, px, al, bold, halo) => { g.font = font(px, bold); g.textAlign = al || 'left'; g.textBaseline = 'middle'; if (halo) { g.lineJoin = 'round'; g.lineWidth = 4; g.strokeStyle = 'rgba(20,20,20,0.85)'; g.strokeText(t, x, y); } g.fillStyle = col; g.fillText(t, x, y); };
   const fit = (t, px, w, bold) => { g.font = font(px, bold); if (g.measureText(t).width <= w) return t; while (t.length > 1 && g.measureText(t + '…').width > w) t = t.slice(0, -1); return t + '…'; };
@@ -81417,13 +81430,17 @@ function smapTap(x, y) {
   if (!(h && h.row)) SMAP.sel = null;
 }
 // the zoom set to z (world units a CSS pixel) about the screen point x, y (none: the map's middle); zoomed in past the view's own scale, back to the view
+// the window's middle (cx, cy) that puts world point p at the map's own middle (left of the lists, above the foot)
+const smapFollowAt = (p, L) => [p[0] - (L.MW / 2 - innerWidth / 2) * SMAP.z, p[1] - (L.footY / 2 - innerHeight / 2) * SMAP.z];
 function smapZoomTo(z, x, y) {
-  const L = smapLayout(), mx = L.MW / 2, my = L.footY / 2; if (x == null) { x = mx; y = my; }
-  const wx = SMAP.cx + (x - mx) * SMAP.z, wy = SMAP.cy + (y - my) * SMAP.z;
+  const L = smapLayout(), hx = innerWidth / 2, hy = innerHeight / 2, p = SMAP.sel ? smapSelPos() : null;
+  if (p) { x = hx + (p[0] - SMAP.cx) / SMAP.z; y = hy + (p[1] - SMAP.cy) / SMAP.z; }   // (picked: about it, where it is on the screen)
+  else if (x == null) { x = L.MW / 2; y = L.footY / 2; }
+  const wx = SMAP.cx + (x - hx) * SMAP.z, wy = SMAP.cy + (y - hy) * SMAP.z;
   if (!Number.isFinite(z)) return;
-  if (z < SMAP.z && SMAP.zIn && z < SMAP.zIn) { smapToggle(); SMAP.z = SMAP.zIn; return; }   // (zoomed in past the view's farthest: back to it)
+  if (z < SMAP.z && SMAP.zIn && z < SMAP.zIn) { const k = SMAP.zIn; SMAP.cx = wx - (x - hx) * k; SMAP.cy = wy - (y - hy) * k; SMAP.z = k; smapToggle(); return; }   // (zoomed in past the view's scale: back to it - the editor's view where the map was)
   SMAP.z = clamp(z, 0.05, 400);
-  if (!SMAP.sel) { SMAP.cx = wx - (x - mx) * SMAP.z; SMAP.cy = wy - (y - my) * SMAP.z; }   // (about the pointer - picked: about it)
+  SMAP.cx = wx - (x - hx) * SMAP.z; SMAP.cy = wy - (y - hy) * SMAP.z;
 }
 // zoom by f, the camera's sense (more than 1: in) - the editor's keys and its pinch, the game's pinch, going on as the map opens
 const smapZoomBy = f => { if (f > 0 && Number.isFinite(f)) smapZoomTo(SMAP.z / f); };
