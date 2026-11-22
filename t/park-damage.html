@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1296, build: 'NOV 22 11:45', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1296, build: 'NOV 22 11:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -3456,8 +3456,7 @@ async function swGoLive() {
   return true;
 }
 // (the worker) the ground's cells changed since the last snapshot (SWH.land: ltDirty's ranges - columns, rows or null for the whole column),
-// merged where they overlap and sent as they are now: ['g', c0, c1, r0s, cells, scorch] - r0s each column's first row sent, its rows down to the
-// next column's start in cells
+// merged where they overlap and sent as they are now: ['g', c0, c1, R, cells, scorch] - R each column's first and last row sent, its cells in turn
 function swLandOut(bufs) {
   const L = SWH.land; if (!L.length || !land.cell) { L.length = 0; return; }
   L.sort((a, b) => a[0] - b[0]);
@@ -3471,22 +3470,21 @@ function swLandOut(bufs) {
   L.length = 0;
   for (const [c0, c1, ra, rb] of M) {
     if (ra == null && c1 - c0 > 600) continue;   // (a world's edit, whole columns: the page builds it too - 50-zzzz-live-edit.js)
-    const r0s = new Int32Array(c1 - c0 + 2); let n = 0;
-    for (let c = c0; c <= c1; c++) { const a = Math.max(ltR0(c), ra == null ? -1e9 : ra), b = Math.min(ltR1(c) - 1, rb == null ? 1e9 : rb); r0s[c - c0] = a; n += Math.max(0, b - a + 1); }
+    const R = new Int32Array(2 * (c1 - c0 + 1)); let n = 0;
+    for (let c = c0; c <= c1; c++) { const a = Math.max(ltR0(c), ra == null ? -1e9 : ra), b = Math.min(ltR1(c) - 1, rb == null ? 1e9 : rb); R[2 * (c - c0)] = a; R[2 * (c - c0) + 1] = b; n += Math.max(0, b - a + 1); }
     const cells = new Uint8Array(n), sc = new Uint8Array(n); let j = 0;
-    for (let c = c0; c <= c1; c++) { const b = Math.min(ltR1(c) - 1, rb == null ? 1e9 : rb); for (let r = r0s[c - c0]; r <= b; r++) { const i = ltIdx(c, r); cells[j] = land.cell[i]; sc[j] = land.scorch[i]; j++; } }
-    r0s[c1 - c0 + 1] = rb == null ? -1 : rb;
-    SWH.ev.push(['g', c0, c1, r0s, cells, sc]); bufs.push(r0s.buffer, cells.buffer, sc.buffer);
+    for (let c = c0; c <= c1; c++) for (let r = R[2 * (c - c0)]; r <= R[2 * (c - c0) + 1]; r++) { const i = ltIdx(c, r); cells[j] = land.cell[i]; sc[j] = land.scorch[i]; j++; }
+    SWH.ev.push(['g', c0, c1, R, cells, sc]); bufs.push(R.buffer, cells.buffer, sc.buffer);
   }
 }
 // (the page) the worker's ground cells (swLandOut) into its own: the slices made whole first, then marked changed (ltDirty - drawn again)
-function swLandIn(c0, c1, r0s, cells, sc) {
+function swLandIn(c0, c1, R, cells, sc) {
   if (!land.cell) return;
   landEnsureX(c0 * LT_CELL, (c1 + 1) * LT_CELL);
-  const rb = r0s[c1 - c0 + 1]; let j = 0, lo = 1e9, hi = -1e9;
+  let j = 0, lo = 1e9, hi = -1e9;
   for (let c = c0; c <= c1; c++) {
-    const b = Math.min(ltR1(c) - 1, rb < 0 ? 1e9 : rb);
-    for (let r = r0s[c - c0]; r <= b; r++) { if (j >= cells.length) break; const i = ltIdx(c, r); land.cell[i] = cells[j]; land.scorch[i] = sc[j]; j++; lo = Math.min(lo, r); hi = Math.max(hi, r); }
+    const a = ltR0(c), e = ltR1(c);
+    for (let r = R[2 * (c - c0)]; r <= R[2 * (c - c0) + 1]; r++, j++) { if (j >= cells.length) break; if (r < a || r >= e) continue; const i = ltIdx(c, r); land.cell[i] = cells[j]; land.scorch[i] = sc[j]; lo = Math.min(lo, r); hi = Math.max(hi, r); }
   }
   if (hi >= lo) ltDirty(c0, c1, lo, hi);
 }
@@ -13342,7 +13340,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1296;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 22 11:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -63293,6 +63291,7 @@ const BIOV: u32 = 17u;
 var<private> LV: u32 = 0u;
 // the art grid this draw paints a cell in (THE ART GRID, fs: AG x AG squares a cell - AN the world's art pixel, then halves of the cell, 1 the cell whole)
 var<private> AG: f32 = 1.0;
+var<private> UNDERH: bool = false;   // (underAt's air cell is 12 rows or fewer under an overhang - fs's side rims)
 var<private> DBG: vec4f = vec4f(-1.0);   // (the layers' debug look - LAY_DBG: the cellCol drawn here - its HIDE INTERIOR, its fade; x < 0 none)
 ${ggCellWgsl('')}
 fn cellAtL(si: u32, c: i32, r: i32, L: u32) -> u32 { return cellAtW(si, c, r, L, which()); }
@@ -63702,6 +63701,7 @@ fn underAt(si: u32, c: i32, i: i32, r4: i32) -> EG {
   let S = slots[si]; let r = r4 >> 2u; if (r < S.rT || r >= S.rB || !mine(si, c, f32(r))) { return EG(false, 0u, 0); }
   let o = cellAt(si, c, r); if (!ok(o) || (pages[o] & 7u) != M_AIR) { return EG(false, 0u, 0); }
   let up = i32(pages[o + 1u] >> 16u); if (up <= 0 || up >= 0xffff) { return EG(false, 0u, 0); }
+  UNDERH = up <= 12;
   let b = r - up; if (b <= S.rT) { return EG(false, 0u, 0); }
   let ob = cellAt(si, c, b); let oa = cellAt(si, c, b - 1); if (!ok(ob) || !ok(oa) || (pages[oa] & 7u) == M_AIR) { return EG(false, 0u, 0); }
   let wb = pages[ob + 1u]; let aD = i32((wb >> 16u) & 255u); let bD = i32(wb >> 24u); if (aD == 0 && bD == 0) { return EG(false, 0u, 0); }
@@ -63764,12 +63764,17 @@ fn rimOver(cc: vec4f, f: u32, w: f32) -> vec4f {
     if (want) { let g = edgeAt(si, ec, ei, er); if (j == 0u) { e0 = g; } else if (j == 1u) { e1 = g.on; } else if (j == 2u) { e2 = g.on; } else if (j == 3u) { e3 = g.on; } else { e4 = g.on; } }
   }
   // (no line over a top there: the line under an underside - underAt; the art pixel its foot row's)
-  // (and a cell's side rim beside a line under an underside: buried as beside a top's; one underAt, in a loop)
+  // (and a cell's side rim - its air a cell or two off - beside a line under an underside, or beside the air under an overhang (UNDERH): buried as
+  // beside a top's - in the overhang's shade; its stairs' rims, a cell in from the smooth line, showed as light ticks. One underAt, in a loop)
   var eu = false;
-  for (var j = 0u; j < select(0u, 3u, eon); j++) {
+  for (var j = 0u; j < select(0u, 5u, eon); j++) {
     var ec = c; var ei = i4; var want = !e0.on && !tp.solid;
-    if (j == 1u) { ec = c - 1; ei = 3; want = rimOn && !e2 && c > S.c0; } else if (j == 2u) { ec = c + 1; ei = 0; want = rimOn && !e3 && c + 1 < S.c0 + S.w; }
-    if (want) { let g = underAt(si, ec, ei, r4); if (j == 0u) { if (g.on) { e0 = g; eu = true; } } else if (j == 1u) { e2 = g.on; } else { e3 = g.on; } }
+    if (j == 1u || j == 3u) { ec = c - i32(j + 1u) / 2; ei = 3; want = rimOn && !e2 && ec >= S.c0; }
+    else if (j == 2u || j == 4u) { ec = c + i32(j) / 2; ei = 0; want = rimOn && !e3 && ec < S.c0 + S.w; }
+    if (want) {
+      UNDERH = false; let g = underAt(si, ec, ei, r4); let b = g.on || UNDERH;
+      if (j == 0u) { if (g.on) { e0 = g; eu = true; } } else if (j == 1u || j == 3u) { e2 = b; } else { e3 = b; }
+    }
   }
   // (the one cellCol: the line's top cell's - the art pixel over it: the top cell's top row's - or, no line there, the pixel's own solid cell's; a line is
   // only ever over air, so never both)
