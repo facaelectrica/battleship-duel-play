@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1334;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 17:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1335;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 18:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71083,11 +71083,11 @@ function storySubs(dt) {
    ================================================================ */
 const story = { coins: 0, at: 0, saveN: 0, wake: 0, cp: 0, cpk: null, dead: 0, inv: {}, came: 0, back: 0, obj: null, said: {}, say: null, car: '' };   // (car: the player's own car as picked at a CAR STAND - 50-zzzzz-car-stand.js)   // (came: the vehicle you went into the place you're in from - EXIT puts you back in it; back: your own, left to start working - STOP WORKING puts you back in it - 50-zzzzz-place-screen.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (cp: the checkpoint - the lighthouse last entered, where the story was saved and resumes; dead: how many times you've died - 50-story-saves.js)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
 const storyR = sysRng('story');
-const STORY_ROW = worldRow({ came: [() => story.came || 0, v => { story.came = v || 0; }], back: [() => story.back || 0, v => { story.back = v || 0; }],
+const STORY_ROW = worldRow({ settle: [() => story.settle || 0, v => { story.settle = v || 0; }], came: [() => story.came || 0, v => { story.came = v || 0; }], back: [() => story.back || 0, v => { story.back = v || 0; }],
   swaps: [() => story.swaps || [], v => { lifeSwapsApply(v); }], coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], cpk: [() => story.cpk, v => { story.cpk = v && typeof v === 'object' ? v : null; }],   // (cpk: your things as they were at the checkpoint - storyDie)
  inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], obj: [() => story.obj, v => { story.obj = v && typeof v === 'object' ? v : null; }], said: [() => story.said, v => { story.said = v && typeof v === 'object' ? v : {}; }], say: [() => story.say, v => { story.say = v && typeof v === 'object' ? v : null; }], car: [() => story.car || '', v => { story.car = typeof v === 'string' ? v : ''; }], homeN: [() => story.homeN || 0, v => { story.homeN = v || 0; }], cars: [() => story.cars || {}, v => { story.cars = v && typeof v === 'object' ? v : {}; }] });   // (cars: each island's car's type, by its land's shape id - a car stand's pick there; keptVehStep)   // (homeN: how many times a lighthouse became your home - storyGo)   // (obj / said / say: the objective, the lines said, the line on screen - 50-zzzzz-story-lines.js)
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = PLAYER_C.coins || 0; story.inv = Object.assign({}, PLAYER_C.inv || {});   /* (the player's COINS and START goods - STORY > CHARACTERS > PLAYER, as every character's) */ story.at = 0; story.came = 0; story.back = 0; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; story.cars = {}; story.homeN = 0; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true, rest: null }); }   // (the automatic zoom again till the player zooms - storyZoom)
+function storyReset() { if (typeof lifeSwapsApply === 'function') lifeSwapsApply([]);   /* (a new story: everyone their own life - 50-zzzzz-story-map.js) */ story.coins = PLAYER_C.coins || 0; story.inv = Object.assign({}, PLAYER_C.inv || {});   /* (the player's COINS and START goods - STORY > CHARACTERS > PLAYER, as every character's) */ story.at = 0; story.came = 0; story.back = 0; story.settle = STORY_SETTLE; story.saveN = 0; story.wake = 0; story.cp = 0; story.cpk = null; story.dead = 0; story.obj = null; story.said = {}; story.say = null; story.car = ''; story.cars = {}; story.homeN = 0; stockReset(); folkReset(); Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true, rest: null }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // (user Nov 19 20:54: "when the game starts, you and the grandfather live in the lighthouse") where you live: the player's HOME (STORY >
 // CHARACTERS - PLAYER_C, 50-zz-struct.js); a new story opens there, you sleep there
 const storyHome = () => PLAYER_C.home != null ? strsUsed().find(o => o.id === PLAYER_C.home) || null : null;
@@ -71134,6 +71134,7 @@ const storyCpO = () => story.cp ? strsUsed().find(o => o.id === story.cp) || nul
 function storyResume(p) {
   if (!STORY) return; const h = storyCpO() || storyHome(); if (!h) return;
   if (crew[p].mode === 'civ') civRelease(p);
+  story.settle = STORY_SETTLE;                           // (a loaded game settles too before the pause inside - storyFrozen)
   storyGo(p, h.id, true, false, true);
 }
 ACTS.storyResume = p => storyResume(p);
@@ -80929,7 +80930,12 @@ function folkBay(c, S, v, J, T) {
    - Come in its work vehicle, the way out is STOP WORKING: back in your own at its lot. No EXIT.
    ================================================================ */
 // (the simulation) in a place now: its structure (stHere - 50-zzzz-struct-act.js); the world paused: in one awake, or in a stand's showroom
-const storyFrozen = () => STORY && !story.wake && (!!stHere() || standIn());
+// (user Nov 22 17:05: "Why was the car turned? So many regression issues" - a story starts inside its lighthouse, so the pause kept the
+// world from ever running its first moments: whatever settles there (a car turning to face us, a boat floating up to her dock, a net
+// folding at its hook) was left half done - 1330 and 1333 fixed two of them one at a time. Now the world settles first, behind the
+// place's screen: STORY_SETTLE seconds of it at every start, new or loaded (story.settle - storyReset), then the pause)
+const STORY_SETTLE = 2;
+const storyFrozen = () => STORY && !story.wake && !(story.settle > 0) && (!!stHere() || standIn());
 // the vehicle you came in (story.came) / your own you left to start working (story.back) - still there to get back into
 const storyVehSid = sid => sid ? storyVehs().find(v => v.sid === sid) || null : null;
 const placeCame = () => stHere() ? storyVehSid(story.came) : null;
@@ -85870,6 +85876,7 @@ function frameBody(now) {
     applyHeldKeys(dt);
     { const ut = performance.now(); cpuStep(dt); uLap('uCpu', ut); }
     stepStory(dt);
+    if (STORY && story.settle > 0) story.settle = Math.max(0, story.settle - dt);   // (the world's first moments before the pause inside - storyFrozen)
     updateHolds(dt);
     stepHud(dt);
     stepWeather(dt);
