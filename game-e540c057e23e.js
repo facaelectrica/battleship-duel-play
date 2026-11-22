@@ -3499,6 +3499,7 @@ function swHostReady() {
       if (m.t === 'run') v = new Function('g', 'T', m.code)(window.__game, window.__game.swT);   // (tools: a few lines run in the worker)
       else if (m.t === 'step') { window.__game.stepQuiet(m.dt, m.n); v = { time, tick: REG.tick }; }
       else if (m.t === 'tables') v = JSON.stringify(tablesSave());
+      else if (m.t === 'save') v = JSON.stringify(tablesSave(m.local));   // (the whole game saved, the page's own tables in it - edGameText, 18-zz-photo.js)
       else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); computeEnv(); v = true; }   // (E: worked out from the loaded weather, as the page's last frame did)
       else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false, m.drawn === true); }   // (drawn: the effect lists' drawn fields only, as live)   // (36-zzzzz-sw-snap.js)
       else if (m.t === 'stats') v = { snapMs: SWS.ms, snapBytes: SWS.bytes, snaps: SWS.n, tick: REG.tick, time, hostTickMs: SWH.tickMs, hostBehind: SWH.behind, hostDone: SWH.done, hostSent: SWH.sent, hostHold: SWH.hold };
@@ -4317,7 +4318,8 @@ const VTUNE_DEF = {
   // kind's driven wheels (Drive: 0 the rear, 1 the front, 2 all four) and engine power at the wheels (Kw - the game's gravity is 2.5 times the real);
   // hp: the hits she takes (user Nov 21 23:09: "If a car gets hit 3 times" - carSmoke); hurt / fall: struck by the ground (her wheels coming down, her body into it) as hard as a fall from this high, m - she begins to lose health / she's
   // destroyed (landHurt; user Nov 19 10:33: "it should get wrecked after a certain height"; Nov 21 22:55: one damage rule for every land vehicle)
-  car: { grip: 1, hp: 3, hurt: 1.5, fall: 6, taxiDrive: 0, taxiKw: 220, suvDrive: 2, suvKw: 260, vanDrive: 0, vanKw: 200, tractorDrive: 2, tractorKw: 160,
+  // turn: the seconds she takes to turn round, stopped - seen from the front between her two sides (user Nov 22 10:43: "so we 'feel' we are turning")
+  car: { grip: 1, hp: 3, hurt: 1.5, fall: 6, turn: 0.6, taxiDrive: 0, taxiKw: 220, suvDrive: 2, suvKw: 260, vanDrive: 0, vanKw: 200, tractorDrive: 2, tractorKw: 160,
     ambulanceDrive: 0, ambulanceKw: 320, fire_engineDrive: 0, fire_engineKw: 480, box_truckDrive: 0, box_truckKw: 320, dump_truckDrive: 0, dump_truckKw: 480,
     city_busDrive: 0, city_busKw: 380, school_busDrive: 0, school_busKw: 320, police_carDrive: 0, police_carKw: 280, tow_truckDrive: 0, tow_truckKw: 400,
     classic_bugDrive: 0, classic_bugKw: 110, classic_wagonDrive: 0, classic_wagonKw: 170, classic_roadsterDrive: 0, classic_roadsterKw: 160, classic_sedanDrive: 1, classic_sedanKw: 140, classic_hatchDrive: 1, classic_hatchKw: 110 },
@@ -13135,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1301;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1302;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14605,6 +14607,19 @@ function edModeSync() {
    screen's to rebuild (there the editor holds the world as before). */
 const edGameSwap = () => NET.role === 'local' && WORLD_READY;
 const edGameSave = () => ({ world: netSnapshot(false, { ev: [], sky: true }), tables: tablesSave() });
+/* (user Nov 22 10:43: "If I open the game and just swap between lighthouse and car, there is a slowdown in the game. No matter how many times I do it" - a
+   story is saved on every arrival at a lighthouse, and the save held the worker: its whole game (2.5 MB) taken onto the page and every table rebuilt
+   there, then sent back for the worker to take again - the game stalled 130-180 ms each time) THE WHOLE GAME SAVED AS TEXT: while the worker runs the
+   game it is asked for it ('save' - its own tables, with this page's own in them: SW_LOCAL, the camera) and the game goes on - nothing taken back,
+   nothing sent again; else (no worker, or the page's game the newer - swPageNewer) this page's own, held as any read of the whole game is */
+async function edGameText() {
+  const world = JSON.stringify(netSnapshot(false, { ev: [], sky: true }));
+  if (typeof SW !== 'undefined' && SW.worker && SW.live && !swPageNewer() && !SWB.taking) {
+    const local = {}; for (const k of SW_LOCAL) if (TABLES[k]) local[k] = tableSave(k);
+    return '{"world":' + world + ',"tables":' + await swAsk('save', { local }) + '}';
+  }
+  await swHold('save'); try { return JSON.stringify(edGameSave()); } finally { swRelease('save'); }
+}
 function edGameBack(G) { NET.lists = {}; netApply(G.world); tablesLoad(G.tables); }
 function edModeEnter() {
   EDMODE.on = true; EDMODE.ov = camOverride[0];
@@ -24271,10 +24286,13 @@ function tblPlain(o, depth, skip, top) {
   }
   return out;
 }
-function tablesSave() {
+// one table as saved (its things given their ids first - tablesSave)
+function tableSave(k) { const t = TABLES[k]; return t.save ? t.save() : t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
+// (local: tables as another copy of the game saved them, taken in place of this one's - the page's own camera in a save the worker makes: edGameText)
+function tablesSave(local) {
   const T = {};
   for (const k in TABLES) for (const o of TABLES[k].list()) uidOf(o);   // (every thing its id first: a reference to one is saved as its id)
-  for (const k in TABLES) { const t = TABLES[k]; T[k] = t.save ? t.save() : t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
+  for (const k in TABLES) T[k] = local && k in local ? local[k] : tableSave(k);
   const R = {}; for (const k in RNGS) R[k] = RNGS[k].s;
   return { v: 1, t: time, reg: { tick: REG.tick, frame: REG.frame, sid: REG.sid }, tables: T, rng: R, uid: netUid };
 }
@@ -45815,10 +45833,10 @@ function stepCivDriven(v, dt) {
   if (k === 'car') {                                                 // (STORY's cars: the lever turns her round and drives her - 50-story-cars.js)
     { const D = v.story ? storyDriveStep(v) : false; if (D === true) return false; if (typeof D === 'number') lever = D; }   // (driving into a place: at its spot, or her lever - 50-zzzzz-car-stand.js)
     // (Nov 1: the other way while she's moving brakes her first - she turns round once stopped - so a reverse is a stop the
-    // body feels, as the STOP's - storyCarBody, 50-story-cars.js)
+    // body feels, as the STOP's; Nov 22: the turn takes its time, seen from the front - carTurnTo / carTurnStep, 50-story-cars.js)
     const back = lever && Math.sign(lever) !== v.dir;
-    if (back && Math.abs(v.vx || 0) < 3) v.dir = Math.sign(lever);
-    v.drv = (v.drv || 0) + ((back ? 0 : Math.abs(lever)) - (v.drv || 0)) * Math.min(1, dt * 2);
+    if (back) carTurnTo(v, Math.sign(lever));
+    v.drv = (v.drv || 0) + ((back || v.turn > 0 ? 0 : Math.abs(lever)) - (v.drv || 0)) * Math.min(1, dt * 2);
     if (!lever && v.drv < 0.03) v.drv = 0;                            // (let go: her drive dies away to nothing, not to ever less - user Nov 2, parked on a slope she crept down it)
     v.vDrive = v.v * v.drv;
     return false;
@@ -69145,10 +69163,10 @@ function storyInvAdd(k, n) { if (!story.inv) story.inv = {}; story.inv[k] = Math
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a car, held and walked as her handle, her fields as they were: her place, way
 // and pose (x y dir a av, pit pitV - her springs, susY susV - her landing's), her drive (v vDrive drv npcV; driveStep's wsp way thr brk wslip
 // slipV; roll rollD - her wheels), in the air, wet, sinking and sunk (air wet sinkT, fl - the floor under her then), at rest (set rest,
-// quiet - settling unseen), her engine and her wreck's smoulder (eng burnT smT), turned at her spot (turn - the story's swap), lost
+// quiet - settling unseen), her engine and her wreck's smoulder (eng burnT smT), turning round (turn tdir - carTurnStep), seen from the front (fr - carFacing), lost
 // (dmgOf draws her wrecked); her picture (art); the STORY's (STORY_REC) and every civilian vehicle's (CIV_REC). Put in
 // by addRow (her structure's spot, renewed the next morning) or the table's own put (placed); each made settled first - carSettle)
-const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV gnd wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost hornOn elOn sirenOn lay hpMax bk bx by bb din',   // (hornOn: her horn held - 50-land-civdrive.js; elOn / sirenOn: her emergency LIGHTS / SIREN on - user Nov 20 13:03; lay: her terrain layer - groundBelow, layStep)
+const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV gnd wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn tdir fr lost hornOn elOn sirenOn lay hpMax bk bx by bb din',   // (hornOn: her horn held - 50-land-civdrive.js; elOn / sirenOn: her emergency LIGHTS / SIREN on - user Nov 20 13:03; lay: her terrain layer - groundBelow, layStep)
 'txt: kind state art','val: fl', ...STORY_REC, ...CIV_REC));
 const CAR_V = 14;                                         // (top speed, metres a second: about 50 km/h)
 // her health whole: the hits she takes (CARS > ALL CARS > HEALTH - user Nov 21 23:09: "If a car gets hit 3 times, it should also have this progressive damage")
@@ -69673,6 +69691,23 @@ function carSpinFx(c, dt) {
     else carThrow(c, x, gy, s === 'dirt' ? 'dirt' : s, k, back * carRnd(25, 60) * k);
   }
 }
+/* TURNING ROUND (user Nov 22 10:43: "have the [front] show when you rotate directions driving, so we 'feel' we are turning vs just swapping for the flipped
+   side view") one rule for every car, whoever drives her: asked to go the other way (carTurnTo - the player's lever, stepCivDriven; a character's trip,
+   folkDrive) she brakes to a stop, then turns round over CARS > ALL CARS > TURN TIME (VTUNE.car.turn), seen from the front (carFacing) - her way (dir)
+   the other at its middle. No drive while she turns. */
+function carTurnTo(c, d) { if (!d || c.turn > 0) return; c.tdir = d !== c.dir ? d : 0; }
+function carTurnStep(c, dt, live) {
+  if (!live) { c.turn = 0; c.tdir = 0; return; }
+  if (c.turn > 0) {
+    const T = Math.max(0.05, VTUNE.car.turn ?? 0.6); c.vDrive = 0; c.turn += dt;
+    if (c.tdir && c.turn >= T / 2) { c.dir = c.tdir; c.tdir = 0; }
+    if (c.turn >= T) c.turn = 0;
+    return;
+  }
+  if (!c.tdir || c.tdir === c.dir) { c.tdir = 0; return; }
+  c.vDrive = 0;                                                    // (moving: she brakes first)
+  if (Math.abs(c.vx || 0) < 3 && c.gnd) { c.turn = 1e-3; c.fr = 0; }   // (turning round is driving off: her side again once round - fr)
+}
 function storyCarBody(c, dt) {
   const [L, H] = storyCarSize(c), half = L * 0.36;
   if (!c.set) { const x = clamp(c.x, 0, WORLD_W - 1), R = layHas(x) ? layRest(x) : null; c.lay = R ? R.lay : 0; c.y = R ? R.y : onLand(c.x) ? landTop(x, 0) : Math.min(seabedY(c.x), harbourTop(c.x)); c.vx = c.vy = c.a = c.av = c.pit = c.pitV = 0; c.set = 1; c.rest = 0; }
@@ -69683,9 +69718,13 @@ function storyCarBody(c, dt) {
   // ground changed is the stretch under her woken - a crater, sand sliding, a pier or a rock gone (landWoke, 50-land-rest): she
   // looks at it again and falls / settles. Not the land's whole-world count (land.ver), which woke every parked car for a crater
   // anywhere
+  // (user Nov 22 10:43: "when I swap to a parked car, the car should stay parked (facing forward) until I start driving it") put away at her spot she's
+  // seen from the front, and stays so - whoever gets in - till she's driven off (carFacing)
+  if (!run || c.hp <= 0 || c.vDrive || Math.abs(c.vx || 0) > 1) c.fr = 0; else if (c.berth != null && c.driven == null) c.fr = 1;
   if (run && c.rest && c.driven == null && !c.npcV && !landWoke(c.x, half)) return;
   c.rest = 0;
   if (run && c.driven != null && !(c.hp <= 0)) stepCivDriven(c, dt); else { c.vDrive = run && !(c.hp <= 0) ? c.npcV || 0 : 0; c.drv = 0; }   // (a wreck goes nowhere)   // (not driven: still, or on a character's routine - folkDrive, 50-zzzzz-story-folk.js)
+  carTurnStep(c, dt, run && !(c.hp <= 0));
   if (run && c.driven == null && c.vDrive && !dryLand(c.x + c.dir * L * 0.5)) c.vDrive = 0;   // (the story's own drivers stop at the water's edge)
   if (c.berth != null && !c.vDrive) c.vx = 0;                                                     // (tied up at her spot)
   const wy = carWater(c.x), deep = wy == null ? 0 : clamp((c.y - wy) / H, 0, 1);                  // (how deep she's in: 0 dry, 1 over her roof)
@@ -69838,9 +69877,10 @@ function carLamps(out) {
 // and a low sun's rims (thingsLit - objLit's rule: no night shape of her own, lit like the ground she stands on, as the structures - user
 // Nov 2, the taxi went black at dusk), seen only through her building's door when at home in one (strMaskBox)
 // (user Nov 20 11:06: "all vehicles should have a front view. And when they're parked, we see them from the front. And when they drive, we see
-// them from the side") a car at its spot, nobody driving it: its front picture (NAME-front - gen/tropical/front_views.py, placeholders till the
+// them from the side") a car at its spot: its front picture (NAME-front - gen/tropical/front_views.py, placeholders till the
 // user's), standing where its side would - its wheels in the picture
-const carFacing = c => c.berth != null && c.state === 'run' && c.driven == null && !c.vDrive && !(c.hp <= 0);
+// (user Nov 22 10:43) and while she turns round (carTurnStep), and put away till she's driven off - whoever's in her (fr, storyCarBody)
+const carFacing = c => c.state === 'run' && !(c.hp <= 0) && (c.turn > 0 || c.fr > 0);
 const carFrontPic = c => tropPic(c.art + '-front');
 // (in: true - only those inside a building with a gate, seen through its door (strMaskBox); false - only the rest; unset - all of them)
 function drawStoryCars(x0, x1, pass, inside) {
@@ -70761,7 +70801,7 @@ function storyPlaneLosses() {
    die or quit the game, it will resume from that checkpoint. And when that checkpoint is recorded, it stores where everything was in
    the world"): a story asks to be saved (story.saveN, 50-story.js) only when it starts and on arriving at a structure of yours
    (storyGo: story.cp, the checkpoint); this page sees the ask in its copy of the game and saves the whole game (the GAME EDITOR's own
-   save - edGameSave: the world and every table, every vehicle where it is, the worker held while it's taken - swHold) into the slot.
+   save - the world and every table, every vehicle where it is, asked of the worker as the game goes on - edGameText) into the slot.
    Nothing else saves - buying, selling, sleeping, getting in or out, quitting. A death (story.dead) loads the slot again; LOAD puts
    you back at the checkpoint (storyResume). The games are kept in this browser's IndexedDB
    ('bd_story_gpu', a store of five), what each slot shows in localStorage (bd_story_slots_gpu). (Nov 11, the swap: the engine's own -
@@ -70797,13 +70837,11 @@ async function storySaveNow(quiet) {
   storySavedAt = performance.now();
   storySaving = true; const n = storySlot, ask = story.saveN;
   try {
-    await swHold('storySave');
-    const at = storyAt(), G = JSON.stringify(edGameSave());
-    swRelease('storySave');
+    const at = storyAt(), G = await edGameText();      // (asked of the worker - the game goes on: edGameText, 18-zz-photo.js)
     await storyPut(n, G);
     storyMetaSet(n, { day: W.day || 1, coins: story.coins, base: at ? strName(at) : '', saved: Date.now(), hour: Math.floor(env.time) });
     storySavedN = ask; if (!quiet) showToast('SAVED');
-  } catch (e) { swRelease('storySave'); storySavedN = ask; console.warn('story save', e); showToast('COULD NOT SAVE'); }
+  } catch (e) { storySavedN = ask; console.warn('story save', e); showToast('COULD NOT SAVE'); }
   storySaving = false;
 }
 // each frame (drawStoryBanner): a checkpoint asked for, saved - while you're at it (an ask made elsewhere is let go); a death, the
@@ -72985,7 +73023,7 @@ const VEH_TUNE = {
   BOATS: () => [['BATTLESHIP'], ['ENGINE THRUST', 'ship', 'thrust', 180, 1, '', 'Engine push: sets her top speed'], ['CANNON RELOAD', 'ship', 'reload', 20, 0.05, 's', 'Seconds between cannon shots'], ['SHELLS', 'ship', 'shells', 80, 1, '', 'Cannon shells carried'],
     ['DEPTH CHARGES', 'ship', 'dc', 30, 1, '', 'Depth charges carried'], ['GUN RATE', 'mg', 'shipRate', 0.5, 0.005, 's', 'Seconds between machine-gun rounds'], ['HEALTH', null, 'BY HULL SECTION']],
   HELIS: () => [['ARMY HELICOPTER'], ['TOP SPEED', 'heli', 'kmh', 500, 5, 'km/h', 'Top speed'], ['HEALTH', 'heli', 'hp', 20, 0.5, '', 'Hits it takes to destroy'], ['ROCKETS', 'heli', 'rockets', 40, 1, '', 'Rockets carried'], ['ROCKET RELOAD', 'heli', 'reload', 5, 0.05, 's', 'Seconds between rockets']],
-  CARS: () => [['ALL CARS'], ['TYRE GRIP', 'car', 'grip', 3, 0.05, 'x', 'Tyre grip, times the standard'], ['HEALTH', 'car', 'hp', 20, 1, '', 'Hits it takes to destroy'], ['HURT HEIGHT', 'car', 'hurt', 30, 0.1, 'm', 'Ground hit as hard as a fall from this: health lost'], ['FALL HEIGHT', 'car', 'fall', 50, 0.5, 'm', 'Ground hit as hard as a fall from this: destroyed']].concat(...Object.values(STR_VEHS).filter(D => D.fam === 'car' && VTUNE.car[D.art + 'Drive'] !== undefined).map(D =>
+  CARS: () => [['ALL CARS'], ['TYRE GRIP', 'car', 'grip', 3, 0.05, 'x', 'Tyre grip, times the standard'], ['HEALTH', 'car', 'hp', 20, 1, '', 'Hits it takes to destroy'], ['HURT HEIGHT', 'car', 'hurt', 30, 0.1, 'm', 'Ground hit as hard as a fall from this: health lost'], ['FALL HEIGHT', 'car', 'fall', 50, 0.5, 'm', 'Ground hit as hard as a fall from this: destroyed'], ['TURN TIME', 'car', 'turn', 3, 0.05, 's', 'Time to turn round, front view between']].concat(...Object.values(STR_VEHS).filter(D => D.fam === 'car' && VTUNE.car[D.art + 'Drive'] !== undefined).map(D =>
     [[D.lab], ['DRIVEN WHEELS', 'car', D.art + 'Drive', 2, 1, '', '0 rear, 1 front, 2 all-wheel drive'], ['ENGINE POWER', 'car', D.art + 'Kw', 1500, 10, 'kW', 'Engine power at the wheels']])),
   SPACE: () => [],
   // (user Nov 17 19:54, the Wave Lab) the one water's numbers - the lab's sliders are these (01-z-vehicle-tune.js WATER_PROPS)
@@ -81828,7 +81866,8 @@ function folkDrive(v, T, dt) {
   const d = T.x - v.x;
   if (v.net) v.net.cmd = -1;
   if (Math.abs(d) < 1.5 * UPM) { v.x = T.x; if (T.park) folkTie(v, T); else { v.npcV = 0; delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } return; }
-  v.dir = Math.sign(d); v.npcV = Math.min(spd, Math.abs(d) * 2 + 4);
+  if (v.car) carTurnTo(v, Math.sign(d)); else v.dir = Math.sign(d);   // (a car turns round as every car does - carTurnStep, 50-story-cars.js)
+  v.npcV = Math.min(spd, Math.abs(d) * 2 + 4);
 }
 function folkStep(dt) {
   if (!STORY) return;
@@ -86081,7 +86120,7 @@ async function start(data) {
   } });
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   // (tests: Story's save and LOAD without the slots - the game's text kept by the tool, the vehicles and where you are - 50-story-saves.js)
-  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, home: PLAYER_C.home }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), does: strDoesLine(o), own: o.own, home: o.home })) } });
+  Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: () => edGameText(), load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, home: PLAYER_C.home }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), does: strDoesLine(o), own: o.own, home: o.home })) } });
   Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test') });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
