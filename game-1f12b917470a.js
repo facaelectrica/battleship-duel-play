@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1298;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1299;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14917,9 +14917,10 @@ function padKind() {
   try { const gp = Array.from(navigator.getGamepads ? navigator.getGamepads() : []).find(Boolean); if (gp && /054c|playstation|dualshock|dualsense|wireless controller/i.test(gp.id)) return 'ps'; } catch (e) {}
   return 'xb';
 }
-// (user Oct 24 night: OPTIONS opens each of the three on its own - KEYBOARD, PLAYSTATION, XBOX; Nov 22: each with its two tabs)
+// (user Oct 24 night: OPTIONS opens each of the three on its own - KEYBOARD, PLAYSTATION, XBOX; Nov 22: each with its two tabs;
+// the keyboard's taller, its picture over its list)
 function controlsLayout() {
-  const w = Math.min(ubw - 12, 700), h = Math.min(ubh - 12, 520), x = (ubw - w) >> 1, y = (ubh - h) >> 1;
+  const w = Math.min(ubw - 12, 700), h = Math.min(ubh - 12, ui.controls === 'kb' ? 680 : 520), x = (ubw - w) >> 1, y = (ubh - h) >> 1;
   const tw = Math.min(w - 24, 520), t0 = x + ((w - tw) >> 1), tA = Math.round(tw * 0.68);
   return { x, y, w, h, back: [x + (w >> 1) - 60, y + h - 44, 120, 34], tabs: [[t0, y + 38, tA - 4, 26], [t0 + tA + 4, y + 38, tw - tA - 4, 26]], area: [x + 12, y + 72, w - 24, h - 72 - 52] };
 }
@@ -14954,7 +14955,7 @@ function drawControls() {
   drawText(ug, CONTROLS_TITLE[ui.controls] || 'CONTROLS', L.x + L.w / 2, L.y + 12, '#ffffff', 3, 'center');
   CTL_TABS.forEach(([k, name], i) => modeButton(...L.tabs[i], name, tab === k));
   modeButton(...L.back, 'BACK', false);
-  if (ui.controls === 'kb') drawKeyList(L, KEY_LIST[tab]); else if (ui.controls === 'tc') drawTouchPage(L, TOUCH_LIST[tab]); else drawPadPic(L, PAD_ART[ui.controls], PAD_DOES[tab], PAD_FOOT[tab][ui.controls]);
+  if (ui.controls === 'kb') drawKeyList(L, KEY_LIST[tab], tab); else if (ui.controls === 'tc') drawTouchPage(L, TOUCH_LIST[tab]); else drawPadPic(L, PAD_ART[ui.controls], PAD_DOES[tab], PAD_FOOT[tab][ui.controls]);
 }
 function drawPadPic(L, P, does, foot) {
   const im = P.img(); if (!im) return;
@@ -14991,9 +14992,13 @@ function drawPadPic(L, P, does, foot) {
 // a list in sections, as a game's controls page: an orange heading over each, then a row a thing to do - its name on the
 // left, the keys (or how) in the columns to the right. The biggest letters that fit the area (2, else 1); a name too long
 // for its column a size down (fitSc)
-function drawSections(L0, D, colX, colCol, heads) {
-  const [ax, ay, aw, ah] = L0.area, nRows = D.sections.reduce((n, s) => n + s[1].length, 0), nFoot = D.foot.length;
-  const size = ts => { const rh = ts * 5 + (ts === 2 ? 5 : 4), hh = rh + (ts === 2 ? 6 : 4); return { rh, hh, H: (heads ? rh + 2 : 0) + D.sections.length * hh + nRows * rh + nFoot * (ts === 2 ? 14 : 10) + 6 }; };
+// (a list's rows, its headings' and its whole height at letters ts)
+function secSize(D, ts, heads) {
+  const nRows = D.sections.reduce((n, s) => n + s[1].length, 0), rh = ts * 5 + (ts === 2 ? 5 : 4), hh = rh + (ts === 2 ? 6 : 4);
+  return { rh, hh, H: (heads ? rh + 2 : 0) + D.sections.length * hh + nRows * rh + D.foot.length * (ts === 2 ? 14 : 10) + 6 };
+}
+function drawSections(area, D, colX, colCol, heads) {
+  const [ax, ay, aw, ah] = area, nFoot = D.foot.length, size = ts => secSize(D, ts, heads);
   const ts = aw > 520 && size(2).H <= ah ? 2 : 1, { rh, hh } = size(ts);
   const cA = ax + Math.round(aw * 0.03), X = colX.map(f => ax + Math.round(aw * f));
   let ty = ay + Math.max(0, Math.floor((ah - size(ts).H) / 2));
@@ -15013,11 +15018,51 @@ function drawSections(L0, D, colX, colCol, heads) {
   D.foot.forEach((t, k) => drawText(ug, t, ax + aw / 2, ay + ah - fh + 2 - (nFoot - 1 - k) * fh, '#cfe0f0', fitSc(t, ts, aw - 20), 'center'));
 }
 // The keyboard (user Oct 24 night: player 1's keys white, player 2's a soft yellow; Nov 22: a list in sections, as GTA's)
+// (user Nov 22 10:45: the keyboard picture back over the list - "super useful, especially for 2 players"): the whole
+// keyboard, the keys of the list's first column white, of its second a soft yellow - BATTLE player 1 / player 2, STORY a
+// key / its other key; the list under it in the biggest letters that leave the keyboard room
 const P2_COL = '#eee39a';
-function drawKeyList(L0, D) { drawSections(L0, D, [0.58, 0.79], ['#ffffff', P2_COL], D.cols); }
+const KEY_CAPS = {
+  battle: [['ESC', '1', '2', '3', '4', '5', '6', 'Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'G', 'Z', 'X', 'C', 'V', 'SPACE'],
+    ['7', '8', '9', '0', ',', '.', ';', "'", '/', '\\', ']', 'ENTER', 'RSHIFT', 'LCTRL', 'RCTRL', 'UP', 'DOWN', 'LEFT', 'RIGHT']],
+  story: [['ESC', 'P', 'M', 'Q', 'E', 'TAB', 'SPACE', 'A', 'D', 'W', 'S', 'R', 'F', 'X', 'G'],
+    [',', '.', 'SHIFT', 'ENTER', 'BACK', 'UP', 'DOWN', 'LEFT', 'RIGHT', ']', 'RSHIFT', '/', '\\']],
+};
+function drawKeyList(L0, D, tab) {
+  const [ax, ay, aw, ah] = L0.area;
+  const ts = aw > 520 && ah - secSize(D, 2, D.cols).H >= 5 * 14 + 12 ? 2 : 1, need = secSize(D, ts, D.cols).H;
+  const totalU = 15 + 0.5 + 3, u = Math.max(8, Math.min(34, Math.floor(Math.min(aw / totalU, (ah - need - 12) / 5)))), kh = u - 2;
+  drawKeyboard(ax + Math.round((aw - totalU * u) / 2), ay, u, kh, KEY_CAPS[tab]);
+  drawSections([ax, ay + 5 * u + 12, aw, ah - 5 * u - 12], D, [0.58, 0.79], ['#ffffff', P2_COL], D.cols);
+}
+function drawKeyboard(kx0, ky0, u, kh, [S1, S2]) {
+  const P1 = new Set(S1), P2 = new Set(S2);
+  const rows = [
+    [['ESC', 1], ...'1234567890'.split('').map(k => [k, 1]), ['-', 1], ['=', 1], ['BACK', 2]],
+    [['TAB', 1.5], ...'QWERTYUIOP'.split('').map(k => [k, 1]), ['[', 1], [']', 1], ['\\', 1.5]],
+    [['CAPS', 1.75], ...'ASDFGHJKL'.split('').map(k => [k, 1]), [';', 1], ["'", 1], ['ENTER', 2.25]],
+    [['SHIFT', 2.25], ...'ZXCVBNM'.split('').map(k => [k, 1]), [',', 1], ['.', 1], ['/', 1], ['RSHIFT', 2.75, 'SHIFT']],
+    [['LCTRL', 1.5, 'CTRL'], ['ALT', 1.25], ['SPACE', 7.25], ['ALT', 1.25], ['RCTRL', 1.5, 'CTRL']],
+  ];
+  const cap = (x, y, w, name, label) => {
+    const p1 = P1.has(name), p2 = !p1 && P2.has(name), face = p1 ? '#ffffff' : p2 ? P2_COL : 'rgba(27,42,58,0.7)';
+    const X = Math.round(x), W = Math.round(w) - 2;
+    ug.fillStyle = p1 ? '#9fb3c6' : p2 ? '#b3a964' : 'rgba(255,255,255,0.18)'; ug.fillRect(X, y, W, kh);
+    ug.fillStyle = face; ug.fillRect(X, y, W, kh - 2);
+    const txt = label || name, col = p1 || p2 ? '#1b2a3a' : '#9fb3c6';
+    if (name === 'UP' || name === 'DOWN') { const cx = X + (W >> 1), cy = y + (kh >> 1) - 1; ug.fillStyle = col; for (let k = 0; k < 4; k++) ug.fillRect(cx - k, cy + (name === 'UP' ? k - 2 : 1 - k), 2 * k + 1, 1); return; }
+    if (name === 'LEFT' || name === 'RIGHT') { const cx = X + (W >> 1), cy = y + (kh >> 1) - 1; ug.fillStyle = col; for (let k = 0; k < 4; k++) ug.fillRect(cx + (name === 'LEFT' ? k - 2 : 1 - k), cy - k, 1, 2 * k + 1); return; }
+    const sc = textWidth(txt) * 2 <= W - 4 && kh >= 14 ? 2 : 1;
+    drawText(ug, txt, X + W / 2, y + ((kh - 2 - 5 * sc) >> 1), col, sc, 'center');
+  };
+  rows.forEach((row, r) => { let x = kx0; for (const [name, w, label] of row) { cap(x, ky0 + r * u, w * u, name, label); x += w * u; } });
+  // the arrow keys: up over the bottom row's left, down, right
+  const axk = kx0 + 15.5 * u;
+  cap(axk + u, ky0 + 3 * u, u, 'UP'); cap(axk, ky0 + 4 * u, u, 'LEFT'); cap(axk + u, ky0 + 4 * u, u, 'DOWN'); cap(axk + 2 * u, ky0 + 4 * u, u, 'RIGHT');
+}
 // (user Oct 27: the controls screens up to date) the mouse and the touch screen: the buttons on the screen and what a drag,
 // a pinch, the wheel and a click do (20-input-pointer.js, 17-hud.js)
-function drawTouchPage(L0, D) { drawSections(L0, D, [0.42], ['#ffffff'], null); }
+function drawTouchPage(L0, D) { drawSections(L0.area, D, [0.42], ['#ffffff'], null); }
 // The flag picker: big flags with room between them for fingers, scrolled by dragging
 function pickerLayout() {
   const fw = 36, fh = 27, cell = 52, cellH = 44;           // 4:3 flags with room for fingers between them
