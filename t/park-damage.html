@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1296, build: 'NOV 22 11:37', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1296, build: 'NOV 22 11:45', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -3455,6 +3455,41 @@ async function swGoLive() {
   SW.live = true;
   return true;
 }
+// (the worker) the ground's cells changed since the last snapshot (SWH.land: ltDirty's ranges - columns, rows or null for the whole column),
+// merged where they overlap and sent as they are now: ['g', c0, c1, r0s, cells, scorch] - r0s each column's first row sent, its rows down to the
+// next column's start in cells
+function swLandOut(bufs) {
+  const L = SWH.land; if (!L.length || !land.cell) { L.length = 0; return; }
+  L.sort((a, b) => a[0] - b[0]);
+  const M = [];
+  for (const q of L) {
+    const c0 = Math.max(0, q[0]), c1 = Math.min(land.cols - 1, q[1]); if (c1 < c0) continue;
+    const m = M[M.length - 1];
+    if (m && c0 <= m[1] + 1) { m[1] = Math.max(m[1], c1); m[2] = m[2] == null || q[2] == null ? null : Math.min(m[2], q[2]); m[3] = m[3] == null || q[3] == null ? null : Math.max(m[3], q[3]); }
+    else M.push([c0, c1, q[2], q[3]]);
+  }
+  L.length = 0;
+  for (const [c0, c1, ra, rb] of M) {
+    if (ra == null && c1 - c0 > 600) continue;   // (a world's edit, whole columns: the page builds it too - 50-zzzz-live-edit.js)
+    const r0s = new Int32Array(c1 - c0 + 2); let n = 0;
+    for (let c = c0; c <= c1; c++) { const a = Math.max(ltR0(c), ra == null ? -1e9 : ra), b = Math.min(ltR1(c) - 1, rb == null ? 1e9 : rb); r0s[c - c0] = a; n += Math.max(0, b - a + 1); }
+    const cells = new Uint8Array(n), sc = new Uint8Array(n); let j = 0;
+    for (let c = c0; c <= c1; c++) { const b = Math.min(ltR1(c) - 1, rb == null ? 1e9 : rb); for (let r = r0s[c - c0]; r <= b; r++) { const i = ltIdx(c, r); cells[j] = land.cell[i]; sc[j] = land.scorch[i]; j++; } }
+    r0s[c1 - c0 + 1] = rb == null ? -1 : rb;
+    SWH.ev.push(['g', c0, c1, r0s, cells, sc]); bufs.push(r0s.buffer, cells.buffer, sc.buffer);
+  }
+}
+// (the page) the worker's ground cells (swLandOut) into its own: the slices made whole first, then marked changed (ltDirty - drawn again)
+function swLandIn(c0, c1, r0s, cells, sc) {
+  if (!land.cell) return;
+  landEnsureX(c0 * LT_CELL, (c1 + 1) * LT_CELL);
+  const rb = r0s[c1 - c0 + 1]; let j = 0, lo = 1e9, hi = -1e9;
+  for (let c = c0; c <= c1; c++) {
+    const b = Math.min(ltR1(c) - 1, rb < 0 ? 1e9 : rb);
+    for (let r = r0s[c - c0]; r <= b; r++) { if (j >= cells.length) break; const i = ltIdx(c, r); land.cell[i] = cells[j]; land.scorch[i] = sc[j]; j++; lo = Math.min(lo, r); hi = Math.max(hi, r); }
+  }
+  if (hi >= lo) ltDirty(c0, c1, lo, hi);
+}
 // (the page) the worker's sounds, shakes and toasts, here
 function swEvents(E) {
   const arg = v => v && typeof v === 'object' && v.ref != null && Object.keys(v).length === 1 ? SWM.byU.get(v.ref) || null : v;
@@ -3464,6 +3499,7 @@ function swEvents(E) {
       else if (e[0] === 'k') shakeAt(e[1], e[2]);
       else if (e[0] === 't') showToast(e[1]);
       else if (e[0] === 'c') cutTo(e[1]);
+      else if (e[0] === 'g') swLandIn(e[1], e[2], e[3], e[4], e[5]);
     } catch (err) { }
   }
 }
@@ -3695,6 +3731,11 @@ function swHostReady() {
   // (Oct 31, tools/space2p.mjs: the camera is the page's own, so a cut to what a player has just taken - a vehicle button, the
   // space button's shuttle - made here only cut the worker's: the page's camera slid across the world to it instead)
   const cut0 = cutTo; cutTo = p => { SWH.ev.push(['c', p]); return cut0(p); };
+  // (user Nov 22 10:34, bug-20261122-103403-v1292: "why isnt the terrain/buildings getting destroyed with the explosions?" - the craters were dug here
+  // and the cars fell into them, but the page's ground, which it draws, never heard: it stood whole over them) THE GROUND'S CHANGES TO THE PAGE: every
+  // change to the cells (ltDirty - a crater, a stone gone, a slide, a piece cut loose) noted, and its cells as they are now sent with the next snapshot
+  // (swLandOut: ['g', ...] - swEvents writes them into the page's own and marks them changed there)
+  const dirty0 = ltDirty; ltDirty = (c0, c1, r0, r1) => { SWH.land.push([c0, c1, r0 == null ? null : r0, r1 == null ? null : r1]); return dirty0(c0, c1, r0, r1); };
   self.__swReady = answer;
   for (const m of self.__swQ.splice(0)) answer(m);
   postMessage({ t: 'ready', touch: self.__SW_TOUCH });
@@ -3704,7 +3745,7 @@ function swHostReady() {
    step); at most 8 a wake-up - behind that, the game runs slower, never different (nothing thinned or skipped: each tick is
    1/120 s of game time). The page grants one credit a frame with its inputs ('in'); after the next tick the worker spends
    it on a snapshot, so the page has one to fold in at each frame and never two. */
-const SWH = { storeSig: null, on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [] };
+const SWH = { storeSig: null, on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [], land: [] };
 function swHostGo(m) {
   SWH.hold = !!m.hold;
   if (!SWH.on) { SWH.on = true; SWH.t0 = performance.now(); SWH.done = 0; swHostLoop(); }
@@ -3750,7 +3791,7 @@ function swHostLoop() {
     if (n && SWH.credit) {
       SWH.credit = 0; SWH.sent++; self.__swTick = REG.tick;
       swDoing('making a snapshot (swSnapshot)'); const S = swSnapshot();
-      swDoing('sending a snapshot'); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs);
+      swLandOut(S.bufs); swDoing('sending a snapshot'); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs);
     }
   }
   swDoing('making the ground (landBgBuild)');
@@ -13301,7 +13342,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1296;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 22 11:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -60970,6 +61011,7 @@ function killTank(t) {
     landWrecks.push({ kind: 'turret', id: t.id, lay: t.lay || 0, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true, oy: (TANKA.deck - TANKA.turTop) / 2 * TANK_K,
       vx: t.vx * 0.5 + bx * 70 + luRnd(-20, 20), vy: -luRnd(175, 205), av: (bx || 1) * (t.facing || 1) * luRnd(4.5, 7) }); }   // (user Nov 16 21:45: "it should rotate in the air ... it should not go that high because it should be heavy" - ~half a tank's length up, never under 4.5 turns of a radian a second, the way the blow throws it)
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
+  wreckBlast(t.x, t.y - 8, null, [0, TANK_BLAST[1]], null);   // (the buildings and cars round it - wreckBlast, 50-story-cars.js)
   tankLost(t);
 }
 
@@ -61331,6 +61373,7 @@ function blowHeli(h) {
   spawnDebris(h.x, h.y, 14, h.vx * 0.3);
   const ht = onLand(h.x) ? hangarRoofUnder(h.x, h.y - 10) : harbourTop(h.x, h.y - 10), g0 = onLand(h.x) ? landBelow(h.x, h.y - 10) : LT_Y1, g = Math.min(g0, ht), deck = h.deck || null;
   if (!deck && g0 - h.y < 40 && ht === Infinity) landCarve(h.x, g, 9);   // (on the harbour's stone or a ship's deck, no crater)
+  wreckBlast(h.x, h.y, null, [0, HELI_BLAST[1]], null);   // (the buildings and cars round it - wreckBlast, 50-story-cars.js)
   // (its wreck: on a ship's deck it rides her - user Oct 27, [19]; on the harbour's deck it lies there till the pier goes;
   // it burns, its smoke standing over it - landCrash)
   const w = { kind: 'heli', id: h.id, x: h.x, y: deck ? h.y + heliSkid() : Math.min(g, h.y + heliSkid()), a: h.tilt, facing: h.facing, t: 0, burn: 0, deck, onDeck: !deck && ht < Infinity };
@@ -69406,11 +69449,24 @@ function stepStoryCars(dt) {
 }
 // a car destroyed - hit at (x, y) by shot s, or (s null) crashed into the ground there: a blast, bits of her, she's a charred wreck where she stops (the
 // things' pass draws her so) - smouldering a while
+/* (user Nov 22 10:34: "why isnt the terrain/buildings getting destroyed with the explosions? Only the cars seem affected? I thought we had this
+   consistent world logic") A VEHICLE'S OWN BLOW-UP, one rule for each: the ground under it dug (its crater - the tank's and the helicopter's were, the
+   car's wasn't), a building it's against knocked where the blast reaches (strHit - as a shot's burst on a wall), and the cars round it hurt a hit
+   each (a burning wreck can set off the next, GTA style). [crater, reach] in world units */
+const CAR_BLAST = [7, 16], TANK_BLAST = [10, 22], HELI_BLAST = [9, 20];
+function wreckBlast(x, y, gy, B, self) {
+  if (netGuestHold()) return;
+  const [cr, reach] = B;
+  if (cr > 0 && gy != null && Math.abs(landBelow(x, gy - 2) - gy) < 6) landCarve(x, gy, cr);
+  for (const q of strShooting().L) if (q.x0 <= x + reach && q.x1 >= x - reach && q.top <= y + reach && q.foot >= y - reach && !layBackAt(q.o.lay, x)) strHit(q.o, clamp(x, q.x0, q.x1), clamp(y, q.top, q.foot), reach);
+  for (const o of storyCars) if (o !== self && o.state === 'run' && o.hp > 0 && Math.hypot(o.x - x, o.y - y) < reach) carHurt(o, 1, x, y);
+}
 function carWreck(c, x, y, s) {
   if (netGuestHold()) return;
   c.hp = 0; c.vDrive = 0; c.drv = 0; c.npcV = 0; c.burnT = 25; c.rest = 0;
   harmed(c, x, y, s); spawnSparks(x, y, 4, 120);
   const H = storyCarSize(c)[1]; sectionBlast(c.x, c.y - H * 0.5, 0.4, 0); spawnDebris(c.x, c.y - H * 0.5, 6, (c.vx || 0) * 0.2); sound('impact', c.x);
+  wreckBlast(c.x, c.y - H * 0.5, c.y, CAR_BLAST, c);
 }
 // hurt by d of her health (a hit - shot s -, the ground's blow - landHurt): marked where it struck; none left, destroyed
 function carHurt(c, d, x, y, s = null) {
@@ -79613,7 +79669,7 @@ function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edV
    zoom is the player's: his own level is put back after (lv0); zooming by hand meanwhile ends it there.
    ================================================================ */
 const STOPEN = { HOLD: 1, FADE: 2, SETTLE: 1, SETTLE_FR: 0.12, SETTLE_MAX: 20, HOME: 4.5, HOME_UP: 46, HOME_FOOT: 0.9, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
-  BOX: { cx: 0.613, cy: 0.467, w: 0.5438 * 0.78, h: 0.7049 * 0.78 }, PAD: 8, GAP: 0.04 };   // (BOX: the name's box, in the screen's fractions - the mockup's made 0.78 the size and its middle a little left and down: user Nov 13 16:05, his picture of it in the game, "a bit too big" and touching the lighthouse; PAD: the picture's margin round it; GAP: the least room between the structure's right side and the name, of the screen's width)
+  BOX: { cx: 0.613, cy: 0.467, w: 0.5438 * 0.78 * 0.8, h: 0.7049 * 0.78 * 0.8 }, PAD: 8, GAP: 0.04 };   // (BOX: the name's box, in the screen's fractions - the mockup's made 0.78 the size, then 0.8 of that (user Nov 22 10:40: "too big and pixelated. It should be 20% smaller") and its middle a little left and down: user Nov 13 16:05, his picture of it in the game, "a bit too big" and touching the lighthouse; PAD: the picture's margin round it; GAP: the least room between the structure's right side and the name, of the screen's width)
 const STORY_OPEN = { on: false, t: 0, skip: false, home: false, lv0: null, seen: null, calm: 0, wait: 0, ok: false, at: 0, beh: -1 };   // (calm / wait / ok: settling - how long it's run smoothly, how long it's waited, settled; at, beh: the last frame's time and the worker's count of dropped steps)   // (home: the new home's shot; lv0: the player's own zoom level to put back; seen: story.homeN as last seen)
 // a story opened from its slots: the shot, from the loading screen's lift
 function storyOpenAsk() { Object.assign(STORY_OPEN, { on: true, t: 0, skip: false, home: false, lv0: null, seen: null, calm: 0, wait: 0, ok: false, at: 0, beh: -1 }); }
