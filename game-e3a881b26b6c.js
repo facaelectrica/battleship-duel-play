@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1296;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1297;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74524,13 +74524,18 @@ function storyArrowsAt() {
       const p = w(cur.wx, cur.wy), i = O.indexOf(T), d = storyOptRow(O.length, i);
       return Object.assign(T, { cx: p.cx, cy: p.cy - (d - 16) * k, up: 16 * k, hw: 0.5 * textWidth(storyOptWords(T)) * 2 * k });
     }
-    const p = w(T.wx, T.wy), n = T.o || T.market ? 2 : 1; return Object.assign(T, { cx: p.cx, cy: p.cy, up: (ARROW_GAP + 7 * ARROW_B + ARROW_BOB + 6 + n * 16) * k });
+    const p = w(T.wx, T.wy), n = storyHintOf(T) ? 2 : 1; return Object.assign(T, { cx: p.cx, cy: p.cy, up: (ARROW_GAP + 7 * ARROW_B + ARROW_BOB + 6 + n * 16) * k });
   });
 }
 // an option's row in the place's label: how far its top is over the place's arrow point (UI pixels) - the name (i -1), then the options in order
 const storyOptRow = (n, i) => ARROW_GAP + 7 * ARROW_B + ARROW_BOB + 6 + (n - i) * 16;
 // what an option says (as an arrow's hint says it)
-const storyOptWords = T => storyBuyHint().replace('PURCHASE', T.market ? (T.sell.every(q => q[3] === 'buy') ? 'BUY' : T.sell.some(q => q[3] === 'buy') ? 'BUY OR SELL' : 'SELL') : T.talk ? 'TALK' : T.deliver ? storyGiveWords(T) : 'ENTER');
+// (user Nov 22 10:13: "The only structures that say 'Press Space to enter' are actual buildings that ONCE YOU ARE IN IT, you can do stuff (e.g. car
+// stand to get a car, marketplace to buy stuff)") what A does on an arrow, or '' - a place says ENTER only when there's something to do in it: the car
+// stand your car drives into (din), a workplace with an activity (actOf - SIGN UP); a home, a lighthouse: its name alone
+const storyVerb = T => T.market ? (T.sell.every(q => q[3] === 'buy') ? 'BUY' : T.sell.some(q => q[3] === 'buy') ? 'BUY OR SELL' : 'SELL') : T.talk ? 'TALK' : T.deliver ? storyGiveWords(T) : T.o && (T.din || actOf(T.o)) ? 'ENTER' : '';
+const storyHintOf = T => { const d = storyVerb(T); return d ? storyBuyHint().replace('PURCHASE', d) : ''; };
+const storyOptWords = T => storyBuyHint().replace('PURCHASE', storyVerb(T) || 'ENTER');
 const LBLS = [];                                         // (the labels drawn this frame: [middle x, width, top, height])
 function drawStoryArrows() {
   if (ui.menu) return;
@@ -74568,10 +74573,7 @@ function drawStoryArrows() {
     pxArrow(X + dx, Y - bob, B, ARROW_COL.to, 0, pop);
     // its label over the bounce: the name, and what A does there
     const lines = [[T.name, '#ffffff']];
-    if (T.market) lines.push([storyBuyHint().replace('PURCHASE', T.sell.every(q => q[3] === 'buy') ? 'BUY' : T.sell.some(q => q[3] === 'buy') ? 'BUY OR SELL' : 'SELL'), '#7fe08a']);   // (user Nov 21 23:17: "You're not selling goods, you're buying")
-    else if (T.talk) lines.push([storyBuyHint().replace('PURCHASE', 'TALK'), '#7fe08a']);
-    else if (T.deliver) lines.push([storyBuyHint().replace('PURCHASE', storyGiveWords(T)), '#7fe08a']);
-    else if (T.o) lines.push([storyBuyHint().replace('PURCHASE', 'ENTER'), '#7fe08a']);   // (a place: going in - "it will just be tap to enter")
+    const hint = storyHintOf(T); if (hint) lines.push([hint, '#7fe08a']);   // (a market BUY / SELL - user Nov 21 23:17; TALK; GIVE / DELIVER; ENTER only where there's something to do inside - storyVerb)
     // (user Nov 21 23:17, two arrows on KAWAI MARKET: "The words overlap on top") no label over another: raised till it's clear of those drawn
     const lw = Math.max(...lines.map(([t]) => textWidth(t) * 2)) + 8, lh = lines.length * 16;
     let ly = Y - 7 * B - ARROW_BOB - 6 - lh;
