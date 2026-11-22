@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1294;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1295;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -82120,7 +82120,7 @@ function slObjFollow(g) {
 // ---- the story screen (this screen's): the line in the middle on black, its keywords coloured; A: it fades, the destination and
 // its objective fly up to the top
 const SAY = { n: 0, t: 0, fly: -1 };
-const SL_COL = { place: '#ffb02e', good: '#9dff8a', days: '#c08cff', text: '#ffffff' };
+const SL_COL = { place: '#ffb02e', good: '#9dff8a', days: '#c08cff', text: '#ffffff', who: '#f3cf8a', hint: '#8f9bb8' };   // (who: the speaker's name; hint: CONTINUE - user Nov 22's model)
 const slSayUp = () => STORY && !ui.title && !(typeof EDMODE !== 'undefined' && EDMODE.on) && story.say && story.say.open && story.say.n !== SAY.n;   // (not in the GAME EDITOR: a line left up by the game ate the editor's presses - cargo-dock chat, Nov 20)
 // the objective's two words as drawn: the destination, and what to do there
 function slObjWords(g) {
@@ -82165,17 +82165,19 @@ function drawStorySay() {
   const s = story.say, up = slSayUp(), fly = SAY.fly >= 0 ? time - SAY.fly : -1;
   if (!up && (fly < 0 || fly > 0.9)) { SAY.fly = -1; return false; }
   const Ls = up ? sayLines(s) : SAY.L || [], sc = ubw < 420 ? 2 : 3, W = Math.min(ubw - 40, 150 * sc * 2), lh = 9 * sc, nsc = Math.max(1, sc - 1);
-  // (every sentence at once: each under its speaker's name - the name left out where the one before was theirs too)
-  const B = Ls.map((l, i) => { const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who); return { who, named, L: slLayout(trText(l.txt || ''), sc, W) }; });
-  const gap = Ls.length > 1 ? 2 * lh : 0, hOf = b => (b.named ? 2 * lh : 0) + b.L.length * lh, H = B.reduce((h, b) => h + hOf(b), 0) + gap * Math.max(0, B.length - 1);
+  // (user Nov 22, his model: one block, left-aligned and centred as a whole - the speaker's name with ':' on its own line over
+  // what they say, each sentence on its own line, no blank lines; a new speaker one line apart. "Continue" smaller, its own colour)
+  const B = Ls.map((l, i) => { const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who); return { who: who ? trText(who) + ':' : '', named, L: slLayout(trText(l.txt || ''), sc, W) }; });
+  const hOf = (b, i) => (i > 0 && b.named ? lh : 0) + (b.named ? lh : 0) + b.L.length * lh, H = B.reduce((h, b, i) => h + hOf(b, i), 0);
+  const lnW = ln => ln.length ? ln[ln.length - 1].x + ln[ln.length - 1].ww : 0;
+  const BW = B.reduce((w, b) => Math.max(w, b.named ? textWidth(b.who) * sc : 0, ...b.L.map(lnW)), 0), x0 = Math.round((ubw - BW) / 2);
   const a = up ? clamp((time - SAY.t) / 0.35, 0, 1) : 1 - clamp(fly / 0.5, 0, 1);
   ug.fillStyle = 'rgba(0,0,0,' + (0.96 * a).toFixed(3) + ')'; ug.fillRect(0, 0, ubw, ubh);
-  let y = Math.round((ubh - H) / 2) + (B[0] && B[0].named ? 2 * lh : 0);
+  let y = Math.round((ubh - H) / 2);
   B.forEach((b, i) => {
-    if (i > 0) y += gap + (b.named ? 2 * lh : 0);
-    if (up && b.named) { ug.globalAlpha = a; drawText(ug, b.who, ubw / 2, y - 2 * lh, '#8a93a8', nsc, 'center'); }
+    if (i > 0 && b.named) y += lh;
+    if (b.named) { if (up) { ug.globalAlpha = a; drawText(ug, b.who, x0, y, SL_COL.who, sc); } y += lh; }
     b.L.forEach((ln, j) => {
-      const lw = ln.length ? ln[ln.length - 1].x + ln[ln.length - 1].ww : 0, x0 = Math.round((ubw - lw) / 2);
       for (const q of ln) {
         const key = q.col !== SL_COL.text; if (!up && !key) continue;   // (read: the plain words fade with the black, the keywords stay)
         ug.globalAlpha = up ? a : key ? 1 - clamp(fly / 0.8, 0, 1) : 0;
@@ -82185,7 +82187,7 @@ function drawStorySay() {
     y += b.L.length * lh;
   });
   ug.globalAlpha = 1;
-  if (up && a >= 1) { const t = storyBuyHint().replace('PURCHASE', 'CONTINUE'), bob = Math.round(2 * Math.abs(Math.sin(time * 3.4))); drawText(ug, t, ubw / 2, y + 2 * lh + bob, '#7fe08a', 2, 'center'); }
+  if (up && a >= 1) { const t = storyBuyHint().replace('PURCHASE', 'CONTINUE'), bob = Math.round(2 * Math.abs(Math.sin(time * 3.4))); drawText(ug, t, x0, y + Math.round(lh * 0.75) + bob, SL_COL.hint, nsc); }
   return up;
 }
 // read it: this screen lets go of it, the simulation hears it (storySaid)
