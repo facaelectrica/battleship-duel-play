@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1306;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 12:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1307;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 12:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71603,8 +71603,9 @@ function drawStoryBanner() {
   const sun = hudIn && storySunBtn(); if (sun) drawStorySun(sun);
   if (story.wake) { const t = 'SLEEPING...'; drawText(ug, t, ubw / 2 + 1, Math.round(ubh * 0.3) + 1, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.3), '#ffd23a', 3, 'center'); }
   drawStoryArrows();   // (what you control and what you can swap to - 50-zz-story-swap.js)
-  storyBannerTop(); drawStoryObj(); drawStorySay();   // (the objective at the top, a line on screen over everything - 50-zzzzz-story-lines.js)
-  drawPhone(); drawShowroom();   // (the phone - 50-zzzzz-story-signup.js; a CAR STAND's showroom over everything - 50-zzzzz-car-stand.js)
+  storyBannerTop(); drawStoryObj();   // (the objective at the top - 50-zzzzz-story-lines.js)
+  if (!slSayUp()) drawPhone(); drawShowroom();   // (the phone - 50-zzzzz-story-signup.js - none while a line is on screen, user Nov 22 11:22: "There should be no phone during the cutscene"; a CAR STAND's showroom - 50-zzzzz-car-stand.js)
+  drawStorySay();   // (a line on screen: over everything of the game's - 50-zzzzz-story-lines.js)
 }
 // (user Nov 2 14:58: "on the top right you should have Current Day, Coins, Current Object you are controlling") under the frame
 // rate: DAY, your coins, the name of what you control (in its arrow's orange); the fuel gauge top-left
@@ -82551,7 +82552,12 @@ function slObjFollow(g) {
 // its objective fly up to the top
 const SAY = { n: 0, t: 0, fly: -1 };
 const SL_COL = { place: '#ffb02e', good: '#9dff8a', days: '#c08cff', text: '#ffffff', who: '#f3cf8a', hint: '#8f9bb8' };   // (who: the speaker's name; hint: CONTINUE - user Nov 22's model)
-const slSayUp = () => STORY && !ui.title && !(typeof EDMODE !== 'undefined' && EDMODE.on) && story.say && story.say.open && story.say.n !== SAY.n;   // (not in the GAME EDITOR: a line left up by the game ate the editor's presses - cargo-dock chat, Nov 20)
+const slSayWaits = () => STORY && !ui.title && !(typeof EDMODE !== 'undefined' && EDMODE.on) && story.say && story.say.open && story.say.n !== SAY.n;   // (a line to say - not in the GAME EDITOR: a line left up by the game ate the editor's presses - cargo-dock chat, Nov 20)
+// (user Nov 22 11:22: "We need to be zoomed in on the structure always for all structures before the objectives appear. So we feel that we enter the
+// structure") the camera there: Story's opening shot over (storyOpenHides), no swap's arrow flying (STSW), the zoom as drawn at the one asked for and no
+// glide left - a line waits for it (and the objective at the top with it), its presses the game's meanwhile
+const storyFramed = () => !storyOpenHides() && !STSW.on && !(cam.glide > 0) && Math.abs((cam.za[0] || cam.zt[0]) / (cam.zt[0] || 1) - 1) < 0.02;
+const slSayUp = () => slSayWaits() && storyFramed();
 // the objective's two words as drawn: the destination, and what to do there
 function slObjWords(g) {
   if (!g) return null; const T = slTo(g.to); if (!T) return null;
@@ -82623,7 +82629,7 @@ function drawStorySay() {
 // read it: this screen lets go of it, the simulation hears it (storySaid)
 function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid'); sound('click', 0); return true; }
 // a line just put up: when it started (its fade in)
-function slSayWatch() { if (story.say && story.say.open && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }
+function slSayWatch() { if (slSayUp() && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }   // (its fade in from when it's shown - storyFramed)
 window.addEventListener('pointerdown', ev => { if (!slSayUp() || smapOwns(ev)) return; slSayNext();   /* (a press on the STORY MAP is the map's - 1243 a line up ate them) */ ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
 window.addEventListener('keydown', ev => {
   if (!slSayUp() || ev.repeat) return;
@@ -82635,7 +82641,7 @@ window.addEventListener('keydown', ev => {
 // is read, the pair flies up from the middle of the screen (OBJFLY)
 const OBJFLY = { t: -9 };
 function drawStoryObj() {
-  if (slSayUp()) return;
+  if (slSayWaits()) return;   // (a line to say first: the objective flies up from it once read)
   const W = slObjWords(story.obj); if (!W) { drawGoalWatch(hudTop() + 14); return; }   // (the countdown always on - under the objective, or alone at the top)
   const y = hudTop() + 14, cx = Math.round(uvw / 2), k = clamp((time - OBJFLY.t) / 0.7, 0, 1), e = 1 - Math.pow(1 - k, 3);
   const yy = Math.round(ubh / 2 + (y - ubh / 2) * e), sc = 3 - Math.round(e);
