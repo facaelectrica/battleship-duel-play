@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1328;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 16:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1329;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 16:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74464,8 +74464,9 @@ function storyPlace(cur) {
 }
 // (user Nov 22 11:48: "There is never a text below a location ever. You click on the location, it opens the location screen, and then you have the options inside
 // the location. And you should be able to enter the fishery") a place you can go into: your HOME, your family's, a lighthouse (storyEnterable), a market, any
-// workplace, a place taking a good you have with you (stOffer) - what you do there is its menu (placeRows)
-const storyVisit = o => !!o && (storyEnterable(o) || strMarket(o) || strWork(o) || stOffer(o).length > 0);
+// workplace, a place taking a good you have with you (stOffer) - what you do there is its menu (placeRows). (user Nov 22 15:24: "why am I allowed to enter the
+// mechanic if there is nothing to do?") Only with something in it for you now: a row of its screen besides EXIT, or something its people say (placeHas)
+const storyVisit = o => !!o && (storyEnterable(o) || strMarket(o) || strWork(o) || stOffer(o).length > 0) && placeHas(o);
 // a vehicle you may take: yours, your family's while free (no stealing - user Nov 20 21:16), one placed by hand in the editor's PLAY
 const storyMayTake = v => !!v && (!!v.own || folkMine(v) || (folkOwner(v) ? folkFamFree(v) : storyTestVeh(v)));
 // where vehicle v is put away to go into place o: o itself where it takes v, else its own PARKING / DOCK for it (lotOf) - null: none
@@ -74491,10 +74492,11 @@ function storyEnterables(v) {
   const out = [], r = STORY_FRONT_M * UPM, V = vehBox({ v }), P = storyParkedAt(v), at = P ? [P, ...storyLinks(P)] : [];
   { const D = storyDriveIn(v); if (D) out.push({ o: D, lot: D.id, stand: true, d: boxGap(V, strBox(D)) }); }   // (a CAR STAND: she goes in with you - its showroom, 50-zzzzz-car-stand.js)
   for (const o of strsUsed()) {
-    if (!storyVisit(o) || strDrivesIn(o)) continue;
+    if (strDrivesIn(o)) continue;
     const L = storyLotFor(v, o); if (!L) continue;                                       // (its own PARKING / DOCK for her - or itself)
     if (P !== L && !(v.car && storyFreeSpot(L, v) >= 0)) continue;                        // (no room for her there: no arrow - the editor says the lot's SPOTS SHORT)
     const d = P === L || at.includes(o) ? 0 : Math.min(boxGap(V, strBox(o)), boxGap(V, strBox(L))); if (d > r) continue;
+    if (!storyVisit(o)) continue;                                                         // (last: what's in it is worked out only for what's close)
     out.push({ o, lot: L.id, d });
   }
   const here = storyLotHere(v);
@@ -80928,6 +80930,8 @@ function placeScreenRows(o) {
   if (!working) R.push({ do: 'exit' });
   return R;
 }
+// something in place o for you now: a row besides EXIT, or something said there (storyVisit - no arrow, no going in, without it)
+const placeHas = o => placeScreenRows(o).some(q => q.do !== 'exit') || [o, ...storyLinks(o)].some(q => slWantsAt(q).some(l => l.txt));
 // a row's words, and why it can't be done now ('' - it can)
 const PLACE_WORDS = { start: 'START WORKING', stop: 'STOP WORKING', signup: 'SIGN UP', sleep: 'SLEEP', exit: 'EXIT' };
 const placeRowLabel = q => PLACE_WORDS[q.do] || placeRowTxt(q);
