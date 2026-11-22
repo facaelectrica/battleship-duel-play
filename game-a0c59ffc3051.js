@@ -5883,7 +5883,7 @@ const ONEVIEW = () => HUMANS() <= 1;                          // one screen (you
 // goods - 50-zz-placed.js, 50-zz-cargo.js)
 // (the STORY's own vehicles - 50-story*.js, 50-zz-story-swap.js, 50-zzzz-veh-deal.js: its spot now (berth / spot), its fuel, lost and
 // mended by the day, renewed; its engine's heat (heatT, hot, stillT))
-const STORY_REC = ['num: story heli plane sub boat car berth spot fuel lostDay lostT fixDay fixT heatT hot stillT wk cv bay bayT bayOut', 'val: wfor'];   // (bay: the place it's in through its vehicle door, bayT / bayOut when it went in / its job done - 50-zzzzz-place-door.js)   // (wk: a work vehicle's workplace, cv: a character's own, wfor: whose - 50-zzzzz-story-work.js)
+const STORY_REC = ['num: story heli plane sub boat car berth spot fuel lostDay lostT fixDay fixT heatT hot stillT wk cv bay bayT bayOut bs ba', 'val: wfor'];   // (bay: the place it's in through its vehicle door, bayT / bayOut when it came to it / starts out, bs the side its inside is, ba where she went in from - 50-zzzzz-place-door.js)   // (wk: a work vehicle's workplace, cv: a character's own, wfor: whose - 50-zzzzz-story-work.js)
 const CIV_REC = ['num: driven cin placed sid own py _off _lifted downK _rv _sa _sk hookA hookT spd dropFrom dkT _smX _smY _smAcc _msPy hb hs fac susV susY noseT enterK washT', 'txt: sv', 'val: loiter carried marks deck dk goods', 'obj: _smS _smCh'];
 // (Nov 11, tables) a vehicle family's record table from its own lists and the shared ones: a name met again is the first list's
 const vehRec = (...L) => { const seen = new Set(); return ColTable.rec(...L.map(s => { const [k, f] = s.split(':'); return k + ': ' + f.trim().split(/\s+/).filter(n => n && !seen.has(n) && seen.add(n)).join(' '); })); };
@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1304;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 12:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1305;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 12:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69266,7 +69266,6 @@ function exhPuff(x, y, vx, px, k, o) {
   exhaust.addRow({ x, y, vx, vy: o ? o.vy : -carRnd(3, 7) * px, r: px * (0.8 + 0.6 * carFxR()) * Math.min(1.5, k), grow: px * carRnd(0.9, 1.6), age: 0, life: o ? o.life : carRnd(0.8, 1.5) * (k > 1.2 ? 1.4 : 1), px, g: o ? o.g : k > 1.2 ? 0.8 : 1 });
 }
 function carPuff(c, L, k) {
-  if (carThru(c) > 0) return;                              // (in through a place's door: none - 50-zzzzz-place-door.js)
   const P = storyCarSize(c)[2], X = CAR_EXH[c.art] || CAR_EXH_DEF, [px, py] = carPt(c, L * X[0], X[1] * UPM);   // (her pipe as she's drawn - carSink)
   exhPuff(px, py + carSink(c), -c.dir * (8 + Math.abs(c.vx) * 0.3), P ? P._m * UPM : 0.06 * UPM, k);
 }
@@ -69327,6 +69326,7 @@ function stepStoryCars(dt) {
     if (c.state === 'run' && !(c.hp <= 0) && c.hp < (c.hpMax || 2) - 1e-6) carSmoke(c, dt);   // (hurt: smoking by how much - carSmoke)
     if (c.hp <= 0 && c.burnT > 0) { c.burnT -= dt; carSmoke(c, dt); }   // (the wreck burns, then smoulders)
     if ((c.state === 'run' && !folkAway(c)) || c.state === 'sink') storyCarBody(c, dt);   // (a character's car out of every view: a node - 50-zzzzz-story-folk.js)
+    if (c.state === 'run' && c.bay && !(c.hp <= 0)) doorCarStep(c, dt);   // (driving through a place's door - 50-zzzzz-place-door.js)
   }
 }
 // a car destroyed - hit at (x, y) by shot s, or (s null) crashed into the ground there: a blast, bits of her, she's a charred wreck where she stops (the
@@ -69878,7 +69878,7 @@ const CAR_BEAM = 2.6;                                     // (how far her headla
 function carLamps(out) {
   const k = E.lampsOn || 0; if (k < 0.05 || !storyCars.length) return out;
   for (const c of storyCars) {
-    if (c.state !== 'run' || !vehManned(c) || carThru(c) >= 0) continue;   // (going through a place's door: none - 50-zzzzz-place-door.js)
+    if (c.state !== 'run' || !vehManned(c) || c.bay) continue;   // (through a place's door: none - its lamps would show through the wall)
     const [L, H] = storyCarSize(c), r = c.a - c.dir * (c.pit || 0);
     for (const [a, u, t] of carLampsOf(c.art)) {
       if (t !== 'beam') continue;
@@ -69891,7 +69891,7 @@ function carLamps(out) {
 // (engine part 5) the cars drawn from the art atlas by the things' pass (45-zz-things-gpu.js): one draw a call, each car its body then
 // its wheels (bySize: smaller in front), her damage (dmgLook, her marks' mask - dmgMask), the hour's tint and a roof's shade, the moon's
 // and a low sun's rims (thingsLit - objLit's rule: no night shape of her own, lit like the ground she stands on, as the structures - user
-// Nov 2, the taxi went black at dusk), seen only through her building's door when at home in one (strMaskBox)
+// Nov 2, the taxi went black at dusk), never seen put away in her garage (carHomeIn), and going through its door only what's in front of the building (strMaskBox)
 // (user Nov 20 11:06: "all vehicles should have a front view. And when they're parked, we see them from the front. And when they drive, we see
 // them from the side") a car at its spot: its front picture (NAME-front - gen/tropical/front_views.py, placeholders till the
 // user's), standing where its side would - its wheels in the picture
@@ -69910,10 +69910,9 @@ function drawStoryCars(x0, x1, pass, inside) {
   for (const c of bySize(storyCars)) {   // (smaller in front - 50-zz-size-order.js)
     if (c.state === 'gone' || vehCulled(c, x0, x1) || carPass(c) !== pass) continue;
     const [w, h, P0] = storyCarSize(c); if (!P0) continue;
+    if (carHomeIn(c)) continue;                                  // (put away in her garage: inside, not seen - 50-zzzzz-place-door.js)
     if (inside != null && !!strMaskBox(c, w / 2) !== inside) continue;
-    const thru = carThru(c); if (thru >= 1) continue;          // (through a place's door - drawn back into its dark, inside not drawn: 50-zzzzz-place-door.js)
-    const TL = thru >= 0 ? thruLook(thru) : null;
-    { const PF = !TL && carFacing(c) && carFrontPic(c), eF = PF && artPut(PF);
+    { const PF = !c.bay && carFacing(c) && carFrontPic(c), eF = PF && artPut(PF);
       if (eF && eF.ok) {
         const wf = PF.width * PF._m * UPM, hf = PF.height * PF._m * UPM, W = PX(c.x + wf / 2) - PX(c.x - wf / 2), H = PY(c.y + hf) - PY(c.y);
         const clip = strMaskBox(c, w / 2), sh = roofShade(c.x - wf / 2, c.x + wf / 2, c.y - hf, c.y), fc = sh < 1 ? fx.map(v => v * sh) : fx;
@@ -69930,10 +69929,9 @@ function drawStoryCars(x0, x1, pass, inside) {
     }) : [];
     if (!e || !e.ok || whs.some(q => !q || !q.ok)) continue;    // (her pictures still on their way to the atlas - artStep: at the load)
     const W = PX(c.x + w / 2) - PX(c.x - w / 2), H = PY(c.y + h) - PY(c.y), bob = c.state === 'run' && c.gnd && Math.abs(c.vx || 0) > 2 ? Math.round(Math.sin(c.ph * 18) * 0.5) : 0;
-    const clip = strMaskBox(c, w / 2);                          // (at home inside a building with a painted gate: seen only through its door - 50-zz-struct.js)
-    const sh = roofShade(c.x - w / 2, c.x + w / 2, c.y - h, c.y) * (TL ? TL.k : 1), fc = sh < 1 ? fx.map(v => v * sh) : fx;   // (under a roof: in its shade - 50-zz-struct.js; going through a door, into its dark)
-    const ts = TL ? TL.s : 1, lift = TL ? Math.round(TL.lift * H) : 0;
-    const M = thgScale(thgRotate(thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + carSink(c))) + bob - lift), (c.a || 0) - c.dir * (c.pit || 0)), (c.dir > 0 ? -1 : 1) * ts, ts);   // (drawn a little into the ground: VEHICLES SINK - user Nov 3 23:02, "so it feels its on the road surface")
+    const clip = strMaskBox(c, w / 2);                          // (going through a garage's door: what's past it behind the building's front - 50-zz-struct.js)
+    const sh = roofShade(c.x - w / 2, c.x + w / 2, c.y - h, c.y), fc = sh < 1 ? fx.map(v => v * sh) : fx;   // (under a roof: in its shade - 50-zz-struct.js)
+    const M = thgScale(thgRotate(thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + carSink(c))) + bob), (c.a || 0) - c.dir * (c.pit || 0)), c.dir > 0 ? -1 : 1, 1);   // (drawn a little into the ground: VEHICLES SINK - user Nov 3 23:02, "so it feels its on the road surface")
     const [cov] = dmgLook(P0, dmgOf(c));                        // (damaged: charred - the one rule, 50-zz-damage.js)
     thingsQuad(M, -W / 2, -H, W, H, e, THG_BODY, fc, cov, dmgMask(c, P0, P0._m), dmgCell(P0), dmgSeed(P0), thingsLit(PX(c.x), 0), clip, 1, 0, null, null, null, null, K ? thingsRules({ rect: [0, 0, P0.width, P0.height], cuts: K.cuts }) : 0);   // (her wheels taken out of her picture - carParts)
     if (K) {                                                     // her wheels, each turned by how far she's rolled (the picture's mirrored when she faces right)
@@ -69943,7 +69941,7 @@ function drawStoryCars(x0, x1, pass, inside) {
         thingsQuad(thgRotate(thgTranslate(M.slice(), -W / 2 + q.x * kx, -H + q.y * ky), (rl || 0) / rw * sx), -R, -R, 2 * R, 2 * R, whs[qi], THG_PART, fc, 0, null, 0, 0, null, clip);
       });
     }
-    if (c.state === 'run' && !TL && (pass === 'dry' || pass === 'isl' || pass === 'deck' || pass.startsWith('lay'))) carLights(c, w, h);
+    if (c.state === 'run' && !c.bay && (pass === 'dry' || pass === 'isl' || pass === 'deck' || pass.startsWith('lay'))) carLights(c, w, h);
   }
   if (own) thingsEnd();
   if (pass === 'dry' && inside !== true) drawExhaust(x0, x1);   // (all of it with the land's: drawn once a frame)                      // (their exhaust, over them - in the hour's light, before the world's tint)
@@ -74657,6 +74655,7 @@ function storyLeave(p, v) {
     const best = storyFreeSpot(o, v);
     if (best >= 0) {
       v.berth = o.id; v.spot = best; v.turn = 0;
+      if (!v.bay && carDoorPlace(v, o.id)) doorIn(v, o, v.dir);   // (a garage: she drives in through its door the way she faces - 50-zzzzz-place-door.js)
       if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
       if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; }
       netAboard(v); storyArrive(o.id);
@@ -74671,6 +74670,7 @@ function storyEnterVeh(p, v) {
   const c = crew[p]; civUI[p] = true;
   if (c.mode !== 'civ' && c.mode !== 'dock') { c.mode = 'dock'; c.watch = null; c.look = null; }
   if (v.plane && v.state === 'parked' && !storyPlaneOut(v)) return false;   // (out of its hangar onto the runway)
+  doorLeave(v, v.dir);                                   // (a car in her garage: out through its door the way she faces - 50-zzzzz-place-door.js)
   v.berth = null; boardCiv(p, v); v.drv = 0; v.vDrive = 0; v.cin = 0; setOrder(telegraphs[p], 3);
   storyCarryIn(v);                                       // (what you carry, loaded)
   return true;
@@ -74680,10 +74680,10 @@ function storySwap(p, key) {
   if (!STORY || p !== 0) return;                         // (one playing out is replaced - no wait)
   const L = storyTargets(), T = L.find(q => q.key === key), C0 = L.find(q => q.cur);
   if (!T || T.cur) return;
-  if (T.din) { const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (v) v.din = T.o.id; return; }   // (a place to drive into: she drives in - stepCivDriven)
+  if (T.din) { const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (v) { v.din = T.o.id; storyDriveSide(v, T.o); } return; }   // (a place to drive into: she drives in the way she's coming - stepCivDriven)
   // (user Nov 22 10:33: "If I select it, my car goes to park at the parking spot and I go into the structure") a place picked from the road: she drives
   // to its PARKING / DOCK and is put away there (v.din - storyDriveStep), then you go in (story.enter - storyEnterNow)
-  if (T.drive != null) { const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (v) { v.din = T.drive; story.enter = T.o.id; } return; }
+  if (T.drive != null) { const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (v) { v.din = T.drive; story.enter = T.o.id; const o = slStr(T.drive); if (o) storyDriveSide(v, o); } return; }
   if (T.v && (!(T.v.own || folkMine(T.v) || folkFamFree(T.v) || storyTestVeh(T.v) || isPierCrane(T.v)) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }   // (or your family's you've taken - 50-zzzzz-story-folk.js)   // (yours, or one you've just rented - 50-zzzz-veh-deal.js)
   storySwapTo(p, T, C0);
 }
@@ -75015,19 +75015,16 @@ function strGateBox(o, B) {
 // in its door's opening gx0..gx1 from gt down: [X0, X1, gx0, gx1, gt] on the screen, or null (not at home in one). Its gate shut, the door has
 // no opening (gx0 = gx1): what's inside is wholly behind the building (user Nov 22, the MECHANIC's door shut and a car's wheels under it, over
 // the step below the door: "I should NOT be seeing the wheels of a car inside a garage ever ... when the door is closed. This applies to all garages")
-// (going in or out through its door - carThru, 50-zzzzz-place-door.js: in front of the walls till she's drawn back small enough for its opening)
+// (user Nov 22 10:23-11:14, every garage: a car goes in and out only through its door - doorAt, 50-zzzzz-place-door.js) a car under way through its
+// door: what's past the door on its inside's side (bs) is behind the building's front, all the way - the rest of her in front of it. Put away
+// inside: never seen (carHomeIn - not drawn)
 function strMaskBox(v, half) {
-  if (!LAND) return null;
-  const d = typeof carThru === 'function' ? carThru(v) : -1;
-  for (const o of strsUsed()) {
-    if (d >= 0 ? o.id !== v.bay : o.id !== v.hb && o.id !== v.berth) continue;
-    const B = strBox(o); if (v.x + half <= B.x0 || v.x - half >= B.x1) continue;
-    if (d >= 0) { const G = strGateBox(o, B); if (!G || 2 * half * thruLook(d).s > G.x1 - G.x0) return null; }
-    const G = strGateBox(o, B); if (!G) continue;
-    const gx0 = Math.round(PX(G.x0)), gx1 = strGateRows(o, B) >= B.P._gate[3] ? gx0 : Math.round(PX(G.x1));
-    return [Math.round(PX(B.x0)), Math.round(PX(B.x1)), gx0, gx1, Math.round(PY(G.top))];
-  }
-  return null;
+  if (!LAND || !v.bay || typeof doorAt !== 'function') return null;
+  const P = doorAt(v); if (!P || !P.run) return null;   // (waiting at the door for its gate: in front)
+  const o = slStr(v.bay), B = o && strBox(o); if (!B || v.x + half <= B.x0 || v.x - half >= B.x1) return null;
+  const G = strGateBox(o, B); if (!G) return null;
+  const gx0 = Math.round(PX(G.x0)), gx1 = strGateRows(o, B) >= B.P._gate[3] ? gx0 : Math.round(PX(G.x1)), gt = Math.round(PY(G.top));
+  return (v.bs || 1) > 0 ? [Math.round(PX(G.x0)), 1e6, gx0, gx1, gt] : [-1e6, Math.round(PX(G.x1)), gx0, gx1, gt];
 }
 // the rows of its painted gate down over its door (all of them: shut) - drawStrGate
 const strGateRows = (o, B) => Math.round(B.P._gate[3] * (1 - (o._gate || 0)));
@@ -80720,10 +80717,11 @@ const standCars = () => Object.keys(STR_VEHS).filter(sv => STR_VEHS[sv].priv && 
 // to enter into the car stand. And if I click that arrow, the car drives in"; "If you can't have any interaction with the location, like the mechanic, it
 // doesn't make sense that the garage door opens"). A place you drive into is one with something to do with your car inside - a CAR STAND (strDrivesIn).
 // Your own car within reach of one with a spot free for her and a door she goes under: its ENTER arrow (storyTargets 'i:') and its door open
-// (drawStrGate); picked (v.din) she drives to the door and goes in through it (user Nov 22 10:23: "your car must go inside ... vs actually entering") -
-// drawn back into its dark, the gate down behind her (bay - carThru, 50-zzzzz-place-door.js); in, its showroom (standHere). Your lever before the door
-// takes her back. Out (standOut, or the car picked): the gate up, she comes out of the dark and drives on out of the building the way she faces (user
-// 10:23: "When you exit the car stand, the gate opens and your car drives out"), then she's yours again
+// (drawStrGate); picked (v.din) she drives to the door and in through it the way she's going (user Nov 22 10:23: "your car must go inside from the
+// direction its facing ... vs actually entering") - at her own size, what's past the door behind the building's front, the gate down behind her (bay -
+// doorAt, 50-zzzzz-place-door.js); in, its showroom (standHere). Your lever before the door takes her back. Out (standOut, or the car picked): the gate
+// up, she drives out of it turned round and clear of the building (user 10:23: "When you exit the car stand, the gate opens and your car drives out"),
+// then she's yours again
 const strDrivesIn = o => strIsStand(o);
 function storyDriveIn(v) {
   if (!v || !v.car || v.cv == null || v.wfor !== 'player' || v.din || v.bay) return null;
@@ -80738,27 +80736,25 @@ function storyDriveIn(v) {
 }
 // her drive while she goes in or out: true - held, this step; a number - the lever she's given; false - none (yours)
 function storyDriveStep(v) {
-  if (v.bay) {                                              // (through the place's door: held while it goes up, she goes in, she's in, she comes out)
-    const o = slStr(v.bay), B = o && strBox(o);
-    if (!B) { v.bay = 0; v.bayOut = 0; return false; }
-    if (!v.bayOut || time < v.bayOut + THRU_T) { v.vx = 0; v.drv = 0; v.vDrive = 0; return true; }
-    const half = vehLenM(v) * UPM / 2;                      // (out of the door: on till she's clear of the building, the way she faces - or your own lever)
-    if (v.cin || (v.dir > 0 ? v.x - half > B.x1 : v.x + half < B.x0)) { v.bay = 0; v.bayOut = 0; v.berth = null; v.spot = null; return false; }
-    return v.dir * 0.35;
+  if (v.bay) {                                              // (through the place's door - doorCarStep moves her: held till she's out and clear of it)
+    v.drv = 0; v.vDrive = 0; return true;                    // (doorCarStep lets her go once she's out and clear)
   }
   if (v.berth != null && !v.din) { const o = slStr(v.berth), B = o && strBox(o); if (!B || v.x < B.x0 || v.x > B.x1) { v.berth = null; v.spot = null; } }
   if (!v.din) return false;
-  const o = slStr(v.din), D = o && placeDoor(o), sp = o ? storyFreeSpot(o, v) : -1;
+  const o = slStr(v.din), G = o && carDoorPlace(v, o.id), sp = o ? storyFreeSpot(o, v) : -1;
   if (!o || sp < 0 || v.cin) { v.din = 0; if (crew[0].civ === v) story.enter = 0; return false; }   // (your own lever: yours again - and no going in after: story.enter)
-  // (a place with a vehicle door - a CAR STAND: in through it; a place's PARKING / DOCK - storySwap's T.drive: onto her free spot there)
-  const dx = (D ? D.cx : storySpotX(o, sp, vehLenM(v))) - v.x;
+  // (a garage - a CAR STAND, a place's lot with a vehicle door: in through its door the way she's coming - 50-zzzzz-place-door.js; a place's PARKING / DOCK -
+  // storySwap's T.drive: onto her free spot there)
+  const dx = (G ? doorRun(v, o).A : storySpotX(o, sp, vehLenM(v))) - v.x;
   if (Math.abs(dx) < 1.5 * UPM && Math.abs(v.vx || 0) < 2.5 * UPM) {
-    if (D) Object.assign(v, { x: D.cx, vx: 0, drv: 0, vDrive: 0, berth: o.id, spot: sp, din: 0, bay: o.id, bayT: time - DOOR_UP_T, bayOut: 0 });   // (at the door: in - its gate's up already, opened for her within reach - drawStrGate)
+    if (G) { Object.assign(v, { vx: 0, drv: 0, vDrive: 0, berth: o.id, spot: sp, din: 0 }); doorIn(v, o, v.bs); v.bayT = time - DOOR_UP_T; }   // (at the door: in - its gate's up already, opened for her coming - drawStrGate)
     else Object.assign(v, { x: v.x + dx, vx: 0, drv: 0, vDrive: 0, berth: o.id, spot: sp, din: 0 });
     return true;
   }
   return Math.abs(dx) < 1.5 * UPM ? 0 : Math.sign(dx) * clamp(Math.abs(dx) / (8 * UPM), 0.1, 0.35);   // (near it: let go, she rolls to a stop on it)
 }
+// (storySwap, picked) the side she goes in from: the way she's coming to its door - the way she faces when she's at it
+function storyDriveSide(v, o) { const D = placeDoor(o); v.ba = 0; v.bs = !D ? v.dir || 1 : Math.abs(D.cx - v.x) > D.w / 2 ? Math.sign(D.cx - v.x) : v.dir || 1; }
 // your own car parked in a stand: { v, o } (null: not)
 function standHere() {
   const c = crew[0], v = c && c.mode === 'civ' ? c.civ : null;
@@ -80769,13 +80765,13 @@ function standHere() {
 ACTS.standPick = (p, sv) => {
   if (p !== 0 || !STORY) return;
   const H = standHere(); if (!H || !standCars().includes(sv) || H.v.sv === sv) return;
-  const { v, o } = H, isle = isleCarOf(v), dir = v.dir || 1;   // (her way: read before she's gone - her row goes with her)   // (an island's car: that island's changes - user Nov 21 11:03, 50-zzzzz-story-work.js)
+  const { v, o } = H, isle = isleCarOf(v), dir = v.dir || 1, bs = v.bs || 1;   // (her way and side: read before she's gone - her row goes with her)   // (an island's car: that island's changes - user Nov 21 11:03, 50-zzzzz-story-work.js)
   if (isle != null) story.cars = Object.assign({}, story.cars, { [isle]: sv }); else story.car = sv;
   storyLeave(0, v); workVehGone(v);
   const made = workVehMake(o, 'player', sv, { cv: isle != null ? CV_ISLE + isle : 1 }), nv = made && folkSid(made.sid); if (!nv) return;   // (its row in the table - what was made is copied in)
   storyEnterVeh(0, nv); storyArrive(o.id);
-  const D = placeDoor(o); if (D) { nv.x = D.cx; const on = strSpotOn(o, nv.x); if (on) Object.assign(nv, on); }
-  Object.assign(nv, { dir, bay: o.id, bayT: time - DOOR_UP_T - THRU_T, bayOut: time + SHOW_UP + SHOW_IN + DOOR_UP_T });   // (in its door the way yours faced: out once the screen's back - standOut)
+  Object.assign(nv, { dir, bs, bay: o.id, bayT: time - 1e3, bayOut: time + SHOW_UP + SHOW_IN + DOOR_UP_T });   // (in, where yours was: out once the screen's back - standOut)
+  const P = doorAt(nv); if (P) { nv.x = P.x; const on = strSpotOn(o, nv.x); if (on) Object.assign(nv, on); }
 };
 // ---- leaving in yours (a command): out of the door once the screen's back from black, the gate up first
 ACTS.standOut = p => {
@@ -80791,7 +80787,7 @@ function showWatch() {
   const H = standHere(), key = H ? 's' + H.o.id : '';
   if (!key) { SHOW.left = ''; return; }
   if (SHOW.on || key === SHOW.left || slSayUp() || story.wake || SMAP.on) return;
-  if (carThru(H.v) < 1 || H.v.bayOut || (H.o._gate || 0) > 0) return;   // (once she's in through its door and the gate's down behind her)
+  if (!(doorAt(H.v) || {}).inside || H.v.bayOut || (H.o._gate || 0) > 0) return;   // (once she's in through its door and the gate's down behind her)
   SHOW.on = true; SHOW.t = 0; SHOW.out = 0; SHOW.left = key; PHN.open = false;
   SHOW.sel = Math.max(0, standCars().indexOf(H.v.sv));
 }
@@ -80958,26 +80954,68 @@ function craneAutoGrab(cr) {
      rolls in through the door - its goods are the place's stock (stAdd). Going the other way, a filled container rolls out onto them for a ship
      waiting with its crane (rollWants): a ship with a crane and room in its hold, stopped within its jib's reach of the door, its magnet empty -
      the good the place has most of, PER CONTAINER of it or what's left. One container on the rollers at a time.
-   - DRIVING IN: a car COLLECTing or DELIVERing there whose height goes under the door drives up to it, goes in (drawn back into the dark of the door - carThru -
-     the gate rolling down behind it), is loaded or unloaded inside, the gate rolls up and it drives off (folkBay, 50-zzzzz-story-folk.js).
+   - DRIVING IN: a car COLLECTing or DELIVERing there whose height goes under the door drives up to it, drives in through it (doorAt - the gate rolling down
+     behind it), is loaded or unloaded inside, the gate rolls up and it drives off (folkBay, 50-zzzzz-story-folk.js).
    The gate rolls up while a container's rolling through it or a car's coming out (drawStrGate). ---- */
 const ROLL_T = 2.5;                                            // (s a container takes through the door)
 const BAY_T = 3;                                               // (s a car stays in, being loaded or unloaded)
 const ROLL_WAIT = 40;                                          // (s a container rolled out waits on the rollers for a crane before it rolls back in)
-/* ---- THROUGH A VEHICLE DOOR, ONE LOOK (user Nov 22 10:23, the car stand: "the garage doors open and your car must go inside ... Right now it aligns and then
-   suddenly goes 'behind' the door vs actually entering"; "When you exit the car stand, the gate opens and your car drives out ... We should never have a car
-   behind the stand like this and then driving from behind"). Whatever goes in through a door - a container on the rollers, a car in for a job (bay), your car
-   into a CAR STAND - draws back into the dark of the door: smaller, darker, a little higher, d 0 (at the door) to 1 (inside, not drawn); coming out the
-   other way. A car is in front of the walls till she's drawn back small enough for the door's opening, then seen only through it (strMaskBox's numbers).
-   A car's door: its gate rolls up (DOOR_UP_T), she goes in (THRU_T), it rolls down; out - it rolls up, she comes out, then drives on. bay: the place, bayT:
-   when she came to its door, bayOut: when she starts out (later than now: still in) */
-const THRU_T = 1.4, DOOR_UP_T = 1.1;                     // (s: through the door; its gate rolling up - drawStrGate, 1 a second)
-const thruLook = d => ({ s: 1 - 0.3 * d, k: 1 - 0.85 * d, lift: 0.3 * 0.3 * d });   // (its size, its light, how far its foot rises - of its height drawn)
-// how far in through its door a car is (-1: she isn't)
-function carThru(v) {
-  if (!v || !v.bay) return -1;
-  if (v.bayOut) return 1 - clamp((time - v.bayOut) / THRU_T, 0, 1);
-  return clamp((time - (v.bayT || 0) - DOOR_UP_T) / THRU_T, 0, 1);
+/* ---- EVERY GARAGE: CARS GO IN AND OUT THROUGH ITS DOOR (user Nov 22 10:23, the car stand: "the garage doors open and your car must go inside from the
+   direction its facing ... Right now it aligns and then suddenly goes 'behind' the door vs actually entering"; "When you exit the car stand, the gate
+   opens and your car drives out ... We should never have a car behind the stand like this and then driving from behind"; 11:08: "A car should never
+   shrink"; 11:14: "All garages from now on to the future should always have the same rule"). A building with a vehicle door (placeDoor) that a car
+   goes under is her garage (carDoorPlace): put away in it she's inside, never seen (carHomeIn); she goes in and comes out only through its door, at
+   her own size:
+   - IN (bay: the place, bayT: when she came to its door): at its door (ba - her nose at its far jamb, or where she stopped) the gate rolls up
+     (DOOR_UP_T), she drives on in the way she's going (bs: the side its inside is) till her tail is past its near jamb (I) - what's past the door
+     on that side is behind the building's front, seen only through its opening (strMaskBox) - and the gate rolls down. Put away there: she's at
+     her spot inside (bay let go); your car in a CAR STAND stays at the door for its showroom.
+   - OUT (bayOut: when she starts out - later than now, still in): the gate up, she drives out of it turned round, clear of the building (O),
+     and on - whoever drives her waits till then (storyDriveStep, folkDrive). Taken out (storyEnterVeh, folkGo), sent on (folkBay), your pick
+     at a car stand: the same.
+   ---- */
+const DOOR_UP_T = 1.1, DOOR_MPS = 2.4;                         // (s its gate takes rolling up - drawStrGate, 1 a second; m/s through it)
+// a car's garage (structure id): o if it has a vehicle door she goes under (null: none)
+function carDoorPlace(v, id) {
+  if (!v || !v.car || id == null) return null;
+  const o = slStr(id), D = o && placeDoor(o); return D && storyBoatSize(v)[1] <= D.foot - D.top ? o : null;
+}
+// put away inside one: not seen (drawStoryCars)
+const carHomeIn = v => !!v && !!v.car && v.berth != null && !v.bay && !!carDoorPlace(v, v.berth);
+// her way through o's door on side s (her bs): A where she goes in from (ba, or at the door), I in, O out - world x of her middle (null: no door)
+function doorRun(v, o, s = v.bs || 1) {
+  const D = placeDoor(o); if (!D) return null;
+  const B = strBox(o), L = vehLenM(v) * UPM, m = 0.3 * UPM;
+  const A = v.ba && s === (v.bs || 1) ? v.ba : (s > 0 ? D.x1 : D.x0) - s * L / 2, I0 = (s > 0 ? D.x0 : D.x1) + s * (L / 2 + m), I = s > 0 ? Math.max(I0, A) : Math.min(I0, A);
+  return { A, I, O: (s > 0 ? B.x0 : B.x1) - s * (L / 2 + 2 * m), s };
+}
+// where she is on it now: { x, dir, run (under way through it), inside (in, stopped), out (through and clear) } - null: no door
+function doorAt(v) {
+  const o = v && v.bay ? slStr(v.bay) : null, R = o && doorRun(v, o); if (!R) return null;
+  const go = (a, b, t0) => { const T = Math.abs(b - a) / (DOOR_MPS * UPM), u = T > 0 ? clamp((time - t0) / T, 0, 1) : 1, e = u * u * (3 - 2 * u); return [a + (b - a) * e, u, time > t0]; };   // (easing off and on)
+  if (!v.bayOut || time < v.bayOut) { const [x, u, on] = go(R.A, R.I, (v.bayT || 0) + DOOR_UP_T); return { x, dir: R.s, run: on, inside: u >= 1, out: false }; }
+  const [x, u] = go(R.I, R.O, v.bayOut); return { x, dir: -R.s, run: true, inside: false, out: u >= 1 };
+}
+// in through o's door now from where she is (put away there - storyLeave, folkTie - or come to its door: storyDriveStep, folkBay)
+function doorIn(v, o, s) { Object.assign(v, { bay: o.id, bs: s || v.dir || 1, ba: v.x, bayT: time, bayOut: 0 }); }
+// out through her garage's door (taken out, sent on): dirOut the way she leaves it - true: she's going out through one
+function doorLeave(v, dirOut) {
+  if (!v || !v.car) return false;
+  if (v.bay) { if (!v.bayOut) v.bayOut = time + DOOR_UP_T; return true; }   // (in, or going in: out the way she came)
+  const o = v.berth != null ? carDoorPlace(v, v.berth) : null; if (!o) return false;
+  Object.assign(v, { bay: o.id, bs: -(Math.sign(dirOut) || v.dir || 1), ba: 0, bayT: -1e9, bayOut: time + DOOR_UP_T });   // (at her spot inside: from in, the gate up first)
+  return true;
+}
+// (stepStoryCars, after her body) a car through a door: there, the way she's going, her wheels turning with it; in and put away there - at her spot,
+// not seen; out and clear - hers to drive again
+function doorCarStep(c, dt) {
+  const P = doorAt(c); if (!P) { c.bay = 0; c.bayOut = 0; c.ba = 0; return; }
+  c.vx = dt > 0 ? (P.x - c.x) / dt : 0; c.x = P.x; c.dir = P.dir; c.npcV = 0; c.vDrive = 0; c.drv = 0; c.turn = 0;
+  if (P.out) { c.bay = 0; c.bayOut = 0; c.ba = 0; return; }
+  if (P.inside && !c.bayOut && c.berth === c.bay && !(crew[0].mode === 'civ' && crew[0].civ === c)) {   // (put away: at her spot - your car at a CAR STAND's door stays for its showroom)
+    const o = slStr(c.bay); if (o && c.spot != null) c.x = storySpotX(o, c.spot, vehLenM(c));
+    c.vx = 0; c.bay = 0; c.ba = 0;
+  }
 }
 // the art a structure is drawn with, and its vehicle door in the world: { x0, x1, cx, w, top, foot } (null: none marked)
 const strArtOf = o => o.art || (STR_KINDS[o.k] || {}).art || null;
@@ -81048,26 +81086,27 @@ function drawRolling(x0, x1) {
   for (const k of containers) {
     if (k.where !== 'roll' || !contSeen(k.x, x0, x1)) continue;
     const u = clamp((time - k.rt) / ROLL_T, 0, 1), d = k.rd > 0 ? u : 1 - u;   // (d: how far in - 0 on the rollers, 1 inside)
-    const L = thruLook(d), W = Math.round(contW(k) * SV * L.s), H = Math.round(CONT_H * SV * L.s), col = (CONT_COLS[k.ci] || CONT_NOCOL).map(v => v * L.k);
-    CONT_M = thgMat(); drawContainerPx(Math.round(PX(k.x) - W / 2), Math.round(PY(k.y + CONT_H / 2) - H - L.lift * CONT_H * SV), W, H, col, false);
+    const s = 1 - 0.3 * d, W = Math.round(contW(k) * SV * s), H = Math.round(CONT_H * SV * s), col = (CONT_COLS[k.ci] || CONT_NOCOL).map(v => v * (1 - 0.75 * d));
+    CONT_M = thgMat(); drawContainerPx(Math.round(PX(k.x) - W / 2), Math.round(PY(k.y + CONT_H / 2) - H - (1 - s) * 0.3 * H), W, H, col, false);
   }
   if (own) thingsEnd();
 }
 // (drawStrGate) the gate rolls up while a container's rolling through it, a car's at it going in, or one's coming out (from DOOR_UP_T before she does, till
 // she's left - bay let go)
-const doorBusy = o => [...containers].some(k => k.where === 'roll' && k.rs === o.id) || (typeof storyVehs === 'function' && storyVehs().some(v => v.bay === o.id && (v.bayOut ? time > v.bayOut - DOOR_UP_T : carThru(v) < 1)));
+const doorBusy = o => [...containers].some(k => k.where === 'roll' && k.rs === o.id) || (typeof storyVehs === 'function' && storyVehs().some(v => v.bay === o.id && (v.bayOut ? time > v.bayOut - DOOR_UP_T : !(doorAt(v) || {}).inside)));
 // (folkPlan) character c's vehicle v for COLLECT / DELIVER job J at T.o: a place with a vehicle door it goes under - to the door, in (the gate rolls down
 // behind it), BAY_T there, the job done (2: folkJob now), the gate up and out (the next job). 0: not this way - beside it as before; 1: under way
 function folkBay(c, S, v, J, T) {
   if (folkBoat(v) || !T.o || (J.do !== 'collect' && J.do !== 'deliver')) return 0;
-  const D = placeDoor(T.o); if (!D || storyBoatSize(v)[1] > D.foot - D.top) return 0;   // (too tall for its door: beside it)
+  const D = placeDoor(T.o); if (!D || !carDoorPlace(v, T.o.id)) return 0;   // (too tall for its door: beside it)
   if (v.bay === T.o.id) {
-    if (!v.bayOut) { if (time - v.bayT < DOOR_UP_T + THRU_T + BAY_T) return 1; v.bayOut = time + DOOR_UP_T; return 2; }   // (in, BAY_T there; then the gate up before she comes out)
-    if (time < v.bayOut + THRU_T) return 1;                      // (the gate rolling up, her coming out)
-    v.bay = 0; v.bayOut = 0; S.j++; return 1;
+    if (v.bayOut || !(doorAt(v) || {}).inside || time - v.bayT < DOOR_UP_T + BAY_T) return 1;   // (going in, BAY_T in there)
+    v.bayOut = time + DOOR_UP_T; S.j++; return 2;                // (done: out through the door - the gate up first - and on to the next)
   }
-  if (Math.abs(v.x - D.cx) > 1.5 * UPM) { if (folkReach(v, v.x, D.cx)) { folkGo(v, D.cx, null, false, T.o); return 1; } return 0; }
-  v.bay = T.o.id; v.bayT = time; v.bayOut = 0;
+  if (v.bay) return 1;                                           // (still through another's door)
+  const s = Math.abs(v.x - D.cx) > 0.5 * D.w ? Math.sign(D.cx - v.x) : v.dir || 1, A = doorRun(v, T.o, s).A;   // (in the way she's going)
+  if (Math.abs(v.x - A) > 1.5 * UPM) { if (folkReach(v, v.x, A)) { folkGo(v, A, null, false, T.o); return 1; } return 0; }
+  doorIn(v, T.o, s); v.ba = 0;                                   // (from its door)
   folkLog({ t: 'job', who: c.id, verb: 'IN THROUGH THE DOOR', k: '', n: 0, at: slPlaceName(T.o) });
   return 1;
 }
@@ -81828,16 +81867,20 @@ const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; retu
 // send vehicle v off to x, to tie up at structure park (or to a fish area; or to stop beside structure at) - its trip's lay the layer it ends on (layRoadStick)
 function folkGo(v, x, park, fish, at) {
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
+  if (!doorLeave(v, x - v.x)) { v.bay = 0; v.bayOut = 0; }                // (in her garage, or through a place's door: out through it first - 50-zzzzz-place-door.js)
   if (v.berth != null) { v.berth = null; v.spot = null; }
-  v.bay = 0; v.bayOut = 0;                                                  // (out of a place's door - 50-zzzzz-place-door.js)
-  const to = park || at; FOLK.v[v.sid] = { x: park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
+  // (going to put it away in a garage: to its door, the way she's going - in through it there, folkTie)
+  const G = park && carDoorPlace(v, park.id), D = G && placeDoor(G), gx = D ? doorRun(v, G, Math.abs(x - D.cx) > 0.5 * D.w ? Math.sign(D.cx - x) || 1 : v.dir || 1).A : null;
+  const to = park || at; FOLK.v[v.sid] = { x: G ? gx : park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
   const o = slStr(T.park); delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: o ? slPlaceName(o) : folkWhere(v.x) }); v.npcV = 0; v.vDrive = 0;
   if (!o) return;
   const sp = storyFreeSpot(o, v); if (sp < 0) return;
-  v.berth = o.id; v.spot = sp; v.x = storySpotX(o, sp, vehLenM(v));
+  v.berth = o.id; v.spot = sp;
+  if (carDoorPlace(v, o.id)) { const D = placeDoor(o); doorIn(v, o, Math.abs(v.x - D.cx) > 0.5 * D.w ? Math.sign(D.cx - v.x) : v.dir); return; }   // (her garage: in through its door - 50-zzzzz-place-door.js)
+  v.x = storySpotX(o, sp, vehLenM(v));
 }
 /* (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car ... the same universal system for all characters")
    GOODS GO WITH WHOEVER STEPS OUT: out of a vehicle, what it holds is carried - a character's in hand (S.carry: { good: n }), the player's in
@@ -81937,6 +81980,7 @@ function folkPlan(c, S) {
 }
 // a vehicle on a trip: the real one near a view, a node elsewhere
 function folkDrive(v, T, dt) {
+  if (v.car && v.bay) { v.npcV = 0; return; }                              // (through a door - doorCarStep drives her till she's clear of it)
   const near = !FOLK_FAST && tierAt(v.x) === 0, spd = (v.v || 60) * 0.6;
   if (!near) {
     T.away = 1; v.npcV = 0; v.vDrive = 0;
