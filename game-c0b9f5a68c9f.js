@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1293;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 10:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1294;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -79310,8 +79310,10 @@ function storyOpenEnd() {
   O.lv0 = null;
 }
 const stopenTitleT = () => STORY_OPEN.home ? STOPEN.HOME : STOPEN.HOLD + STOPEN.FADE;
-// the name on the screen: the controls hidden, presses only take it away
-const storyOpenHides = () => STORY && STORY_OPEN.on && !STORY_OPEN.home && !ui.title && STORY_OPEN.t < stopenTitleT();
+// the name on the screen, then the zoom in to where you are: the controls (and what's said, the objective) hidden, presses only hurry it (user Nov 22 09:57:
+// "1 - Zoom out view with title 2 - Zoom in to your current location 3 - (if applicable) show message / objective. 3 should not appear halfway through the
+// zoom. We first do the zoom")
+const storyOpenHides = () => STORY && STORY_OPEN.on && !STORY_OPEN.home && !ui.title && STORY_OPEN.t < stopenTitleT() + STOPEN.MOVE;
 const storyOpenAlpha = () => storyOpenHides() ? 1 - clamp((STORY_OPEN.t - STOPEN.HOLD) / STOPEN.FADE, 0, 1) : 0;
 // the structure framed: the one you're at, while you're in it and nothing's picked
 function stopenO() {
@@ -79337,7 +79339,7 @@ function storyOpenStep(dt) {
   if (coverUp()) return;
   if (!O.ok && !stopenSettle(O)) return;                 // (the name held till the game runs smoothly)
   if ((STORY_ZOOM.manual && !O.home) || storySel || crew[0].mode !== 'dock') { storyOpenEnd(); return; }
-  O.t += dt * (O.skip && O.t < stopenTitleT() ? STOPEN.SKIP : 1);
+  O.t += dt * (O.skip ? STOPEN.SKIP : 1);   // (a press hurries the whole shot - the name and the zoom in)
   if (O.t >= stopenTitleT() + (O.home && O.lv0 != null ? 0 : STOPEN.MOVE)) storyOpenEnd();   // (the player's own zoom: eased straight back to it)
 }
 // the automatic zoom's width while the shot frames the structure (storyZoomWidth): as tall as 1 / H of it; once the name's gone, Story's own
