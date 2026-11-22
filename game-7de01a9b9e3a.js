@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1316;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 15:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1317;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 15:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69593,6 +69593,16 @@ const layFeet = (x, y, L) => Math.abs(layBelow(x, y - 2 * LAY_FEET, L) - y) <= L
 const layFrontAt = (x, y, L) => { for (let k = L; k >= 0; k--) if (layFeet(x, y, k)) return k; return -1; };
 // a join within r of x between layer L and another
 const layJoinNear = (x, r, L) => { for (const J of layerJoins()) if ((J.lay === L || J.play === L) && Math.abs(J.x - x) <= r) return J; return null; };
+// the frontmost layer (>= 1) whose own ground is under feet at (x, y) - the cell just under them inside its shapes, its top at them; 0 none
+function layOnLayer(x, y) {
+  const c = ltCol(x), yy = y + LT_CELL * 0.5;
+  for (let i = SHP.layList.length - 1; i >= 0; i--) {
+    const M = SHP.layList[i], v = laySpans(c, M); if (!v) continue;
+    let inS = false; for (let j = 0; j < v.length; j += 2) if (yy >= v[j] && yy <= v[j + 1]) { inS = true; break; }
+    if (inS && Math.abs(layOwnBelow(x, y - 2 * LAY_FEET, M) - y) <= LAY_FEET) return M;
+  }
+  return 0;
+}
 // at a join with the two roads parting ahead of it (half: its half length, dir: its way): { J, hi, lo } - the layers of the higher road and the
 // lower - else null. The road of the layer in front is the lower: one under the road behind it ahead would be behind it, never a road
 function layFork(o, half, dir) {
@@ -69611,6 +69621,11 @@ function layStep(o, on, landed, half, dir, stick) {
   if (Math.abs(stick) > 0.2) { const F = layFork(o, half, dir), k = F && (stick < 0 ? F.hi : F.lo); if (F && layFeet(o.x, o.y, k)) { o.lay = k; return; } }   // (only where that road's ground is at its feet - user Nov 19: a car taking the lower road before the join fell through)
   const L = o.lay || 0;
   if (landed) { const f = layFrontAt(o.x, o.y, layN()); if (f >= 0) { o.lay = f; return; } }
+  // (user Nov 22 14:10, bug-20261122-140856-v1314: "If I drive from the dock I go up the side" - off the harbour's pier onto the quay, a layer whose end
+  // isn't joined to anything, the car stayed on the back (0), whose ground is every layer's, and climbed the cliff's foot rising over the quay) ON THE
+  // BACK, AWAY FROM ANY JOIN, STANDING ON A LAYER'S OWN GROUND - the cell under its feet inside that layer's shapes, its top at its feet: it's on that
+  // layer (as come down onto it). At a join the roads' own rule decides (above: what's held; layFork)
+  if (!L && !layJoinNear(o.x, 2 * half, 0)) { const k = layOnLayer(o.x, o.y); if (k > 0) { o.lay = k; return; } }
   if (L && !(layBelow(o.x, o.y - 2 * LAY_FEET, L) <= o.y + half)) {   // (no ground of its layer under it)
     const J = layJoinNear(o.x, half, L);
     o.lay = J ? (J.lay === L ? J.play : J.lay) : Math.max(0, layFrontAt(o.x, o.y, L - 1));
