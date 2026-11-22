@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1310;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 12:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1311;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 12:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74478,6 +74478,8 @@ STR_LOOKS.streetLamp = () => {
    kind of vehicle: within each kind's drawing, the biggest first, so a smaller one overlapping it is in front. The size is the
    vehicle's own outline (vehBox, 50-zz-editor-vehicles.js - the editor's pick box, its picture at its scale): its area. Equal
    sizes keep their list's order. Every family's draw loop goes through bySize (its own kept array per list: nothing made a frame).
+   PUT AWAY BEHIND WHAT'S MOVING (user Nov 22 11:39: "Parked cars should always render behind cars that are driving"): anything put away at a
+   structure (berth - a parking, a dock, a garage's door, a hangar) is drawn before everything that isn't, whatever its size - then bigger first in each.
    ================================================================ */
 const SIZE_ORD = new Map();
 const vehArea = o => { const B = vehBox({ v: o }); return (B[1] - B[0]) * (B[3] - B[2]); };
@@ -74486,7 +74488,7 @@ function bySize(list) {
   let R = SIZE_ORD.get(list); if (!R) SIZE_ORD.set(list, R = { A: [], k: [], i: [] });
   const n = list.length, A = R.A, K = R.k, I = R.i; A.length = n;
   if (n < 2) { if (n) A[0] = list[0]; return A; }
-  K.length = I.length = n; for (let j = 0; j < n; j++) { K[j] = vehArea(list[j]); I[j] = j; }
+  K.length = I.length = n; for (let j = 0; j < n; j++) { const o = list[j]; K[j] = vehArea(o) + (o.berth != null || o.bay ? 1e15 : 0); I[j] = j; }   // (put away: before all that isn't)
   I.sort((a, b) => K[b] - K[a] || a - b);
   for (let j = 0; j < n; j++) A[j] = list[I[j]];
   return A;
@@ -75258,7 +75260,9 @@ function strTypeLenM(sv) {
   const B = PIC_BOATS[D.kind]; if (!B) return 3.5;   // (the jet boat)
   const P = boatPic(B); return P ? P.width * P._m : B.fb[0];   // (a picture boat: its side picture's length)
 }
-const strFits = (o, sv) => { if (isHangarS(o) && STR_VEHS[sv] && STR_VEHS[sv].big && !o.big) return false; const m = strTypeLenM(sv); return m == null || m <= strMaxL(o) + 1e-6; };
+// (user Nov 22 11:30-11:39, every garage: put away facing us in its door - 50-zzzzz-place-door.js) a building with a vehicle door takes a car only if her
+// front picture fits its opening (strDoorFits) - one that doesn't is never put away there (the editor's lists don't offer it; it's red where it stands)
+const strFits = (o, sv) => { if (isHangarS(o) && STR_VEHS[sv] && STR_VEHS[sv].big && !o.big) return false; if (typeof strDoorFits === 'function' && !strDoorFits(o, sv)) return false; const m = strTypeLenM(sv); return m == null || m <= strMaxL(o) + 1e-6; };
 // (a dock's length or MAX SIZE changed, a hangar's SIZE, its SPOTS) its spots as many as fit, what no longer fits taken out of them - on a slider's
 // let go: while it moves what doesn't fit is kept, shown red (spotBad - 50-zzzz-spots.js), and only what's still red when it's let go goes
 const spotFitsAt = (o, i, e) => i < strSpots(o) && strFits(o, e.v);
@@ -80986,11 +80990,16 @@ const ROLL_WAIT = 40;                                          // (s a container
    ---- */
 const DOOR_UP_T = 1.1, DOOR_SHUT_T = 1.6, DOOR_MPS = 2.4;     // (s its gate takes rolling up - drawStrGate, 1 a second - and down, 0.7; m/s to the door's middle)
 const carFrontOf = v => tropPic(v.art + '-front');
+// a car picture's front fits o's vehicle door (true: o has none, or sv isn't a car - strFits)
+const frontFits = (F, D) => !!F && F.width * F._m * UPM <= D.w + 1e-6 && F.height * F._m * UPM <= D.foot - D.top + 1e-6;
+function strDoorFits(o, sv) {
+  const T = STR_VEHS[sv]; if (!T || T.fam !== 'car' || !T.art) return true;
+  const D = placeDoor(o); return !D || frontFits(tropPic(T.art + '-front'), D);
+}
 // a car's garage (structure id): o if it has a vehicle door her front picture fits (null: none)
 function carDoorPlace(v, id) {
   if (!v || !v.car || id == null) return null;
-  const o = slStr(id), D = o && placeDoor(o), F = D && carFrontOf(v); if (!F) return null;
-  return F.width * F._m * UPM <= D.w + 1e-6 && F.height * F._m * UPM <= D.foot - D.top + 1e-6 ? o : null;
+  const o = slStr(id), D = o && placeDoor(o); return D && frontFits(carFrontOf(v), D) ? o : null;
 }
 // put away inside one: not seen (drawStoryCars)
 const carHomeIn = v => !!v && !!v.car && v.berth != null && !v.bay && !!carDoorPlace(v, v.berth);
