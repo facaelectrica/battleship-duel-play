@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1333;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 17:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1334;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 17:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81033,11 +81033,12 @@ function placePress(X, Y) {
 // should be inside the image ... layout and design so it looks attractive and polished"; 15:30, his drawing over the screen: "The important text is in the middle,
 // one line for each of the sentences, and then below is the area where you have options. Your current version is extremely small. It's very hard to press with
 // a finger"; 15:46: "The frame should be the same size. The picture should stay the same size. I was talking about the text inside and how it's formatted") its
-// kind's ROOM (STR_KINDS room - gen/showroom/interiors.py) at the showroom's size (SHOW_K: a whole number k of its pixels, black round it), and everything
-// inside it: its name on a plaque at the top of the wall; what's said in the middle on a dark glass panel - the speaker's name, then each sentence on its own
-// line, centred, as large as lets every one fit its line (up to 2k); its rows below, across the room's foot, as buttons side by side - 30 of its pixels tall,
-// a finger's. No ROOM yet: the same frame on black
-const PS_ROOM = [331, 186];   // (a room's size at the showroom's pixel - every interior is cut the same)
+// kind's ROOM (STR_KINDS room - gen/showroom/interiors.py) 1.5x the showroom's size (below), black round it, and everything inside it: its name on a plaque
+// at the top of the wall; what's said filling its middle on a lighter glass - the speaker's name, then each sentence starting a line of its own, centred, as
+// large as fits; its rows below, across the room's foot, as buttons side by side - 30 of the showroom's pixels tall, a finger's. No ROOM yet: the same frame on black
+// (user Nov 22 16:40: "The text is too fucking small when you're inside a building"; 16:45, asked how: "Room 1.5x size") a room is 1.5x the showroom's size:
+// cut 1.5x finer (gen/showroom/interiors.py ROOM_X), drawn at the showroom's whole number of pixels (its k - drawShowroom)
+const PS_ROOM_X = 1.5, PS_ROOM = [497, 280];   // (a room's size in its own pixels - every interior is cut the same)
 const placeRoom = o => { const P = img[(STR_KINDS[strIsLh(o) ? 'lighthouse' : o.k] || {}).room]; return P && P.width ? P : null; };
 // a dark glass panel: its fill, a hairline round it
 function psPanel(x, y, w, h, a = 0.82) {
@@ -81060,25 +81061,25 @@ function drawPlaceScreen() {
   if (key !== PS.key) { PS.key = key; PS.sel = 0; }
   PS.sel = clamp(PS.sel, 0, Math.max(0, R.length - 1));
   ug.globalAlpha = PS.a;
-  // the room (as the showroom's - drawShowroom): a whole number of its pixels, black round it
-  const P = placeRoom(o), RW = P ? P.width : PS_ROOM[0], RH = P ? P.height : PS_ROOM[1];
-  const k = Math.max(1, Math.floor(Math.floor(Math.min((ubw - 16) / RW, (ubh - 16) / RH)) * SHOW_K)), W = RW * k, H = RH * k, X = Math.round((ubw - W) / 2), Y = Math.round((ubh - H) / 2);
+  // the room at the showroom's k (drawShowroom's: from its room's size), a whole number of its own pixels, black round it; u the showroom's pixel on screen
+  const P = placeRoom(o), RW = P ? P.width : PS_ROOM[0], RH = P ? P.height : PS_ROOM[1], CR = CAR_STAND.room;
+  const k = Math.max(1, Math.floor(Math.floor(Math.min((ubw - 16) / CR[2], (ubh - 16) / CR[3])) * SHOW_K)), W = Math.min(RW * k, ubw - 8), H = Math.round(W * RH / RW), X = Math.round((ubw - W) / 2), Y = Math.round((ubh - H) / 2);
   if (P) { ug.save(); ug.imageSmoothingEnabled = false; ug.drawImage(P, X, Y, W, H); ug.restore(); }
-  const ts = k, m = 6 * k;
+  const u = W / RW * PS_ROOM_X, ts = Math.max(1, Math.round(u)), m = Math.round(6 * u);
   // its name: a plaque at the top of the wall
-  const nm = storyStrName(o), ns = ts + 1, nw = textWidth(nm) * ns, pp = 3 * k;
+  const nm = storyStrName(o), ns = ts + 1, nw = textWidth(nm) * ns, pp = Math.round(3 * u);
   psPanel(Math.round(X + (W - nw) / 2 - pp), Y + m, nw + 2 * pp, 5 * ns + 2 * pp);
   drawText(ug, nm, Math.round(X + W / 2), Y + m + pp, SL_COL.place, ns, 'center');
   // its rows: buttons side by side across the room's foot
-  const bh = 30 * k, by = Y + H - m - bh, gap = 4 * k, n = Math.max(1, R.length), bw = Math.floor((W - 2 * m - gap * (n - 1)) / n);
+  const bh = Math.round(30 * u), by = Y + H - m - bh, gap = Math.round(4 * u), n = Math.max(1, R.length), bw = Math.floor((W - 2 * m - gap * (n - 1)) / n);
   PS.rows = [];
   R.forEach((q, i) => {
     const bx = X + m + i * (bw + gap), pick = i === PS.sel, no = placeRowNo(o, q), lab = placeRowLabel(q), sub = no || (placeGoods(q) ? q.c + ' COIN' : '');
     psPanel(bx, by, bw, bh);
-    if (pick) { ug.fillStyle = 'rgba(255,176,46,0.28)'; ug.fillRect(bx + 1, by + 1, bw - 2, bh - 2); ug.fillStyle = '#ffb02e'; ug.fillRect(bx, by + bh - k, bw, k); }
-    const s1 = fitSc(lab, 2 * ts, bw - 6 * k), s2 = sub ? fitSc(sub, ts, bw - 6 * k) : 0, th = 5 * s1 + (sub ? 4 * k + 5 * s2 : 0), ty = Math.round(by + (bh - th) / 2);
+    if (pick) { ug.fillStyle = 'rgba(255,176,46,0.28)'; ug.fillRect(bx + 1, by + 1, bw - 2, bh - 2); ug.fillStyle = '#ffb02e'; ug.fillRect(bx, by + bh - Math.max(1, Math.round(u)), bw, Math.max(1, Math.round(u))); }
+    const s1 = fitSc(lab, 2 * ts, bw - Math.round(6 * u)), s2 = sub ? fitSc(sub, ts, bw - Math.round(6 * u)) : 0, th = 5 * s1 + (sub ? Math.round(4 * u) + 5 * s2 : 0), ty = Math.round(by + (bh - th) / 2);
     drawText(ug, lab, Math.round(bx + bw / 2), ty, no ? '#6f7890' : pick ? '#ffffff' : '#c9d1e2', s1, 'center');
-    if (sub) drawText(ug, sub, Math.round(bx + bw / 2), ty + 5 * s1 + 4 * k, no ? '#ff6a5a' : '#ffd23a', s2, 'center');
+    if (sub) drawText(ug, sub, Math.round(bx + bw / 2), ty + 5 * s1 + Math.round(4 * u), no ? '#ff6a5a' : '#ffd23a', s2, 'center');
     PS.rows.push([bx, by, bw, bh]);
   });
   // what's said there, in the middle: what was just said, else what they'd say now (user Nov 22 15:16: "you must always get your grandfather details") -
@@ -81086,11 +81087,11 @@ function drawPlaceScreen() {
   const s = story.say, here = [o, ...storyLinks(o)];
   const Ls = s && s.open && s.at != null && here.some(q => q.id === s.at) ? sayLines(s) : placeSays(o, here);
   if (Ls.length) {
-    const top = Y + m + 5 * ns + 2 * pp + 4 * k, bot = by - 4 * k, dw = W - 2 * m - 8 * k, lines = [];
+    const top = Y + m + 5 * ns + 2 * pp + Math.round(4 * u), bot = by - Math.round(4 * u), dw = W - 2 * m - Math.round(8 * u), lines = [];
     // (user Nov 22 15:48: "the text you made that was too small inside the box because you crammed it in the bottom ... you should use the full picture for the
-    // text") the scale: the largest (up to 3k) at which it all fits the room between its name and its buttons - every sentence starting a line of its own,
+    // text") the scale: the largest (up to 3u) at which it all fits the room between its name and its buttons - every sentence starting a line of its own,
     // wrapped only when it's wider than the room
-    const avail = bot - top - 8 * k, layout = ts => {
+    const avail = bot - top - Math.round(8 * u), layout = ts => {
       const out = [];
       Ls.forEach((l, i) => {
         const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who);
@@ -81100,7 +81101,7 @@ function drawPlaceScreen() {
       });
       return out;
     };
-    let ts = 3 * k, L = layout(ts); while (ts > 1 && L.length * Math.round(9 * ts * 1.15) > avail) L = layout(--ts);
+    let ts = Math.max(1, Math.round(3 * u)), L = layout(ts); while (ts > 1 && L.length * Math.round(9 * ts * 1.15) > avail) L = layout(--ts);
     const lh = 9 * ts; lines.push(...L);
     const tl = Math.round(lh * 1.15), th = lines.length * tl, ph = bot - top, py = top;   // (the panel the whole middle of the room)
     psPanel(X + m, py, W - 2 * m, ph, 0.6);   // (lighter: the room seen through it)
