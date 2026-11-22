@@ -13096,8 +13096,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1299;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 11:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1300;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 11:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49928,11 +49928,11 @@ function drawIslChunks(x0, x1, inLand) {
   }
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
-// (user Nov 19 20:34-20:35) an island at sea's plants in front of what stands on it, as on the land (renderLandObjects0): its buildings' own plants, then the
-// vegetation's DECK 1 and DECK 0 - drawn right after drawIslStructs (its back decks with its ground - drawIslChunks)
+// (user Nov 19 20:34-20:35) an island at sea's plants in front of what stands on it, as on the land (renderLandObjects0): the vegetation's DECK 1 and
+// DECK 0 - drawn right after drawIslStructs (its buildings' own plants with them - strPlants; its back decks with its ground - drawIslChunks)
 function drawIslFront(x0, x1) {
   if (!land.cell || !(land.islRuns && land.islRuns.length)) return;
-  try { for (const p of ['str', null, 'front']) { VEG_PASS = p; drawLandProps(x0, x1, 'sea', 'plants'); } } finally { VEG_PASS = null; }
+  try { for (const p of [null, 'front']) { VEG_PASS = p; drawLandProps(x0, x1, 'sea', 'plants'); } } finally { VEG_PASS = null; }
 }
 // the slices holding island columns in [x0, x1], each once, in the island lines' order
 function islSlices(x0, x1) {
@@ -61922,11 +61922,12 @@ function renderLandObjects0() {
     lt('ground');
     drawPads(x0, x1);                                     // (OPEN WORLD: the launch pads, past the hangars)
     // (user Nov 19 20:34: "The deck 1 of the vegetation, the one cars collide with, must be in front of the buildings because cars don't collide with
-    // buildings"; 20:35: "The house only has the bushes and flowers in front of it") the back decks behind the ground (above); the structures; each
-    // building's own plants (its prefab's - the 'str' pass); then the vegetation's DECK 1 and DECK 0 in front of them all
+    // buildings"; 20:35: "The house only has the bushes and flowers in front of it") the back decks behind the ground (above); the structures, each
+    // building's own plants (its prefab's - the 'str' pass) and the cars on the ground in front of them (drawStructs - user Nov 22); then the vegetation's
+    // DECK 1 and DECK 0 in front of them all
     const vegBack = !RIG_T.off;
-    lt('pads'); if (!VEG_SOLO) drawStructs(x0, x1); lt('structs');
-    if (vegBack && !edTiny(6 * UPM)) { VEG_PASS = 'str'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; drawLandPlants(x0, x1); lt('plants'); }   // (the vegetation lab's WORLD view: only the plant being edited)                                  // (the placed structures: houses, stations, docks... - 50-zz-struct)
+    lt('pads'); if (!VEG_SOLO) drawStructs(x0, x1); else strPlants(x0, x1, false, 0); lt('structs');   // (the vegetation lab's WORLD view: only the plant being edited)
+    if (vegBack && !edTiny(6 * UPM)) { drawLandPlants(x0, x1); lt('plants'); }                                  // (the placed structures: houses, stations, docks... - 50-zz-struct)
     if (vegBack && !edTiny(6 * UPM)) { VEG_PASS = 'front'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck0'); }   // (deck 0: in front of the structures - 22:54)
     if (!vegBack && !edTiny(6 * UPM)) drawLandPlants(x0, x1); lt('plants');         // (the trees, palms, cacti and scrub: in front of the structures - user Nov 2)
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
@@ -61948,7 +61949,7 @@ function renderLandObjects0() {
   drawCoastWedges(x0, x1);                               // (OPEN WORLD: the embankment under each harbour's block, user Oct 25 late)
   lt('coast'); drawLandUnits(x0, x1, 0);                // (what's on the back layer - terrain layers, 50-story-cars.js layStep)
   // (each terrain layer in front, back to front: its ground over everything behind it, then what's on it - terrain-layers-plan-nov18.md)
-  for (let L = 1, N = layN(); L <= N; L++) { if (layIsl(L)) { drawLayThings(x0, x1, L); for (const p of ['str', null, 'front']) drawLayPlants(x0, x1, L, p); continue; } drawLayPlants(x0, x1, L, 'back'); drawLay(x0, x1, L); drawLayThings(x0, x1, L); drawLayPlants(x0, x1, L, 'str'); drawLayPlants(x0, x1, L, null); drawLayPlants(x0, x1, L, 'front'); }   // (a layer of islands: its ground and plants with the islands, behind the water - drawIslChunks - only what stands on it here; any other: its plants as the back's: the back decks behind its ground, DECK 1 before its structures, DECK 0 in front of them)
+  for (let L = 1, N = layN(); L <= N; L++) { if (layIsl(L)) { drawLayThings(x0, x1, L); for (const p of [null, 'front']) drawLayPlants(x0, x1, L, p); continue; } drawLayPlants(x0, x1, L, 'back'); drawLay(x0, x1, L); drawLayThings(x0, x1, L); drawLayPlants(x0, x1, L, null); drawLayPlants(x0, x1, L, 'front'); }   // (a layer of islands: its ground and plants with the islands, behind the water - drawIslChunks - only what stands on it here; any other: its plants as the back's: the back decks behind its ground, its buildings' own with its structures - drawStructs -, DECK 1 and DECK 0 in front of them)
   drawLandFliers(); lt('units');                         // (a helicopter can be out over the sea)                               // (a helicopter can be out over the sea)
   if (!spans.length) return;
   drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
@@ -72975,9 +72976,10 @@ function nightOf(art) {
 // nightPic's rule on its own picture, no lit copy), after the night's tint, hidden where something drawn after it stands in front
 // (glow: a building's windows glow round them; a vehicle's are lit in their panes only, no glow - user Nov 2 11:16, the fishing boat
 // at night: "A couple of lights on top + the interior lights only in the windows")
+// (k: how lit - the lamps' hour, or a home being entered's - swapLit)
 const NIGHT_MUL = NIGHT_COL.map(v => v / 255);
-function objNight(P, art, X0, Y0, X1, Y1, flip, glow = true) {
-  const k = E.lampsOn || 0; if (k < 0.05) return;
+function objNight(P, art, X0, Y0, X1, Y1, flip, glow = true, k = E.lampsOn || 0) {
+  if (k < 0.05) return;
   const N = nightOf(art); if (!N || !P || !P.width) return;
   const sx = (X1 - X0) / P.width, sy = (Y1 - Y0) / P.height;
   if (glow) for (const [x, y, n] of N.spots) airLamp(flip ? X1 - x * sx : X0 + x * sx, Y0 + y * sy, k * Math.min(1, n / 10), 2, thgOrder());
@@ -72995,7 +72997,7 @@ function strLit(o, B) {
   // its windows dark - its power out
   const c = typeof strCutOf === 'function' ? strCutOf(o, strPieces(B.P, B.m)) : null;
   if (L[0] + L[1] + L[2] + L[3] > 0) { if (c) strDrawCut(o, B, c, 0, { kind: THG_LIGHT, lit: L }); else strQuad(B.P, X0, Y0, X1, Y1, !!o.flip, { kind: THG_LIGHT, lit: L }); }
-  if (!c && !STR_NO_NIGHT[o.k] && strLightsOn(o)) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip);
+  if (!c && !STR_NO_NIGHT[o.k]) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip, true, Math.max(strLightsOn(o) ? E.lampsOn || 0 : 0, swapLit(o)));   // (a home being entered: lit at once, settling to the hour's own)
   if (!c) strDoorSign(o, B, X0, Y0, X1, Y1);
 }
 /* (user Nov 21 11:08: "all buildings that sell stuff that you can interact with have a sign on the door saying if they're open or closed") a place with a
@@ -73457,7 +73459,7 @@ function vehOwnerSet(v, val) {
    One window for every structure and vehicle prefab (PREFABS, and OBJECTS' spawn prefab): its picture as the world draws it, from
    the same art the world draws it from - a structure's picture with its flag's cloth, its gate over its door and its front layer;
    the harbour's hangar with its room and gate; the airport's LARGE hangar with its roll-up door; a vehicle's own picture.
-   DOOR (a gate or a door): OPEN / CLOSE rolls it at the world's speeds (up 1 a second, down 0.7 - drawStrGate).
+   DOOR (a gate or a door): OPEN / CLOSE rolls it at the world's speeds (up 1 a second, down 0.7 - strGateStep).
    NIGHT: the night's tint over it (the hour's fx at no light - 03-environment.js) and its lights on - a building's or boat's
    windows and lamps (nightOf, STR_WINDOWS - 50-zz-lights.js) with their warm glow.
    A look: { P: the picture (its size is the window's), draw(g, open, night) } - null while its art is still loading.
@@ -74367,7 +74369,8 @@ function storyTargets() {
     let x0, x1, y0, y1;
     if (q.o) { const B = strBox(q.o); x0 = B.x0; x1 = B.x1; y0 = B.top; y1 = B.foot; }
     else [x0, x1, y0, y1] = isPierCrane(q.v) ? pierCraneBox(q.v) : vehBox({ v: q.v });
-    const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: (x0 + x1) / 2, wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, box: [x0, x1, y0, y1], name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
+    const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: q.o ? strPeakX(q.o) : (x0 + x1) / 2,   // (a structure's: over its tallest part - strPeakX)
+       wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, box: [x0, x1, y0, y1], name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
     return T;
   };
   const out = [mk(cur, true)];
@@ -74637,7 +74640,6 @@ function drawStoryArrows() {
     for (let k = 4; k >= 1; k--) { const q = at(Math.max(0, u - k * 0.06)); pxArrow(q[0], q[1], ARROW_B - 1, AC, 0, 0.12 * (5 - k)); }
     const q = at(u); pxArrow(q[0], q[1], ARROW_B, AC, -0.25 * Math.sin(u * Math.PI));   // (stretched in flight)
   }
-  const so = STSW.on ? swO() : null; if (so && tS >= STSW_T.LAND) swapWindows(w, so, tS - STSW_T.LAND);
   drawMarket(w, L);
 }
 // the landing's spark ring: eight blocks flying out from the point, orange then white, gone in a quarter second
@@ -74647,17 +74649,13 @@ function swapSparks(X, Y, k) {
   for (let i = 0; i < 8; i++) { const an = i * Math.PI / 4; ug.fillRect(Math.round(X + Math.cos(an) * r - s / 2), Math.round(Y - 10 + Math.sin(an) * r * 0.7 - s / 2), s, s); }
   ug.globalAlpha = 1;
 }
-// a home entered: its windows (STR_WINDOWS, marked by eye) lit warm - on at once, glowing, then settling to the hour's own
-function swapWindows(w, o, t) {
-  const B = strBox(o), P = B.P, Wn = P && STR_WINDOWS[o.art || (STR_KINDS[o.k] || {}).art]; if (!Wn || !Wn.win) return;
-  const k = t < 0.12 ? t / 0.12 : clamp(1 - (t - 0.5) / 0.6, 0, 1); if (k <= 0) return;
-  ug.globalAlpha = 0.85 * k;
-  for (const [x, y, ww, hh] of Wn.win) {
-    const X0 = B.x0 + (o.flip ? P.width - x - ww : x) * B.m, Y0 = B.top + y * B.m, a = w(X0, Y0), b = w(X0 + ww * B.m, Y0 + hh * B.m);
-    ug.fillStyle = '#ffc470'; ug.fillRect(Math.round(a.X), Math.round(a.Y), Math.max(1, Math.round(b.X - a.X)), Math.max(1, Math.round(b.Y - a.Y)));
-    ug.fillStyle = '#fff1c8'; ug.fillRect(Math.round(a.X) + 1, Math.round(a.Y) + 1, Math.max(1, Math.round(b.X - a.X) - 2), Math.max(1, Math.round((b.Y - a.Y) * 0.4)));
-  }
-  ug.globalAlpha = 1;
+// (user Nov 22, v1292: "every time I switch between the car and lighthouse, I get those rectangles in the lighthouse light" - each pane was a flat
+// block laid over the controls' layer, the lantern's bars and all under it) a home entered: its windows lit warm - on at once, then settling to the
+// hour's own - by the windows' one rule (strLit's night, objNight: the panes' dark pixels lit, their frames and bars as painted, behind what stands in
+// front): how lit (0: not being entered)
+function swapLit(o) {
+  if (!STSW.on || STSW.oi !== o.id || STSW.t < STSW_T.LAND) return 0;
+  const t = STSW.t - STSW_T.LAND; return t < 0.12 ? t / 0.12 : clamp(1 - (t - 0.5) / 0.6, 0, 1);
 }
 
 /* ---- the entering's sound, played in one go from the swap's start, in time with the arrow (STSW_T): a soft lift as the arrow
@@ -74802,17 +74800,22 @@ function strGateBox(o, B) {
 }
 // a vehicle at home in an enclosed structure with a painted gate and inside its walls: what the building doesn't hide of it (engine
 // part 5: as numbers the things' shader tests - 45-zz-things-gpu.js) - seen where it's outside the building's columns X0..X1, or
-// in its door's opening gx0..gx1 from gt down: [X0, X1, gx0, gx1, gt] on the screen, or null (not at home in one)
+// in its door's opening gx0..gx1 from gt down: [X0, X1, gx0, gx1, gt] on the screen, or null (not at home in one). Its gate shut, the door has
+// no opening (gx0 = gx1): what's inside is wholly behind the building (user Nov 22, the MECHANIC's door shut and a car's wheels under it, over
+// the step below the door: "I should NOT be seeing the wheels of a car inside a garage ever ... when the door is closed. This applies to all garages")
 function strMaskBox(v, half) {
   if (!LAND) return null;
   for (const o of strsUsed()) {
     if (o.id !== v.hb && o.id !== v.berth && o.id !== v.bay) continue;   // (or in through its door for a job - 50-zzzzz-place-door.js)
     const B = strBox(o); if (v.x + half <= B.x0 || v.x - half >= B.x1) continue;
     const G = strGateBox(o, B); if (!G) continue;
-    return [Math.round(PX(B.x0)), Math.round(PX(B.x1)), Math.round(PX(G.x0)), Math.round(PX(G.x1)), Math.round(PY(G.top))];
+    const gx0 = Math.round(PX(G.x0)), gx1 = strGateRows(o, B) >= B.P._gate[3] ? gx0 : Math.round(PX(G.x1));
+    return [Math.round(PX(B.x0)), Math.round(PX(B.x1)), gx0, gx1, Math.round(PY(G.top))];
   }
   return null;
 }
+// the rows of its painted gate down over its door (all of them: shut) - drawStrGate
+const strGateRows = (o, B) => Math.round(B.P._gate[3] * (1 - (o._gate || 0)));
 // (user Nov 8 17:46: "you should not be able to capture something that's hidden in the hangar") a point inside an enclosed structure's
 // walls (a hangar, a fire or police station - what keeps its vehicles out of sight) or a harbour's marine hangar (inHangar): hidden there
 function strHides(x, y) {
@@ -75091,6 +75094,24 @@ function strBox(o) {
   const B = strBox0(o); if (!strFree(o)) return B;
   const d = o.fy - B.foot; return Object.assign({}, B, { top: B.top + d, foot: o.fy });
 }
+// (user Nov 22 10:17: "the arrow in the lighthouse should be centered with the tower, not the middle of the structure") where an arrow over a structure
+// points: over its tallest part - the middle of the picture's columns whose top is in its top quarter (a lighthouse's tower, a house's roof), mirrored with it
+function strPeakX(o) {
+  const B = strBox(o), P = B.P; if (!P) return (B.x0 + B.x1) / 2;
+  let px = P._peak;
+  if (px == null) {
+    px = P.width / 2;
+    try {
+      const W = P.width, H = P.height, d = P.getContext('2d').getImageData(0, 0, W, H).data, top = new Int32Array(W).fill(H);
+      for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (d[(y * W + x) * 4 + 3] > 40) { top[x] = y; break; }
+      let t0 = H; for (const t of top) t0 = Math.min(t0, t);
+      const lim = t0 + (H - t0) * 0.25; let sx = 0, n = 0; for (let x = 0; x < W; x++) if (top[x] <= lim) { sx += x + 0.5; n++; }
+      if (n) px = sx / n;
+    } catch (e) { }
+    P._peak = px;
+  }
+  return o.flip ? B.x1 - px * B.m : B.x0 + px * B.m;
+}
 // (user Nov 2 14:25: "when things get blown up and destroyed, it all has to make sense physically") the ground a building
 // w wide stands on at x: the ground under its middle - but with its middle undermined (a crater, a hole opened under it) it
 // still stands on its two ends, as long as either holds it (the lower of them); with nothing left under it, it's down in the
@@ -75357,11 +75378,19 @@ function drawSeaStructs(x0, x1) {
 // land's in the land's pass. isl: this call's share - false the land's, true the sea islands'
 const strOnIsl = o => { const x = clamp(o.x, 0, WORLD_W - 1); return seaAtX(x) && onLand(x) && !lakeAt(x); };
 const drawIslStructs = (x0, x1) => drawStructs(x0, x1, true);
+// (user Nov 19 20:34-20:35) the buildings' own plants (each prefab's - it.sp, the 'str' pass) on drawStructs' ground: the land's (and a segment's in a
+// country), an island's at sea, terrain layer lay's - drawn with them, in front of them (the vegetation's DECK 1 and DECK 0 after it all)
+function strPlants(x0, x1, isl, lay) {
+  if (lay) { drawLayPlants(x0, x1, lay, 'str'); return; }
+  if (isl ? !land.cell || !(land.islRuns && land.islRuns.length) : RIG_T.off || edTiny(6 * UPM)) return;
+  const p0 = VEG_PASS; VEG_PASS = 'str';
+  try { if (isl) drawLandProps(x0, x1, 'sea', 'plants'); else { drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); } } finally { VEG_PASS = p0; }
+}
 // (terrain layers: lay - those standing on that layer, drawn after its ground and with what's on it - drawLayThings; 0 the back's, as always)
 function drawStructs(x0, x1, isl = false, lay = 0) {
   STR_LAND.length = 0; for (const o of strsUsed()) if (!strInSea(o) && (o.lay | 0) === lay && (lay || strOnIsl(o) === isl)) STR_LAND.push(o);
   const L = STR_LAND, cars = lay ? 'lay' + lay : isl ? 'isl' : 'dry'; if (!img.tropical) return;
-  if (!L.length && !(land.sceneB && land.sceneB.length)) { drawStoryCars(x0, x1, cars); return; }
+  if (!L.length && !(land.sceneB && land.sceneB.length)) { strPlants(x0, x1, isl, lay); drawStoryCars(x0, x1, cars); return; }
   const own = thingsOwn();                                  // (one batch: the old code's draws between - thingsGL)
   if (!lay && land.sceneB) for (const o of land.sceneB) { if (strOnIsl(o) !== isl) continue; const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) continue; strStillDraw(o, B); strLit(o, B); }   // (the decks' buildings, behind the world's - sceneBuildings, 50-land-plants.js)
   for (const o of L) {
@@ -75373,8 +75402,12 @@ function drawStructs(x0, x1, isl = false, lay = 0) {
   }
   // (user Nov 21 20:46: driving a truck through the town, the fire station's closed gate was drawn over it) a gate is in front of what's inside its
   // building and behind everything else: the cars inside one (seen through its door - strMaskBox), its gate, then every other car
+  for (const o of L) if (strGated(o)) strGateStep(o, x0, x1);   // (each gate rolled this frame first: what's inside seen through what it leaves open)
   drawStoryCars(x0, x1, cars, true);                     // (STORY's cars on dry ground - 50-story-cars.js; wet ones go with the water they're in)
-  for (const o of L) if (STR_KINDS[o.k].enclosed || (strBox(o).P || {})._gate) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
+  for (const o of L) if (strGated(o)) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
+  // (user Nov 22: "the cars should render in FRONT of the bushes in a structure") each building's own plants in front of it, its gate and what's
+  // inside it, and behind every vehicle out on its ground - the cars here, then the tanks and wrecks (drawLandUnits, drawCrashes)
+  thingsGL(); strPlants(x0, x1, isl, lay);               // (the quads so far drawn first: the plants are a pass of their own)
   drawStoryCars(x0, x1, cars, false);
   for (const o of L) { const B = strBox(o); if (B.P && !offView(B.x0, B.x1, x0, x1) && strDrawn(o, B)) strFrontDraw(o, B); }   // (and their front layers - user Nov 2)
   if (own) thingsEnd();
@@ -75908,8 +75941,9 @@ window.__strRunway = { place: (id, x) => { const o = STRS.find(q => q.id === id)
    structures have gates"): an enclosed structure's roll-up gate (rolling UP - user Nov 2 11:53) over its painted door (P._door - user Nov 2 11:35: the
    building is sized so that door fits its tallest vehicle, gen/tropical/prep.py DOORS), in front of what's parked inside;
    it rolls up while one of the story's vehicles is moving close to it (coming in or going out), and down again. This
-   screen's own look (o._gate, never saved). ---- */
-function drawStrGate(o, x0, x1) {
+   screen's own look (o._gate, never saved), rolled (strGateStep) before what's parked inside is drawn - its door's opening is the gate's (strMaskBox). ---- */
+const strGated = o => !!(STR_KINDS[o.k].enclosed || (strBox(o).P || {})._gate);
+function strGateStep(o, x0, x1) {
   const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) return;
   // (user Nov 21 23:15: "Driving by should not open the door of other buildings like the fire station or the police") it opens only for what goes
   // through it: its own vehicles coming or going (kept there - berth, hb -, in for a job - bay -, its work vehicles - wk), yours driving into it or
@@ -75917,11 +75951,14 @@ function drawStrGate(o, x0, x1) {
   const mine = v => v.berth === o.id || v.hb === o.id || v.bay === o.id || v.wk === o.id || v.din === o.id;
   const near = (typeof storyVehs === 'function' && STORY && (storyVehs().some(v => !v.plane && mine(v) && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && (Math.abs(v.vDrive || 0) > 1 || Math.abs(v.npcV || 0) > 1 || v.din === o.id))
     || (crew[0].mode === 'civ' && storyDriveIn(crew[0].civ) === o))) || (STORY && doorBusy(o));
-  if (STORY && placeRolls(o)) { const D = placeDoor(o); if (D) drawRollers(o, D); }
   o._gate = clamp((o._gate || 0) + (near ? 1 : -0.7) * frameDt, 0, 1);
-  const open = o._gate, G = strGateBox(o, B);
+}
+function drawStrGate(o, x0, x1) {
+  const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) return;
+  if (STORY && placeRolls(o)) { const D = placeDoor(o); if (D) drawRollers(o, D); }
+  const open = o._gate || 0, G = strGateBox(o, B);
   if (G) {                                                   // its painted gate: the door's bottom rows, rolled up into the lintel (a part of its picture)
-    const [gx, gy, gw, gh] = B.P._gate, rows = Math.round(gh * (1 - open)); if (rows < 1) return;
+    const [gx, gy, gw, gh] = B.P._gate, rows = strGateRows(o, B); if (rows < 1) return;
     const X0 = Math.round(PX(G.x0)), X1 = Math.round(PX(G.x1)), T = Math.round(PY(G.top)), H = Math.round((PY(G.foot) - PY(G.top)) * rows / gh);
     strQuad(B.P, X0, T, X1, T + H, !!o.flip, { sr: [gx, gy + gh - rows, gw, rows] });
     return;
@@ -81489,6 +81526,14 @@ function folkPark(v, x, ok) {
   }
   return best;
 }
+// (user Nov 22 10:15: "There should be no proximity calculation like that. The NPC must know the parking lot connected to his work location. Not the
+// vertically closest one") where a character puts vehicle v away for place o: o itself where it takes v (a dock for a boat, a workplace's own spots for its
+// work vehicles), else o's own PARKING / DOCK for it (its lot - lotOf, 50-zzzzz-story-work.js). Never the nearest that takes it: none there free, none
+function folkLotAt(v, o) {
+  if (!o) return null; const cat = civCat(v);
+  const ok = q => v.berth === q.id || ((strTakes(q) || []).includes(cat) && strAllows(q, v.sv) && strFits(q, v.sv) && !(strWork(q) && v.wk !== q.id) && storyFreeSpot(q, v) >= 0 && folkReach(v, v.x, q.x));
+  if (ok(o)) return o; const L = lotOf(o, cat); return L && ok(L) ? L : null;
+}
 // a target: { x, o (a structure) | a (a fish area) }
 function folkTarget(c, J) {
   if (!J) { const h = stHome(c); return h ? { x: h.x, o: h } : null; }
@@ -81586,12 +81631,12 @@ function folkPlan(c, S) {
     // home (or the workplace, on foot): put away where it's taken nearest it, then a hop
     if (foot) {
       if (here && folkAtPlace(here, T)) { folkCarry(S, v); S.in = 0; if (J) { S.at = here.id; return; } S.at = T.o.id; S.j = -1; folkLog({ t: 'home', who: c.id }); return; }
-      if (can(v)) { const Lt = T.o && typeof lotOf === 'function' ? lotOf(T.o, civCat(v)) : null, P = (Lt && folkPark(v, T.x, q => q === Lt)) || folkPark(v, T.x, q => folkAtPlace(q, T)); if (P && P !== here) { folkGo(v, P.x, P); return; } }   // (its PARKING / DOCK first - 50-zzzzz-story-work.js)
+      if (can(v)) { const P = folkLotAt(v, T.o); if (P && P !== here) { folkGo(v, P.x, P); return; } }   // (the place's own PARKING / DOCK - folkLotAt)
     }
     // this vehicle can't get there: to one of theirs that can, and out of this one there
-    // (a place this one ties up at, from which the other is reached by hops)
-    const u = V.find(q => q !== v && can(q) && q.berth != null && (() => { const P = folkPark(v, q.x); return P && folkHops(P, slStr(q.berth)); })());
-    if (u) { const P = folkPark(v, u.x); if (P && P !== here) { folkGo(v, P.x, P); return; } if (here) { folkCarry(S, v); S.in = 0; S.at = here.id; return; } }
+    // (where the other is put away, or its own PARKING / DOCK for this one - folkLotAt)
+    const u = V.find(q => q !== v && can(q) && q.berth != null && (() => { const P = folkLotAt(v, slStr(q.berth)); return P && folkHops(P, slStr(q.berth)); })());
+    if (u) { const P = folkLotAt(v, slStr(u.berth)); if (P && P !== here) { folkGo(v, P.x, P); return; } if (here) { folkCarry(S, v); S.in = 0; S.at = here.id; return; } }
     if (folkWait(c, S, V)) return;                                          // (stuck in this one, waiting for the other)
     if (!J) { if (!wasStuck) folkLog({ t: 'skip', who: c.id, verb: 'home', at: T.o ? slPlaceName(T.o) : '' }); S.stuck = 1; S.nx = time + 5; S.j = jobs.length; return; }   // (no way home from here: they stay in it, and look again now and then)
     folkLog({ t: 'skip', who: c.id, verb: J.do, at: T.o ? slPlaceName(T.o) : 'THE FISH AREA' }); S.j = J.do === 'clockin' ? jobs.length : S.j + 1; return;                                                          // (no way there: that job left - no way to work: the day's off)
@@ -81609,7 +81654,7 @@ function folkPlan(c, S) {
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkCan(q, J, T);
-  const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkPark(q, u.x); return B && folkHops(B, slStr(u.berth)); })()));
+  const go = near.find(can) || near.find(q => V.some(u => u !== q && u.berth != null && can(u) && (() => { const B = folkLotAt(q, slStr(u.berth)); return B && folkHops(B, slStr(u.berth)); })()));
   if (go && S.wk && workShort(c, S, J, jobs, go)) return;                       // (at work: nothing leaves without its MIN CARGO - they wait on duty - 50-zzzzz-story-work.js)
   if (go && S.wk && signHold(c, S, J)) return;                                    // (a task held for the player signed up here: they wait for it to start - 50-zzzzz-story-signup.js)
   if (go) { if (FOLK.st[go.sid]) { const st = Object.assign({}, FOLK.st); delete st[go.sid]; FOLK.st = st; } S.in = go.sid; S.at = 0; folkLoad(S, go); if (S.wk) workLoad(S, go, jobs); return; }   // (what they carried, loaded; at work, what it delivers from its workplace)
