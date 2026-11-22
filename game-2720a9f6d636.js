@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1327;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 16:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1328;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 16:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74401,24 +74401,22 @@ function bySize(list) {
    (user Nov 22 14:22: "Every time you approach a location you can interact with, we see a arrow above it and says 'press A to enter' ... So your vehicle
    never has or needs an arrow") Driving, the nearest place you can go into or vehicle of yours you can take that you're close to wears a WHITE arrow
    bouncing over it - its name and PRESS A TO ENTER (storyTargets). A takes it: the vehicle you're in parks itself (storyStow) and you're inside the place
-   (its screen, time paused) or in the other vehicle. The ORANGE arrow shows what you control only while a swap into a vehicle plays out.
+   (its screen, time paused) or in the other vehicle. What you control never wears an arrow (user Nov 22 15:20 - not even as you get into it).
    A swap (storySwap, a command): the one you leave stays where it is, tied up at the structure it's parked at (storyLeave), the camera eases to the new one, and the swap plays out - one timeline for every kind (STSW_T):
-     0      the orange arrow lifts off the old one and moves over to the new one - no trail, no stretch (from a place's screen: it lands at once);
-     LAND   it lands with a squash and a spark ring, and the new controls are there at once (storyHudIn - drawHud; user Nov 13 15:54: "The
-            moment the arrow is on the new object, the controls are already there" - they slid up at 0.95-1.3 s); the entering sound (a door, a car's door, steps on a deck, a hatch); the
+     0      the camera on its way (from a place's screen: at LAND at once);
+     LAND   the new controls are there (storyHudIn - drawHud); the entering sound (a door, a car's door, steps on a deck, a hatch); the
             vehicle takes your weight - it dips on its springs / in the water (susKick, susY);
      ENGINE a vehicle's engine catches (the sound's starter, then the engine) - its own exhaust, funnel smoke and screw bubbles,
-            the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start); the orange arrow
-            fades away from here to END;
+            the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start);
             Till ENGINE its lever does nothing (swapHold - stepCivDriven).
    (user Nov 13 17:47: "If I choose to switch immediately back, it should do it. There's no wait.") A swap can be made at any moment: one
    made while another plays out replaces it - its timeline starts again from 0 on the new object, and the old one's sound is cut
    (sfxStoryEnter's bus). Nothing waits for END.
    ================================================================ */
 const STSW_T = { LAND: 0.42, ENGINE: 0.9, END: 1.5 };
-const STSW = { on: false, t: 0, from: null, key: null, kind: null, vs: null, step: 0, n: 0 };   // (n: swaps made)
+const STSW = { on: false, t: 0, key: null, kind: null, vs: null, step: 0, n: 0 };   // (n: swaps made)
 // (the swap is the simulation's - the worker's when it runs the game: a table, so the page that draws it has it too - rules.md, Systems 6)
-const STSW_ROW = worldRow(Object.fromEntries(['on', 't', 'from', 'key', 'kind', 'vs', 'step', 'n'].map(k => [k, [() => STSW[k], v => { STSW[k] = v; }]])));
+const STSW_ROW = worldRow(Object.fromEntries(['on', 't', 'key', 'kind', 'vs', 'step', 'n'].map(k => [k, [() => STSW[k], v => { STSW[k] = v; }]])));
 defTable('storySwap', () => [STSW_ROW], { make: () => STSW_ROW });
 const swV = () => STSW.vs == null ? null : storyVehs().find(v => v.sid === STSW.vs) || null;   // (what's being entered)
 const swapR = sysRng('storySwap');
@@ -74616,7 +74614,7 @@ function storySwap(p, key) {
 function storySwapTo(p, T, C0) {
   folkFamTake(T.v); storyEnterVeh(p, T.v); if (T.at != null) storyArrive(T.at);   // (one of your family's: kept as taken - 50-zzzzz-story-folk.js)
   if (C0) cam.glide = STORY_GLIDE; else cutTo(p);
-  Object.assign(STSW, { n: (STSW.n | 0) + 1, on: true, t: C0 ? 0 : STSW_T.LAND, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v.sid, step: 0 });
+  Object.assign(STSW, { n: (STSW.n | 0) + 1, on: true, t: C0 ? 0 : STSW_T.LAND, key: T.key, kind: swapKind(T), vs: T.v.sid, step: 0 });
   sound('storyEnter', T.wx, STSW.kind);                 // (the whole entering, in time with the arrow: sfxStoryEnter)
 }
 ACTS.storySwap = (p, key) => storySwap(p, key);
@@ -74655,14 +74653,13 @@ function swapEngineFx(v) {
 }
 
 /* ---- the arrows, drawn in the controls' layer (drawStoryBanner): pixel art, stepped in whole blocks (a 7-block arrowhead on a
-   3-block shaft, an ink edge round it, its right side a shade darker). The orange one on what you control only through a swap; the white
-   ones bouncing; a picked one (the keys, a pad's shoulders) a little bigger. Over a vehicle for sale: its name, its price, and
-   how to buy it (or NO FUNDS); over your own: its name. ---- */
+   3-block shaft, an ink edge round it, its right side a shade darker). White, bouncing, over what you can go into, its name and PRESS A TO
+   ENTER over it; orange (ARROW_COL.cur) only the objective's way to go (pxArrowH - 50-zzzzz-story-lines.js). ---- */
 const ARROW = ['..###..', '..###..', '..###..', '#######', '.#####.', '..###..', '...#...'];
 const ARROW_COL = { cur: ['#ffb02e', '#d9771a', '#ffd76a'], to: ['#ffffff', '#c8d2e0', '#ffffff'] };
-// an arrow, its point at (cx, tipY), blocks of B, squashed by sq (landing: wider and flatter)
-function pxArrow(cx, tipY, B, cols, sq = 0, a = 1) {
-  const bw = B * (1 + 0.22 * sq), bh = B * (1 - 0.32 * sq), W = 7 * bw, x0 = Math.round(cx - W / 2), y0 = Math.round(tipY - 7 * bh);
+// an arrow, its point at (cx, tipY), blocks of B
+function pxArrow(cx, tipY, B, cols, a = 1) {
+  const bw = B, bh = B, W = 7 * bw, x0 = Math.round(cx - W / 2), y0 = Math.round(tipY - 7 * bh);
   ug.globalAlpha = a;
   ug.fillStyle = '#04070f';
   ARROW.forEach((row, j) => { for (let i = 0; i < 7; i++) if (row[i] === '#') ug.fillRect(Math.round(x0 + (i - 1) * bw), Math.round(y0 + (j - 1) * bh), Math.ceil(3 * bw), Math.ceil(3 * bh)); });
@@ -74700,21 +74697,13 @@ function storyArrowsAt() {
 }
 function drawStoryArrows() {
   if (ui.menu || stHere()) return;                       // (inside a place: its screen - 50-zzzzz-place-screen.js)
-  const w = storyToUI(), L = storyTargets(), tS = STSW.on ? STSW.t : 9, flying = STSW.on && tS < STSW_T.LAND;
-  const pop = STSW.on ? clamp((tS - STSW_T.LAND) / 0.2, 0, 1) : 1;      // (the other arrow back as it lands)
-  for (const T of L) {
-    const p = w(T.wx, T.wy), X = Math.round(p.X), Y = Math.round(p.Y) - ARROW_GAP;
-    if (T.cur) {
-      // (user Nov 22 14:22: "your vehicle never has or needs an arrow") what you control wears its orange arrow only while a swap into it plays out
-      if (flying || !STSW.on) continue;
-      const k = clamp((tS - STSW_T.LAND) / 0.25, 0, 1), sq = Math.sin(k * Math.PI) * (1 - k) * 1.6;   // (landed: squashed, springing back)
-      pxArrow(X, Y, ARROW_B, ARROW_COL.cur, sq, clamp((STSW_T.END - tS) / (STSW_T.END - STSW_T.ENGINE), 0, 1));
-      if (k < 1) swapSparks(X, Y, k);
-      continue;
-    }
-    if (pop <= 0) continue;
-    const bob = Math.round(ARROW_BOB * Math.abs(Math.sin(time * 3.4)));
-    pxArrow(X, Y - bob, ARROW_B, ARROW_COL.to, 0, pop);
+  // (user Nov 22 14:22 / 15:20: "your vehicle never has or needs an arrow"; "I just asked not to have any arrows above the car, but I'm seeing one when I exit
+  // the structure") only what you can go into wears one - white, bouncing; what you control never does, not even as you get into it
+  const w = storyToUI(), pop = STSW.on ? clamp((STSW.t - STSW_T.LAND) / 0.2, 0, 1) : 1;   // (the arrow back as the swap lands)
+  for (const T of storyTargets()) {
+    if (T.cur || pop <= 0) continue;
+    const p = w(T.wx, T.wy), X = Math.round(p.X), Y = Math.round(p.Y) - ARROW_GAP, bob = Math.round(ARROW_BOB * Math.abs(Math.sin(time * 3.4)));
+    pxArrow(X, Y - bob, ARROW_B, ARROW_COL.to, pop);
     // its label over the bounce: its name, and PRESS A TO ENTER under it (user Nov 22 14:22)
     let ly = Y - 7 * ARROW_B - ARROW_BOB - 6 - 32;
     ug.globalAlpha = pop;
@@ -74722,20 +74711,6 @@ function drawStoryArrows() {
     drawTextC(ug, storyHint('ENTER'), X, ly, '#9dff8a', 2, 'center', '#04070f');
     ug.globalAlpha = 1;
   }
-  // (user Nov 22 11:23: "lets remove this ugly black trailing of the arrow. The arrow just moves and thats it") no trail, no stretch
-  if (flying && STSW.from) {                               // the orange arrow on its way: lifted, over in an arc
-    const cur = L.find(q => q.cur), a = w(STSW.from[0], STSW.from[1]), b = cur ? w(cur.wx, cur.wy) : a, AC = ARROW_COL.cur;
-    const ax = a.X, ay = a.Y - ARROW_GAP, bx = b.X, by = b.Y - ARROW_GAP, lift = Math.max(60, Math.hypot(bx - ax, by - ay) * 0.35);
-    const at = u => { const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2, m = 1 - e; return [m * m * ax + 2 * m * e * (ax + bx) / 2 + e * e * bx, m * m * ay + 2 * m * e * (Math.min(ay, by) - lift) + e * e * by]; };
-    const q = at(tS / STSW_T.LAND); pxArrow(q[0], q[1], ARROW_B, AC);
-  }
-}
-// the landing's spark ring: eight blocks flying out from the point, orange then white, gone in a quarter second
-function swapSparks(X, Y, k) {
-  const r = 6 + 26 * k, s = Math.max(1, Math.round(4 * (1 - k)));
-  ug.fillStyle = k < 0.5 ? '#ffd76a' : '#ffffff'; ug.globalAlpha = 1 - k;
-  for (let i = 0; i < 8; i++) { const an = i * Math.PI / 4; ug.fillRect(Math.round(X + Math.cos(an) * r - s / 2), Math.round(Y - 10 + Math.sin(an) * r * 0.7 - s / 2), s, s); }
-  ug.globalAlpha = 1;
 }
 
 /* ---- the entering's sound, played in one go from the swap's start, in time with the arrow (STSW_T): a soft lift as the arrow
