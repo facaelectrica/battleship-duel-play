@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1314;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 14:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1315;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 15:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -75892,11 +75892,11 @@ window.addEventListener('pointerdown', ev => {
   const [X, Y, r] = vehWorld(ev), H = SE.hnd.find(h => Math.hypot(X - h.x, Y - h.y) < Math.max(h.r, r)); if (!H) return;
   const o = strById(H.o); if (!o) return; const B = strBox(o);
   if (H.lk) { LOTD.d = { id: ev.pointerId, o, fam: H.lk, x: X, y: Y }; ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct'); return; }   // (a lot's handle: dragged onto its lot)
-  SE.str = { id: ev.pointerId, o, s: H.s, fixed: H.s < 0 ? B.x1 : B.x0, off: X - (H.s < 0 ? B.x0 : B.x1) };
+  SE.str = { id: ev.pointerId, o, s: H.s, fixed: H.s < 0 ? B.x1 : B.x0, off: X - (H.s < 0 ? B.x0 : B.x1), end0: H.s < 0 ? B.x0 : B.x1, T: strTrain([o]) };   // (what's joined beyond the end pushed along - strTrain)
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct');
 }, { capture: true, passive: false });
-window.addEventListener('pointermove', ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); LOTD.d.x = X; LOTD.d.y = Y; ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; strStretchTo(d.o, d.s, vehWorld(ev)[0] - d.off, d.fixed); ev.stopImmediatePropagation(); }, { capture: true, passive: true });
-const strStretchUp = ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); lotDragEnd(X, Y); ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; SE.str = null; if (d.o.k === 'dock') dockRefit(d.o); strSave(); strSync(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); };
+window.addEventListener('pointermove', ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); LOTD.d.x = X; LOTD.d.y = Y; ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; strStretchTo(d.o, d.s, vehWorld(ev)[0] - d.off, d.fixed); { const B = strBox(d.o), m = (d.s < 0 ? B.x0 : B.x1) - d.end0, G = d.T && (d.s < 0 ? d.T.l : d.T.r); if (G && m !== d.m) { grpDragMove(G, m, 0, vehWorld(ev)[2]); d.m = m; if (d.s < 0) d.T.dl = m; else d.T.dr = m; } } ev.stopImmediatePropagation(); }, { capture: true, passive: true });   // (the ones joined beyond that end: with it, out or back - strTrain)
+const strStretchUp = ev => { if (typeof LOTD !== 'undefined' && LOTD.d && LOTD.d.id === ev.pointerId) { const [X, Y] = vehWorld(ev); lotDragEnd(X, Y); ev.stopImmediatePropagation(); return; } const d = SE.str; if (!d || d.id !== ev.pointerId) return; SE.str = null; strTrainEnd(d.T); if (d.o.k === 'dock') dockRefit(d.o); strSave(); strSync(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); };
 window.addEventListener('pointerup', strStretchUp, { capture: true });
 window.addEventListener('pointercancel', strStretchUp, { capture: true });
 // ---- the pointer over the world while the tab is open (before the game's own, as the vehicles' tab)
@@ -75910,7 +75910,7 @@ window.addEventListener('pointerdown', ev => {
   if (ev.shiftKey) { SE.sel = SE.sel.includes(o.id) ? SE.sel.filter(i => i !== o.id) : SE.sel.concat(o.id); strSync(); }
   else if (!SE.sel.includes(o.id)) { SE.sel = [o.id]; strSync(); }
   // (the pick and everything in its groups - any kind: structures, islands, placed vehicles - grpDragStart)
-  SE.drag = { id: ev.pointerId, X, Y, G: grpDragStart(SE.sel.map(strById).filter(Boolean).map(grpM.s)), cx: ev.clientX, cy: ev.clientY, moved: false };
+  { const P = SE.sel.map(strById).filter(Boolean); SE.drag = { id: ev.pointerId, X, Y, G: grpDragStart(P.map(grpM.s)), T: strTrain(P), cx: ev.clientX, cy: ev.clientY, moved: false }; }   // (T: what's joined ahead, pushed along - strTrain)
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct');
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', ev => {
@@ -75918,9 +75918,10 @@ window.addEventListener('pointermove', ev => {
   if (!d.moved && Math.hypot(ev.clientX - d.cx, ev.clientY - d.cy) < 6) return;
   d.moved = true; const [X, Y, r] = vehWorld(ev);
   grpDragMove(d.G, X - d.X, Y - d.Y, r);                     // (the whole pick and its groups by the same step - 50-zzz-objects-tab.js)
+  strTrainMove(d.T, X - d.X, r, d.G.s.some(a => !a[3] && strFree(a[0])));   // (what's joined ahead pushed along; lifted off its ground: let go)
   ev.stopImmediatePropagation();
 }, { capture: true, passive: true });
-const strUp = ev => { if (SE.drag && SE.drag.id === ev.pointerId) { const d = SE.drag; SE.drag = null; if (d.moved) grpDragEnd(d.G); ev.stopImmediatePropagation(); } };
+const strUp = ev => { if (SE.drag && SE.drag.id === ev.pointerId) { const d = SE.drag; SE.drag = null; if (d.moved) { grpDragEnd(d.G); strTrainEnd(d.T); } ev.stopImmediatePropagation(); } };
 window.addEventListener('pointerup', strUp, { capture: true });
 window.addEventListener('pointercancel', strUp, { capture: true });
 // ---- drawn over the world while the tab is open: each one's frame - its corners in its colour (its group's), its name over it;
@@ -77120,6 +77121,28 @@ function ridersOf(N, S0 = [], V0 = []) {
   for (const w of pirateWrecks) { const r = WRECK_SET.find(q => q.id === w.k); if (r && w.y == null && rideOn(N, w.x, seabedY(clamp(w.x, 0, WORLD_W - 1)))) R.w.push([r, w.x]); }
   return R;
 }
+/* ---- THE TRAIN (user Nov 22 13:59: "if I'm dragging a parking lot or moving a building, everything next to it also moves ... we know they're next to it because
+   they're all connected"; asked: "Only those ahead of it", "Dragged away, it lets go"): the structures joined to what's dragged (storyLinks - touching, across and
+   up and down), one after another, on each side - the ones ahead of it on the side it goes are pushed along the same way, on their own ground, with everything
+   riding on them (a group drag each side, its structures riding); those behind stay. A stretched end pushes the ones beyond it. Lifted off its ground (OFF
+   THE GROUND), what's dragged lets them go: back where they were. ---- */
+function strTrain(seeds) {
+  const S = new Set(seeds), mid = o => { const B = strBox(o); return (B.x0 + B.x1) / 2; }, side = d => {
+    const out = [], seen = new Set(seeds), Q = [...seeds];
+    while (Q.length) { const a = Q.shift(); for (const q of storyLinks(a)) if (!seen.has(q) && (mid(q) - mid(a)) * d > 0) { seen.add(q); out.push(q); Q.push(q); } }
+    const G = out.length ? grpDragStart(out.map(grpM.s)) : null; if (G) for (const a of G.s) a[3] = true;   // (on their own ground - riding, never lifted)
+    return G;
+  };
+  return S.size ? { r: side(1), l: side(-1), dr: 0, dl: 0 } : null;
+}
+// the train after the drag went dx (the right one pushed going right, the left one going left; held: both back)
+function strTrainMove(T, dx, r, held) {
+  if (!T) return;
+  const dr = !held && dx > 0 ? dx : 0, dl = !held && dx < 0 ? dx : 0;
+  if (T.r && dr !== T.dr) { grpDragMove(T.r, dr, 0, r); T.dr = dr; }
+  if (T.l && dl !== T.dl) { grpDragMove(T.l, dl, 0, r); T.dl = dl; }
+}
+function strTrainEnd(T) { if (!T) return; if (T.r && T.dr) grpDragEnd(T.r); if (T.l && T.dl) grpDragEnd(T.l); }
 // ---- the group drag (the structures', islands' and vehicles' own drags call these)
 function grpDragStart(seeds) {
   const M = grpExpand(seeds), S = { s: [], i: [], v: [] };
