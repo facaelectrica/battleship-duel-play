@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1325;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 16:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1326;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 16:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -83417,7 +83417,11 @@ function stTakes(o, who = 'player', paid) {
   // (user Nov 20 21:16: "every delivery, you get paid") what a workplace's routine DELIVERs here: the task's pay - (user Nov 22 00:13: "The ability to work
   // somewhere is when you're inside that location ... you can either buy stuff or apply to work there") to one who works at that workplace (worksAt -
   // the player signed up there): nobody else is offered a delivery (it offered the medicine you'd just bought back to the market)
-  const wc = who === 'player' ? PLAYER_C : charOf(who);
+  // (user Nov 22 15:05: "I should not be able to sell back the medicine I purchased"; "'Delivery 1 medicine' does not make sense") the player hands over work's
+  // goods only as the task he's doing - its goods, where it ends (signTake / signLoad, 50-zzzzz-story-signup.js), as a character does only on its job's DELIVER step
+  // (folkDo): what he bought or carries for himself is never his work's (the market's COLLECT from anywhere took any good back from its worker, paid)
+  const wc = who === 'player' ? null : charOf(who);
+  if (who === 'player') { const T = FOLK.tk; if (T && T.mine && ((T.do === 'deliver' && T.to === o.id) || (T.do !== 'deliver' && T.got && T.at === o.id))) for (const k of signKs(T)) if (cargoKind(k)) K.add(k); }
   for (const W of strsUsed()) if (strWork(W) && !strDown(W) && wc && worksAt(wc, W.id)) for (const J of workJobs(W)) for (const k of rtAll(J) ? goodKs() : [J.k]) if (k && cargoKind(k) && ((J.do === 'deliver' && J.at === o.id) || (J.do === 'collect' && W === o && !(strMarket(slStr(J.at)) && marketSells(slStr(J.at)).includes(k))))) K.add(k);   // (a COLLECT / DELIVER with no good: every good - rtAll)   // (and what its own routine COLLECTs - brought back to it; not what it buys at a market)
   for (const k of CARGO_KINDS.map(q => q[0])) if (!K.has(k) && strWork(o) && !strDown(o) && workBuysOwn(o, k)) K.add(k);   // (what its own routine HUNTs / SELLs here: it buys it from whoever brings it - buysHere, folkSellPay)
   return [...K];
