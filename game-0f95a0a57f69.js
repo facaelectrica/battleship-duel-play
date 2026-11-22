@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1326;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 16:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1327;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 16:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81026,9 +81026,23 @@ function placePress(X, Y) {
   if (i >= 0) { PS.sel = i; placeDoRow(placeScreenRows(stHere())[i]); }
   return true;
 }
-// (user Nov 22 14:55: "just like we see the inside of the car stand, we see the inside of the fishery, the lighthouse, and the marketplace") its kind's ROOM
-// (STR_KINDS room - gen/showroom/interiors.py), at the showroom's size (SHOW_K) on black; its name over it, what's said and its rows on a dark panel over its floor
+// (user Nov 22 14:55: "just like we see the inside of the car stand, we see the inside of the fishery, the lighthouse, and the marketplace"; 15:14: "The text
+// should be inside the image. Do you have to make it so bulky? Are you able to do layout and design so it looks attractive and polished?") its kind's ROOM
+// (STR_KINDS room - gen/showroom/interiors.py) at the showroom's size (SHOW_K) on black, and everything inside it, sized with it (its pixel k = the text's
+// scale): its name on a plaque on the wall; on the floor what's said (left) and its rows (right), each on a dark glass panel. No ROOM yet: the same frame, black
+const PS_ROOM = [331, 186], PS_FLOOR = 0.61;   // (a room's size at the showroom's pixel - every interior is cut the same; where its floor starts, a share of its height)
 const placeRoom = o => { const P = img[(STR_KINDS[strIsLh(o) ? 'lighthouse' : o.k] || {}).room]; return P && P.width ? P : null; };
+// a dark glass panel: its fill, a hairline round it
+function psPanel(x, y, w, h) {
+  ug.fillStyle = 'rgba(8,11,20,0.82)'; ug.fillRect(x, y, w, h);
+  ug.fillStyle = 'rgba(255,255,255,0.14)'; ug.fillRect(x, y, w, 1); ug.fillRect(x, y + h - 1, w, 1); ug.fillRect(x, y, 1, h); ug.fillRect(x + w - 1, y, 1, h);
+}
+// what they'd say there now, worked out again only when something you can change in there changed (the world is paused inside - storyFrozen)
+function placeSays(o, here) {
+  const k = [o.id, story.coins, JSON.stringify(story.inv), story.saveN, W.day, Math.round(env.time * 10)].join('|');
+  if (PS.saysK !== k) { const seen = new Set(); PS.saysK = k; PS.says = here.flatMap(q => slWantsAt(q)).filter(l => l.txt && !seen.has(l.id) && seen.add(l.id)); }
+  return PS.says;
+}
 function drawPlaceScreen() {
   const on = placeShown();
   PS.a = clamp(PS.a + (on ? 1 : -1) * frameDt / 0.3, 0, 1);
@@ -81038,40 +81052,51 @@ function drawPlaceScreen() {
   const o = stHere(), R = placeScreenRows(o), key = o.id + ':' + R.map(q => q.do + (q.k || '')).join(',');
   if (key !== PS.key) { PS.key = key; PS.sel = 0; }
   PS.sel = clamp(PS.sel, 0, Math.max(0, R.length - 1));
-  const sc = ubw < 420 ? 2 : 3, lh = 9 * sc, nsc = Math.max(1, sc - 1), rh = Math.round(lh * 1.4);
   ug.globalAlpha = PS.a;
   // the room (as the showroom's - drawShowroom): a whole number of its pixels, black round it
-  const P = placeRoom(o); let room = null;
-  if (P) { const k = Math.max(1, Math.floor(Math.floor(Math.min((ubw - 16) / P.width, (ubh - 16) / P.height)) * SHOW_K)); room = [Math.round((ubw - P.width * k) / 2), Math.round((ubh - P.height * k) / 2), P.width * k, P.height * k];
-    ug.save(); ug.imageSmoothingEnabled = false; ug.drawImage(P, room[0], room[1], room[2], room[3]); ug.restore(); }
-  const W = room ? room[2] - 28 : Math.min(ubw - 40, 150 * sc * 2), x0 = Math.round((ubw - W) / 2);   // (the panel as wide as the room)
-  // what's said there (the story screen's way - drawStorySay: the speaker's name over what they say), laid out first to know its height
-  const s = story.say, Ls = s && s.open && s.at != null && [o, ...storyLinks(o)].some(q => q.id === s.at) ? sayLines(s) : [], said = [];
+  const P = placeRoom(o), RW = P ? P.width : PS_ROOM[0], RH = P ? P.height : PS_ROOM[1];
+  const k = Math.max(1, Math.floor(Math.floor(Math.min((ubw - 16) / RW, (ubh - 16) / RH)) * SHOW_K)), W = RW * k, H = RH * k, X = Math.round((ubw - W) / 2), Y = Math.round((ubh - H) / 2);
+  if (P) { ug.save(); ug.imageSmoothingEnabled = false; ug.drawImage(P, X, Y, W, H); ug.restore(); }
+  const ts = k, lh = 9 * ts, m = 5 * k, pad = 4 * k;
+  // its name: a plaque at the top of the wall
+  const nm = storyStrName(o), nw = textWidth(nm) * (ts + 1);
+  psPanel(Math.round(X + (W - nw) / 2 - pad), Y + m, nw + 2 * pad, 7 * (ts + 1) + 2 * pad - 2 * (ts + 1));
+  drawText(ug, nm, Math.round(X + W / 2), Y + m + pad, SL_COL.place, ts + 1, 'center');
+  // the floor: what's said on the left, its rows on the right - both standing on the room's foot
+  const bot = Y + H - m, cw = Math.round((W - 3 * m) * 0.42), cx = X + W - m - cw;
+  const rh = lh + 3 * ts, mh = R.length * rh + lh + 2 * pad + ts;
+  // what's said there (the story screen's way - drawStorySay: the speaker's name over what they say), laid out first: both panels as tall as the taller
+  // (user Nov 22 15:16: "when you re enter the lighthouse, you must always get your grandfather details") what was just said there, else what they'd say now -
+  // their state, every time (placeSays: the place's and those touching it)
+  const s = story.say, here = [o, ...storyLinks(o)];
+  const Ls = s && s.open && s.at != null && here.some(q => q.id === s.at) ? sayLines(s) : placeSays(o, here);
+  const dw = W - 3 * m - cw, said = [];
   Ls.forEach((l, i) => {
     const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who);
     if (i > 0 && named) said.push(null);
-    if (named) said.push([[{ w: trText(who) + ':', col: SL_COL.who, x: 0 }]]);
-    for (const ln of slLayout(trText(l.txt || ''), sc, W)) said.push([ln]);
+    if (named) said.push([{ w: trText(who) + ':', col: SL_COL.who, x: 0 }]);
+    for (const ln of slLayout(trText(l.txt || ''), ts, dw - 2 * pad)) said.push(ln);
   });
-  const H = said.length * lh + (said.length ? lh : 0) + R.length * rh + lh * 2;
-  let y = room ? clamp(room[1] + Math.round(room[3] * 0.55), hudTop() + 3 * lh, ubh - H - 16) : Math.round(Math.max(hudTop() + 3 * lh, (ubh - H) / 2));
-  // its name over the room (or the panel)
-  drawText(ug, storyStrName(o), Math.round(ubw / 2), (room ? room[1] : y) - 2 * lh, SL_COL.place, sc + 1, 'center');
-  ug.fillStyle = 'rgba(4,7,15,0.8)'; ug.fillRect(x0 - 14, y - 12, W + 28, H + 4);
-  for (const q of said) { if (q) for (const w of q[0]) drawText(ug, w.w, x0 + w.x, y, w.col, sc); y += lh; }
-  if (said.length) y += lh;
-  // the rows: the picked one marked; coins on the right of goods; why it can't be done, red
+  const dh = said.length ? said.length * lh + 2 * pad - 2 * ts : 0, ph = Math.max(mh, dh), top = bot - ph;
+  // its rows, on the right
   PS.rows = [];
+  psPanel(cx, top, cw, ph);
+  let y = top + pad + ts;
   R.forEach((q, i) => {
-    const pick = i === PS.sel, no = placeRowNo(o, q), col = no ? '#7a8294' : pick ? '#ffffff' : '#aab4c8';
-    if (pick) drawText(ug, '>', x0, y, '#ffb02e', sc);
-    drawText(ug, placeRowLabel(q), x0 + 3 * sc * 3, y, col, sc);
+    const pick = i === PS.sel, no = placeRowNo(o, q), col = no ? '#6f7890' : pick ? '#ffffff' : '#b9c2d6';
+    if (pick) { ug.fillStyle = 'rgba(255,176,46,0.2)'; ug.fillRect(cx + 1, y - 2 * ts, cw - 2, rh); drawText(ug, '>', cx + pad, y, '#ffb02e', ts); }
+    drawText(ug, placeRowLabel(q), cx + pad + 6 * ts, y, col, ts);
     const right = no || (placeGoods(q) ? q.c + ' COIN' : '');
-    if (right) drawText(ug, right, x0 + W, y, no ? '#ff6a5a' : '#ffd23a', nsc, 'right');
-    PS.rows.push([x0 - 8, y - 4, W + 16, lh + 4]); y += rh;
+    if (right) drawText(ug, right, cx + cw - pad, y, no ? '#ff6a5a' : '#ffd23a', ts, 'right');
+    PS.rows.push([cx, y - 2 * ts, cw, rh]); y += rh;
   });
-  const bob = Math.round(2 * Math.abs(Math.sin(time * 3.4)));
-  drawText(ug, storyHint('SELECT'), x0, y + Math.round(lh * 0.3) + bob, SL_COL.hint, nsc);
+  drawText(ug, storyHint('SELECT'), cx + pad, y + ts, SL_COL.hint, ts);
+  // what's said, on the left
+  if (said.length) {
+    const dx = X + m; psPanel(dx, top, dw, ph);
+    let yy = top + pad;
+    for (const ln of said) { if (ln) for (const w of ln) drawText(ug, w.w, dx + pad + w.x, yy, w.col, ts); yy += lh; }
+  }
   ug.globalAlpha = 1;
 }
 window.__place = { rows: () => placeScreenRows(stHere()), state: PS, frozen: () => storyFrozen(), shown: () => placeShown() };
@@ -82179,7 +82204,7 @@ function slWantOf(c) {
   const H = stHome(c), G = slHousehold(c) ? goalChain(c) : null;
   if (G) {
     const key = 'g:chain:' + c.id + ':' + G.k, sk = goalActKey(G.act) + (G.urgent ? ':u' : ':f'), says = G.links.filter(l => l.says);
-    if (G.act || G.urgent) says.forEach((l, i) => {
+    says.forEach((l, i) => {   // (user Nov 22 15:16: "when you re enter the lighthouse, you must always get your grandfather details about the medicine" - said whatever comes next, ready or not)
       const w = { id: key + ':' + l.id + ':' + sk, key, row: l.id, who: c.id, at: H.id, txt: l.says, d: G.days + i * 1e-6, k: G.k, to: '', do: 'go' };
       if (i === 0 && G.act) Object.assign(w, G.act.do === 'hunt' ? { to: 'k:' + G.act.sv, do: 'hunt', k: G.act.k, n: G.act.n } : { to: 's:' + G.act.at, do: G.act.do, k: G.act.k || '', n: G.act.do === 'collect' ? 0 : G.act.n || 0 });
       out.push(w);
