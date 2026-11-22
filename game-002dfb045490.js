@@ -13137,8 +13137,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1305;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 12:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1306;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 12:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73177,7 +73177,7 @@ function nightOf(art) {
 // nightPic's rule on its own picture, no lit copy), after the night's tint, hidden where something drawn after it stands in front
 // (glow: a building's windows glow round them; a vehicle's are lit in their panes only, no glow - user Nov 2 11:16, the fishing boat
 // at night: "A couple of lights on top + the interior lights only in the windows")
-// (k: how lit - the lamps' hour, or a home being entered's - swapLit)
+// (k: how lit - the lamps' hour)
 const NIGHT_MUL = NIGHT_COL.map(v => v / 255);
 function objNight(P, art, X0, Y0, X1, Y1, flip, glow = true, k = E.lampsOn || 0) {
   if (k < 0.05) return;
@@ -73196,7 +73196,7 @@ function strLit(o, B) {
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
   // (pieces of it gone - strHit: its windows dark, its power out)
   const c = typeof strCutOf === 'function' ? strCutOf(o, strPieces(B.P, B.m)) : null;
-  if (!c && !STR_NO_NIGHT[o.k]) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip, true, Math.max(strLightsOn(o) ? E.lampsOn || 0 : 0, swapLit(o)));   // (a home being entered: lit at once, settling to the hour's own)
+  if (!c && !STR_NO_NIGHT[o.k]) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip, true, strLightsOn(o) ? E.lampsOn || 0 : 0);   // (user Nov 22 11:23: "Why are the lighthouse lights flash on every time I enter? That looks weird" - no flash on entering: lit by the hour's own rule)
   if (!c) strDoorSign(o, B, X0, Y0, X1, Y1);
 }
 /* (user Nov 21 11:08: "all buildings that sell stuff that you can interact with have a sign on the door saying if they're open or closed") a place with a
@@ -74473,11 +74473,11 @@ function bySize(list) {
    - the homes in the place, and every story vehicle in it or within STORY_PARK_M of the one you're in: your own, your family's
      while free (no stealing - user Nov 20 21:16) - or, in the editor's PLAY, one nobody has, to test it (storyTestVeh; nothing is for sale - user Nov 20 10:44). Structures that only hold vehicles (a dock, a taxi shelter, a hangar) wear none: their vehicles do.
    A swap (storySwap, a command): the one you leave stays where it is, tied up at the structure it's parked at (storyLeave), the camera eases to the new one, and the swap plays out - one timeline for every kind (STSW_T):
-     0      the orange arrow lifts off the old one and flies over to the new one (the others' arrows hidden);
+     0      the orange arrow lifts off the old one and moves over to the new one - no trail, no stretch (the others' arrows hidden);
      LAND   it lands with a squash and a spark ring, and the new controls are there at once (storyHudIn - drawHud; user Nov 13 15:54: "The
             moment the arrow is on the new object, the controls are already there" - they slid up at 0.95-1.3 s); the entering sound (a door, a car's door, steps on a deck, a hatch); the
-            object takes your weight - a vehicle dips on its springs / in the water (susKick, susY), a home's windows light up
-            and its stove's chimney puffs; the other arrows pop back, the old one's now white and bouncing;
+            object takes your weight - a vehicle dips on its springs / in the water (susKick, susY), a home's stove's
+            chimney puffs (its windows lit only by the hour's own rule - no flash, user Nov 22 11:23); the other arrows pop back, the old one's now white and bouncing;
      ENGINE a vehicle's engine catches (the sound's starter, then the engine) - its own exhaust, funnel smoke and screw bubbles,
             the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start); the orange arrow
             fades away from here to END;
@@ -74844,13 +74844,13 @@ function drawStoryArrows() {
     for (const [t, col] of lines) { drawTextC(ug, t, X + dx, ly, col, 2, 'center', '#04070f'); ly += 16; }
     ug.globalAlpha = 1;
   }
-  if (flying && STSW.from) {                               // the orange arrow on its way: lifted, over in an arc, a fading trail
+  // (user Nov 22 11:23: "lets remove this ugly black trailing of the arrow. The arrow just moves and thats it") no trail, no stretch
+  if (flying && STSW.from) {                               // the orange arrow on its way: lifted, over in an arc
     const cur = L.find(q => q.cur), a = w(STSW.from[0], STSW.from[1]), b = cur ? w(cur.wx, cur.wy) : a, AC = ARROW_COL.cur;
     const ax = a.X, ay = a.Y - ARROW_GAP, bx = b.X, by = b.Y - ARROW_GAP, lift = Math.max(60, Math.hypot(bx - ax, by - ay) * 0.35);
     const at = u => { const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2, m = 1 - e; return [m * m * ax + 2 * m * e * (ax + bx) / 2 + e * e * bx, m * m * ay + 2 * m * e * (Math.min(ay, by) - lift) + e * e * by]; };
     const u = tS / STSW_T.LAND;
-    for (let k = 4; k >= 1; k--) { const q = at(Math.max(0, u - k * 0.06)); pxArrow(q[0], q[1], ARROW_B - 1, AC, 0, 0.12 * (5 - k)); }
-    const q = at(u); pxArrow(q[0], q[1], ARROW_B, AC, -0.25 * Math.sin(u * Math.PI));   // (stretched in flight)
+    const q = at(u); pxArrow(q[0], q[1], ARROW_B, AC);
   }
   drawMarket(w, L);
 }
@@ -74860,14 +74860,6 @@ function swapSparks(X, Y, k) {
   ug.fillStyle = k < 0.5 ? '#ffd76a' : '#ffffff'; ug.globalAlpha = 1 - k;
   for (let i = 0; i < 8; i++) { const an = i * Math.PI / 4; ug.fillRect(Math.round(X + Math.cos(an) * r - s / 2), Math.round(Y - 10 + Math.sin(an) * r * 0.7 - s / 2), s, s); }
   ug.globalAlpha = 1;
-}
-// (user Nov 22, v1292: "every time I switch between the car and lighthouse, I get those rectangles in the lighthouse light" - each pane was a flat
-// block laid over the controls' layer, the lantern's bars and all under it) a home entered: its windows lit warm - on at once, then settling to the
-// hour's own - by the windows' one rule (strLit's night, objNight: the panes' dark pixels lit, their frames and bars as painted, behind what stands in
-// front): how lit (0: not being entered)
-function swapLit(o) {
-  if (!STSW.on || STSW.oi !== o.id || STSW.t < STSW_T.LAND) return 0;
-  const t = STSW.t - STSW_T.LAND; return t < 0.12 ? t / 0.12 : clamp(1 - (t - 0.5) / 0.6, 0, 1);
 }
 
 /* ---- the entering's sound, played in one go from the swap's start, in time with the arrow (STSW_T): a soft lift as the arrow
