@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1330;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 16:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1331;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 16:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -63033,8 +63033,9 @@ fn hw(i: i32, j: i32) -> u32 { return halo[J.hpos + u32(j) * J.bw + u32(i)]; }
 // (ltDist) open air: air, and not an island's body under the water (ugInBody - flag bit 18)
 // (and not the ground behind a terrain layer - flag bit 17, layBehind: the layer meets ground there, not the air)
 fn hopen(i: i32, j: i32) -> bool { let w = hw(i, j); return (w & 7u) == 0u && (w & ((1u << 18u) | (1u << 17u))) == 0u; }
-// the air a cell's edges and rims face: air, and not the ground behind a terrain layer (bit 17); that ground itself
-fn hair(i: i32, j: i32) -> bool { let w = hw(i, j); return (w & 7u) == 0u && (w & (1u << 17u)) == 0u; }
+// the air a cell's edges and rims face: air, and not the ground behind a terrain layer (bit 17) nor a body under the water (bit 18 - an island's ground
+// stops at the water's line, its body under it is ground: no underside there - bug-20261122-151727-v1326)
+fn hair(i: i32, j: i32) -> bool { return hopen(i, j); }
 fn hback(i: i32, j: i32) -> bool { return (hw(i, j) & (1u << 17u)) != 0u; }
 // (overhangShade) the open air under an overhang as its shapes have it: each halo column's gap spans (world y, 8 at most - top, bottom; none: 1e9, -1e9)
 fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; return vec2f(bitcast<f32>(halo[o]), bitcast<f32>(halo[o + 1u])); }
@@ -63171,6 +63172,13 @@ fn matAt(si: u32, c: i32, r: i32) -> u32 {
   let S = slots[si]; if (r >= S.rB) { return M_ROCK; } if (r < S.rT) { return M_AIR; }
   let o = cellAt(si, c, r); if (o == NONE - 2u) { return M_AIR; } if (o >= BLACK) { return M_ROCK; }
   return pages[o] & 7u;
+}
+// (an underside's tests - cellCol's dn, its shelves and dark band) a cell as ground under an underside: an air cell of a body under the water (the
+// halo's bit 18 - ggUnder) is rock
+fn matU(si: u32, c: i32, r: i32) -> u32 {
+  let S = slots[si]; if (r >= S.rB) { return M_ROCK; } if (r < S.rT) { return M_AIR; }
+  let o = cellAt(si, c, r); if (o == NONE - 2u) { return M_AIR; } if (o >= BLACK) { return M_ROCK; }
+  let w = pages[o]; return select(w & 7u, M_ROCK, (w & 7u) == M_AIR && (w & (1u << 18u)) != 0u);
 }
 fn col(si: u32, c: i32, v: u32) -> vec4f { return cols[(si * 64u + u32(c - slots[si].c0)) * COLV + v]; }
 fn bv(b: u32, v: u32) -> vec4f { return FD[FD_BIO + b * BIOV + v]; }
@@ -63322,7 +63330,7 @@ fn cellCol(si: u32, c: i32, r: i32, o: u32, sp: vec2f) -> vec3f {
   let hs = select((f32(w4 & 0xffffu) + 0.5) / 65536.0, gh(c * i32(AN) + i32(spp.x * AN), r * i32(AN) + i32(spp.y * AN), 0x51u), sub);
   let C0 = col(si, c, 0u); let C1 = col(si, c, 1u); let C2 = col(si, c, 2u); let own = u32(C1.x); let cfl = u32(C1.w);
   let SEG = f32(r) < col(si, c, 6u).x; let SEAB = (cfl & 1u) != 0u && !SEG;
-  let up = select(M_AIR, matAt(si, c, r - 1), r > S.rT && f32(r) != col(si, c, 6u).x); let dn = select(M_ROCK, matAt(si, c, r + 1), r < S.rB - 1);
+  let up = select(M_AIR, matAt(si, c, r - 1), r > S.rT && f32(r) != col(si, c, 6u).x); let dn = select(M_ROCK, matU(si, c, r + 1), r < S.rB - 1);
   let tC = typeOf(si, c, r, w0); let sj = w5 & 0xffffu; let sbS = select(select(0xffffffffu, (S.sb + sj) * SW, sj != 0xffffu), subStone(si, c, r, w5, P, spp), sub);
   let hasS = sbS != 0xffffffffu; let sb0 = select(0u, sbS, hasS);
   let tt = select(tC, u32(stones[select(0u, sb0 + 2u, hasS)].y), hasS && !SEG);   // (in a stone: its middle's type - stoneTC; a segment's rows: the segment's)
@@ -63395,7 +63403,7 @@ fn cellCol(si: u32, c: i32, r: i32, o: u32, sp: vec2f) -> vec3f {
   // deeper in, under a lit shelf; or a shelf standing out along the underside (shL: a shelf's face, out of the overhang's shade; shk: after the light)
   var shk = 1.0; var shL = false;
   if (sub && AG >= AN && !SEAB && m != M_CONC && m != M_ROAD && m != M_GRASS) {
-    var k = -1; if (dn == M_AIR) { k = 0; } else if (r + 2 < S.rB && matAt(si, c, r + 2) == M_AIR) { k = 1; }
+    var k = -1; if (dn == M_AIR) { k = 0; } else if (r + 2 < S.rB && matU(si, c, r + 2) == M_AIR) { k = 1; }
     if (k >= 0) {
       let du = f32(k * NA + NA - 1 - i32(floor(spp.y * AN))); let ax = f32(c * NA + i32(floor(spp.x * AN))) + 0.5; let g = i32(floor(ax / SHELF_W));
       for (var gi = g - 1; gi <= g + 1; gi++) {
@@ -63422,7 +63430,7 @@ fn cellCol(si: u32, c: i32, r: i32, o: u32, sp: vec2f) -> vec3f {
   let ec = (d0 >> 16u) & 3u;
   if (up == M_AIR) { k2 *= select(1.22, 1.04, m == M_GRASS || m == M_CONC || m == M_ROAD || soft); }
   else if (dn == M_AIR) { k2 *= 0.62; }
-  else if (r + 3 < S.rB && (matAt(si, c, r + 2) == M_AIR || matAt(si, c, r + 3) == M_AIR) && ec == 3u) { k2 *= 1.0 - select(0.16, 0.28, matAt(si, c, r + 2) == M_AIR) * BSx.z; }
+  else if (r + 3 < S.rB && (matU(si, c, r + 2) == M_AIR || matU(si, c, r + 3) == M_AIR) && ec == 3u) { k2 *= 1.0 - select(0.16, 0.28, matU(si, c, r + 2) == M_AIR) * BSx.z; }
   if (((d1 >> 16u) & 1u) != 0u) { k2 *= select(0.85, 1.0, up == M_AIR); }
   let gq = d1 & 0xffffu;
   if (gq != 0xffffu) { let t = 1.0 - (f32(gq) / 256.0) / 72.0; let sh = 1.0 - 0.8 * t * t * (3.0 - 2.0 * t); k2 *= 1.0 - (1.0 - sh) * sstep(0.0, 4.0, depth); }
@@ -64460,7 +64468,7 @@ function ggLvJob(e, pre) {
       const hsh = hash(c * 1.37 + r * 7.91);
       u[npos + o] = (Math.min(65535, Math.floor(hsh * 65536)) | Math.min(65535, Math.floor(hash(c * 2.17 + r * 0.61) * 65536)) << 16) >>> 0;
       const sj = SR ? SR.id[o] : -1, si = sj >= 0 && Sl && Sl.sIdx ? Sl.sIdx.get(sj) : undefined;
-      u[wpos + o] = ((si === undefined ? 0xffff : si) | ggRare(c, r, m, depth, hsh, mat[(H + j + 1) * BW + x], lay[(H + j) * BW + x], sj, SR, o, r < SE) << 16) >>> 0;
+      u[wpos + o] = ((si === undefined ? 0xffff : si) | ggRare(c, r, m, depth, hsh, ggUnder(mat, u, hpos, (H + j + 1) * BW + x), lay[(H + j) * BW + x], sj, SR, o, r < SE) << 16) >>> 0;
       depth += F;
     }
   }
@@ -64526,6 +64534,17 @@ function ggPageBlock(S, i) {
   if (!open && (fr || land.ugSee)) for (let q = 0; q < 64 && !open; q++) { const c = c0 + q; if (c < land.cols && (fr ? layColHas(c, Lf) : land.ugSee[c])) for (let j = 0; j < 64; j++) { const y = LT_Y0 + (r0 + j + 0.5) * LT_CELL; if ((fr ? layUG(c, y, Lf) : ugCell(c, y)) === 0) { open = true; break; } } }   // (seen into: a layer's by its own shapes - layUG)
   return { which, fr, Lf, k, c0, r0, cap, H, BW, N, mat, lay, open };
 }
+// (bug-20261122-151727-v1326, user: "Why are there roots near water level?") an island's or a layer's body under the water is ground, never the open air
+// under an underside: the ground in front stops at the water's line there (isleSeaRow), its cells under it air with the halo's flag 18 - roots, shelves and
+// the underside's line hung from that cut into the sea. ggBodyAir: that air cell (the halo's bit 18 rule); ggUnder: a halo cell's material for an
+// underside's tests - such a cell is rock
+function ggBodyAir(c, r, which) {
+  if (c < 0 || c >= land.cols) return false;
+  const y = LT_Y0 + (r + 0.5) * LT_CELL;
+  if (which >= 2) { const own = laySpans(c, ggSetLay(which)); return !!own && layOwnBody(own, y); }
+  return ugInBody(c, y);
+}
+const ggUnder = (mat, u, hpos, i) => mat[i] === M_AIR && (u[hpos + i] & (1 << 18)) ? M_ROCK : mat[i];
 // the block's halo words from hpos in u - each cell's material and flags, what the derive reads (ggPageJob; layProbe)
 function ggPageHaloWords(S, B, u, hpos) {
   const { which, fr, Lf, c0, r0, H, BW, mat, lay } = B, gapC = fr ? null : land.gapC, seam = land.seam;
@@ -64581,7 +64600,7 @@ function ggPageJob(S, i, pre) {
     for (let j = 63; j >= 0; j--) { const m = mat[(H + j) * BW + x]; if (m === M_AIR) { down++; W1[j] = Math.min(0xffff, down); } else down = 0; }
     // (user Nov 22 09:54, the lighthouse cliff's underside in stairs: "Can these look less blocky and more like natural rock shaped?") an air cell's rows up
     // to the ground over it (its word 1's high half - the underside's smooth line finds its cell from there: the ground's fs, underAt)
-    { let up = 0; for (let j = 0; j < 64; j++) { if (mat[(H + j) * BW + x] === M_AIR) { up = up > 0 ? up + 1 : (mat[(H + j - 1) * BW + x] !== M_AIR && mat[(H + j - 1) * BW + x] != null ? 1 : 0); if (up > 0) W1[j] = (W1[j] | Math.min(0xffff, up) << 16) >>> 0; } else up = 0; } }
+    { let up = 0; for (let j = 0; j < 64; j++) { if (ggUnder(mat, u, hpos, (H + j) * BW + x) === M_AIR) { up = up > 0 ? up + 1 : (mat[(H + j - 1) * BW + x] !== M_AIR && mat[(H + j - 1) * BW + x] != null ? 1 : 0); if (up > 0) W1[j] = (W1[j] | Math.min(0xffff, up) << 16) >>> 0; } else up = 0; } }
     for (let j = 0; j < 64; j++) {
       const r = r0 + j, m = mat[(H + j) * BW + x];
       if (m === M_AIR) { depth = 0; u[ipos + j * 64 + q] = W1[j]; u[npos + j * 64 + q] = 0; u[wpos + j * 64 + q] = 0xffff; continue; }
@@ -64592,9 +64611,9 @@ function ggPageJob(S, i, pre) {
         // (user Nov 13: the one smooth line, gedgeLine - its heights at the column's sides in eighths of a cell)
         const E = gedgeLine(c, r, (cc, rr) => ggMat(cc, rr, which) !== M_AIR, (cc, rr) => Math.max(0, rr - (which ? runStart(cc, rr) : Math.max(runStart(cc, rr), splitRow(cc)))));
         w1 |= Math.min(255, Math.round(E[0] * 8)) << 16 | Math.min(255, Math.round(E[1] * 8)) << 24;
-      } else if (mat[(H + j + 1) * BW + x] === M_AIR) {   // (an underside - air under it, ground over it: the same smooth line, upside down - how far down the
+      } else if (ggUnder(mat, u, hpos, (H + j + 1) * BW + x) === M_AIR) {   // (an underside - air under it, ground over it: the same smooth line, upside down - how far down the
         // neighbours' undersides are, where they're solid just under it; the ground's fs fills the air under it to the line - underAt)
-        const sol = (cc, rr) => ggMat(cc, -rr, which) !== M_AIR, dn = (cc, rr) => { let n = 0; while (n < 255 && sol(cc, rr - n - 1)) n++; return n; };
+        const sol = (cc, rr) => ggMat(cc, -rr, which) !== M_AIR || ggBodyAir(cc, -rr, which), dn = (cc, rr) => { let n = 0; while (n < 255 && sol(cc, rr - n - 1)) n++; return n; };
         const E = gedgeLine(c, -r, sol, dn);
         w1 |= Math.min(255, Math.round(E[0] * 8)) << 16 | Math.min(255, Math.round(E[1] * 8)) << 24;
       }
@@ -64602,7 +64621,7 @@ function ggPageJob(S, i, pre) {
       const hsh = hash(c * 1.37 + r * 7.91);
       u[npos + j * 64 + q] = (Math.min(65535, Math.floor(hsh * 65536)) | Math.min(65535, Math.floor(hash(c * 2.17 + r * 0.61) * 65536)) << 16) >>> 0;
       const qi = SR && q < sw && r >= SR.r0 && r < rb ? (r - SR.r0) * sw + q : -1, sj = qi >= 0 ? SR.id[qi] : -1, si = sj >= 0 ? S.sIdx.get(sj) : undefined;
-      u[wpos + j * 64 + q] = ((si === undefined ? 0xffff : si) | ggRare(c, r, m, depth, hsh, mat[(H + j + 1) * BW + x], lay[(H + j) * BW + x], sj, SR, qi, r < SE) << 16) >>> 0;
+      u[wpos + j * 64 + q] = ((si === undefined ? 0xffff : si) | ggRare(c, r, m, depth, hsh, ggUnder(mat, u, hpos, (H + j + 1) * BW + x), lay[(H + j) * BW + x], sj, SR, qi, r < SE) << 16) >>> 0;
       depth++;
     }
   }
@@ -81010,15 +81029,16 @@ function placePress(X, Y) {
 // (user Nov 22 14:55: "just like we see the inside of the car stand, we see the inside of the fishery, the lighthouse, and the marketplace"; 15:14: "The text
 // should be inside the image ... layout and design so it looks attractive and polished"; 15:30, his drawing over the screen: "The important text is in the middle,
 // one line for each of the sentences, and then below is the area where you have options. Your current version is extremely small. It's very hard to press with
-// a finger") its kind's ROOM (STR_KINDS room - gen/showroom/interiors.py) as large as the screen takes it (a whole number k of its pixels, black round it), and
-// everything inside it, sized with it: its name on a plaque at the top of the wall; what's said in the middle on a dark glass panel - the speaker's name,
-// then each sentence on its own line, centred; its rows below, across the room's foot, as buttons side by side - big enough for a finger. No ROOM yet: the
-// same frame on black
+// a finger"; 15:46: "The frame should be the same size. The picture should stay the same size. I was talking about the text inside and how it's formatted") its
+// kind's ROOM (STR_KINDS room - gen/showroom/interiors.py) at the showroom's size (SHOW_K: a whole number k of its pixels, black round it), and everything
+// inside it: its name on a plaque at the top of the wall; what's said in the middle on a dark glass panel - the speaker's name, then each sentence on its own
+// line, centred, as large as lets every one fit its line (up to 2k); its rows below, across the room's foot, as buttons side by side - 30 of its pixels tall,
+// a finger's. No ROOM yet: the same frame on black
 const PS_ROOM = [331, 186];   // (a room's size at the showroom's pixel - every interior is cut the same)
 const placeRoom = o => { const P = img[(STR_KINDS[strIsLh(o) ? 'lighthouse' : o.k] || {}).room]; return P && P.width ? P : null; };
 // a dark glass panel: its fill, a hairline round it
-function psPanel(x, y, w, h) {
-  ug.fillStyle = 'rgba(8,11,20,0.82)'; ug.fillRect(x, y, w, h);
+function psPanel(x, y, w, h, a = 0.82) {
+  ug.fillStyle = 'rgba(8,11,20,' + a + ')'; ug.fillRect(x, y, w, h);
   ug.fillStyle = 'rgba(255,255,255,0.14)'; ug.fillRect(x, y, w, 1); ug.fillRect(x, y + h - 1, w, 1); ug.fillRect(x, y, 1, h); ug.fillRect(x + w - 1, y, 1, h);
 }
 // what they'd say there now, worked out again only when something you can change in there changed (the world is paused inside - storyFrozen)
@@ -81037,11 +81057,11 @@ function drawPlaceScreen() {
   if (key !== PS.key) { PS.key = key; PS.sel = 0; }
   PS.sel = clamp(PS.sel, 0, Math.max(0, R.length - 1));
   ug.globalAlpha = PS.a;
-  // the room: as large as fits, a whole number of its pixels
+  // the room (as the showroom's - drawShowroom): a whole number of its pixels, black round it
   const P = placeRoom(o), RW = P ? P.width : PS_ROOM[0], RH = P ? P.height : PS_ROOM[1];
-  const k = Math.max(1, Math.floor(Math.min((ubw - 16) / RW, (ubh - 16) / RH))), W = RW * k, H = RH * k, X = Math.round((ubw - W) / 2), Y = Math.round((ubh - H) / 2);
+  const k = Math.max(1, Math.floor(Math.floor(Math.min((ubw - 16) / RW, (ubh - 16) / RH)) * SHOW_K)), W = RW * k, H = RH * k, X = Math.round((ubw - W) / 2), Y = Math.round((ubh - H) / 2);
   if (P) { ug.save(); ug.imageSmoothingEnabled = false; ug.drawImage(P, X, Y, W, H); ug.restore(); }
-  const ts = k, lh = 9 * ts, m = 6 * k;
+  const ts = k, m = 6 * k;
   // its name: a plaque at the top of the wall
   const nm = storyStrName(o), ns = ts + 1, nw = textWidth(nm) * ns, pp = 3 * k;
   psPanel(Math.round(X + (W - nw) / 2 - pp), Y + m, nw + 2 * pp, 5 * ns + 2 * pp);
@@ -81053,7 +81073,7 @@ function drawPlaceScreen() {
     const bx = X + m + i * (bw + gap), pick = i === PS.sel, no = placeRowNo(o, q), lab = placeRowLabel(q), sub = no || (placeGoods(q) ? q.c + ' COIN' : '');
     psPanel(bx, by, bw, bh);
     if (pick) { ug.fillStyle = 'rgba(255,176,46,0.28)'; ug.fillRect(bx + 1, by + 1, bw - 2, bh - 2); ug.fillStyle = '#ffb02e'; ug.fillRect(bx, by + bh - k, bw, k); }
-    const s1 = fitSc(lab, ts, bw - 6 * k), s2 = sub ? fitSc(sub, ts, bw - 6 * k) : 0, th = 5 * s1 + (sub ? 4 * k + 5 * s2 : 0), ty = Math.round(by + (bh - th) / 2);
+    const s1 = fitSc(lab, 2 * ts, bw - 6 * k), s2 = sub ? fitSc(sub, ts, bw - 6 * k) : 0, th = 5 * s1 + (sub ? 4 * k + 5 * s2 : 0), ty = Math.round(by + (bh - th) / 2);
     drawText(ug, lab, Math.round(bx + bw / 2), ty, no ? '#6f7890' : pick ? '#ffffff' : '#c9d1e2', s1, 'center');
     if (sub) drawText(ug, sub, Math.round(bx + bw / 2), ty + 5 * s1 + 4 * k, no ? '#ff6a5a' : '#ffd23a', s2, 'center');
     PS.rows.push([bx, by, bw, bh]);
@@ -81064,14 +81084,23 @@ function drawPlaceScreen() {
   const Ls = s && s.open && s.at != null && here.some(q => q.id === s.at) ? sayLines(s) : placeSays(o, here);
   if (Ls.length) {
     const top = Y + m + 5 * ns + 2 * pp + 4 * k, bot = by - 4 * k, dw = W - 2 * m - 8 * k, lines = [];
-    Ls.forEach((l, i) => {
-      const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who);
-      if (i > 0 && named) lines.push(null);
-      if (named) lines.push([{ w: trText(who) + ':', col: SL_COL.who, x: 0, ww: textWidth(trText(who) + ':') * ts }]);
-      for (const ln of slLayout(trText(l.txt || ''), ts, dw)) lines.push(ln);
-    });
-    const tl = Math.round(lh * 1.15), th = lines.length * tl, ph = Math.min(bot - top, th + 8 * k), py = Math.round(top + (bot - top - ph) / 2);
-    psPanel(X + m, py, W - 2 * m, ph);
+    // (user Nov 22 15:48: "the text you made that was too small inside the box because you crammed it in the bottom ... you should use the full picture for the
+    // text") the scale: the largest (up to 3k) at which it all fits the room between its name and its buttons - every sentence starting a line of its own,
+    // wrapped only when it's wider than the room
+    const avail = bot - top - 8 * k, layout = ts => {
+      const out = [];
+      Ls.forEach((l, i) => {
+        const who = slWho(l.who), named = !!who && (i === 0 || l.who !== Ls[i - 1].who);
+        if (i > 0 && named) out.push(null);
+        if (named) out.push([{ w: trText(who) + ':', col: SL_COL.who, x: 0, ww: textWidth(trText(who) + ':') * ts }]);
+        for (const ln of slLayout(trText(l.txt || ''), ts, dw)) out.push(ln);
+      });
+      return out;
+    };
+    let ts = 3 * k, L = layout(ts); while (ts > 1 && L.length * Math.round(9 * ts * 1.15) > avail) L = layout(--ts);
+    const lh = 9 * ts; lines.push(...L);
+    const tl = Math.round(lh * 1.15), th = lines.length * tl, ph = bot - top, py = top;   // (the panel the whole middle of the room)
+    psPanel(X + m, py, W - 2 * m, ph, 0.6);   // (lighter: the room seen through it)
     let y = Math.round(py + (ph - th) / 2 + (tl - 5 * ts) / 2);
     for (const ln of lines) {
       if (ln) { const lw = ln[ln.length - 1].x + ln[ln.length - 1].ww, x0 = Math.round(X + (W - lw) / 2); for (const w of ln) drawText(ug, w.w, x0 + w.x, y, w.col, ts); }
