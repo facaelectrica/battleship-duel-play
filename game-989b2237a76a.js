@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1366;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1367;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 23 08:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71217,6 +71217,14 @@ const storyBerths = o => berthRun(o) ? dockCells(o) : Math.max(1, strSpots(o)); 
 // the middle of berth i (len: the length in metres of what stands there - a dock's run; none: one cell)
 function storySpotX(o, i, len) { const B = strBox(o), n = storyBerths(o); return B.x0 + (i + (berthRun(o) && len != null ? berthLen(len, o) : 1) / 2) * (B.x1 - B.x0) / n; }
 const vehLenM = v => storyBoatSize(v)[0] / UPM;   // (a vehicle's own length, metres)
+// (user Nov 23 07:14: "a car is seen facing forward, not sideways, so why the issue") what x - a vehicle, or a type's key - takes along lot o, metres:
+// a car at a Story PARKING stands there facing us (put away - storyCarBody), so her FRONT picture's width; anything else its own length. Every berth
+// pick, spot and fit at a lot asks this (berthPick, berthCover, storySpotX, strFits, strWhyNot, the start plan)
+function alongM(o, x) {
+  const D = typeof x === 'string' ? STR_VEHS[x] : null, car = D ? D.fam === 'car' : !!(x && x.car), art = D ? D.art : x && x.art;
+  if (car && art && o && o.k === 'parking' && STORY_WORLD) { const F = typeof tropPic === 'function' ? tropPic(art + '-front') : null; if (F && F.width) return F.width * F._m; }
+  return D || typeof x === 'string' ? strTypeLenM(x) : vehLenM(x);
+}
 // the free berth of o nearest x for something len metres long, the berths taken being U (a Set): its first, or -1
 function berthPick(o, U, len, x) {
   const n = storyBerths(o), k = berthRun(o) ? berthLen(len, o) : 1; let best = -1, bd = 1e12;
@@ -71279,15 +71287,15 @@ function storyParksAt(v) {
 // taken by another)
 // (a crane berth - craneKept, 50-zzzzz-ship-crane.js: anything but a crane ship takes it last)
 function storyFreeSpot(o, v, x) {
-  const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) { if (berthRun(o)) berthCover(o, U, j); else berthTake(o, U, j.spot, vehLenM(j)); }
+  const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) { if (berthRun(o)) berthCover(o, U, j); else berthTake(o, U, j.spot, alongM(o, j)); }
   const R = typeof craneKept === 'function' && !(typeof craneUser === 'function' && craneUser(v.sv)) ? craneKept(o) : null;
-  if (R) { const i = berthPick(o, new Set([...U, ...R]), vehLenM(v), x ?? v.x); if (i >= 0) return i; }
-  return berthPick(o, U, vehLenM(v), x ?? v.x);
+  if (R) { const i = berthPick(o, new Set([...U, ...R]), alongM(o, v), x ?? v.x); if (i >= 0) return i; }
+  return berthPick(o, U, alongM(o, v), x ?? v.x);
 }
 // a run's cells under what stands at it - where it is and its length with its gap (never by its spot's number alone: one parked before a parking was a run
 // stood over the next stall)
 function berthCover(o, U, j) {
-  const B = strBox(o), w = (B.x1 - B.x0) / storyBerths(o), h = (vehLenM(j) + (o.k === 'parking' ? PARK_GAP_M : DOCK_GAP_M)) * UPM / 2;
+  const B = strBox(o), w = (B.x1 - B.x0) / storyBerths(o), h = (alongM(o, j) + (o.k === 'parking' ? PARK_GAP_M : DOCK_GAP_M)) * UPM / 2;
   for (let c = Math.max(0, Math.floor((j.x - h - B.x0) / w)); c <= Math.min(storyBerths(o) - 1, Math.ceil((j.x + h - B.x0) / w) - 1); c++) U.add(c);
   return U;
 }
@@ -71304,7 +71312,7 @@ function storyPark(p, id) {
   const c = crew[p], v = c.mode === 'civ' ? c.civ : null, o = storyParks(v).find(q => q.id === id); if (!o) return;
   const best = storyFreeSpot(o, v);
   if (best < 0) { sound('empty', v.x); return; }                         // (every berth taken)
-  v.berth = o.id; v.spot = best; v.x = storySpotX(o, best, vehLenM(v)); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
+  v.berth = o.id; v.spot = best; v.x = storySpotX(o, best, alongM(o, v)); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
   if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
   if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); netAboard(v); storyCarryOut(v); civRelease(p); civUI[p] = true;   // (tied up: the net aboard, its catch landed into the hold - 50-story-net.js -, then carried out with you - 50-zz-story-swap.js)
@@ -73609,7 +73617,7 @@ function strWhyNot(o, sv, len) {
   if (!strAllows(o, sv)) return 'RESTRICTED';
   if (isHangarS(o) && !strFits(o, sv)) return 'TOO SMALL';
   if (typeof strDoorFits === 'function' && !strDoorFits(o, sv)) return 'DOOR TOO SMALL';   // (a garage: her front picture through its vehicle door - strFits, 50-zzzzz-place-door.js)
-  const L = len != null ? len : strTypeLenM(sv);
+  const L = len != null ? len : alongM(o, sv);   // (a car at a parking: her front's width)
   if (L != null && L > strMaxL(o) + 1e-6) return 'MAX SIZE ' + Math.floor(strMaxL(o)) + ' M < ' + Math.ceil(L) + ' M';
   return '';
 }
@@ -74707,7 +74715,7 @@ function storyStow(v, L) {
   if (!v || !L) return false;
   if (v.berth === L.id && storyParked(v)) return true;   // (put away there already)
   const sp = storyFreeSpot(L, v); if (sp < 0) return false;
-  const D = v.car && carDoorPlace(v, L.id) ? placeDoor(L) : null, x = D ? D.cx : storySpotX(L, sp, vehLenM(v));
+  const D = v.car && carDoorPlace(v, L.id) ? placeDoor(L) : null, x = D ? D.cx : storySpotX(L, sp, alongM(L, v));
   Object.assign(v, { x, vx: 0, drv: 0, vDrive: 0, cin: 0, turn: 0, berth: L.id, spot: sp, bay: 0, bayOut: 0 });
   if (v.car) { const on = strSpotOn(L, x); if (on) Object.assign(v, on); v.fr = 1; }   // (on the lot's ground, facing us - put away)
   else if (jetboats.includes(v)) { v.y = waterLv(x); v.vy = 0; }   // (a boat put away moving: afloat at her spot at once - the world is paused inside, as workVehMake's)
@@ -75182,7 +75190,7 @@ function strTypeLenM(sv) {
 }
 // (user Nov 22 11:30-11:39, every garage: put away facing us in its door - 50-zzzzz-place-door.js) a building with a vehicle door takes a car only if her
 // front picture fits its opening (strDoorFits) - one that doesn't is never put away there (the editor's lists don't offer it; it's red where it stands)
-const strFits = (o, sv) => { if (isHangarS(o) && STR_VEHS[sv] && STR_VEHS[sv].big && !o.big) return false; if (typeof strDoorFits === 'function' && !strDoorFits(o, sv)) return false; const m = strTypeLenM(sv); return m == null || m <= strMaxL(o) + 1e-6; };
+const strFits = (o, sv) => { if (isHangarS(o) && STR_VEHS[sv] && STR_VEHS[sv].big && !o.big) return false; if (typeof strDoorFits === 'function' && !strDoorFits(o, sv)) return false; const m = alongM(o, sv); return m == null || m <= strMaxL(o) + 1e-6; };
 // (a dock's length or MAX SIZE changed, a hangar's SIZE, its SPOTS) its spots as many as fit, what no longer fits taken out of them - on a slider's
 // let go: while it moves what doesn't fit is kept, shown red (spotBad - 50-zzzz-spots.js), and only what's still red when it's let go goes
 const spotFitsAt = (o, i, e) => i < strSpots(o) && strFits(o, e.v);
@@ -75783,7 +75791,7 @@ function strPick(X, Y, r) {
 const STR_STRETCH = { runway: [120, 900], road: [10, 600], dock: [6, 160], pier: [60, 900], parking: [PARK_STALL_M, 120] };   // (metres: the shortest and longest)
 // (user Nov 22 22:28: "if there's a minimum size for a parking lot just for my car, shouldn't that be the minimum size of a parking by default? Why would we
 // make it smaller?") in the Story world a PARKING is never shorter than one of your cars and its gap (berthLen: STORY > CHARACTERS > PLAYER > VEHICLE)
-const parkMinM = () => STORY_WORLD ? Math.max(PARK_STALL_M, berthLen(strTypeLenM(PLAYER_C.veh || 'suv') || 0, { k: 'parking' }) * DOCK_CELL_M) : PARK_STALL_M;
+const parkMinM = () => STORY_WORLD ? Math.max(PARK_STALL_M, berthLen(alongM({ k: 'parking' }, PLAYER_C.veh || 'suv') || 0, { k: 'parking' }) * DOCK_CELL_M) : PARK_STALL_M;
 const strStretchOf = o => { const S = o ? STR_STRETCH[isPierS(o) ? 'pier' : o.k] || null : null; return S && o.k === 'parking' ? [parkMinM(), S[1]] : S; };
 // the ends that stretch: both, a pier its sea end only (away from its land end)
 const strStretchEnds = o => { if (!isPierS(o)) return [-1, 1]; const B = strBox(o), E = pierLandEnd(o); return [Math.abs(B.x0 - E) > Math.abs(B.x1 - E) ? -1 : 1]; };
@@ -78312,7 +78320,7 @@ function dockBerth(v, half) {
   if (v.story && jetboats.includes(v) && typeof storyParksAt === 'function') {
     const L = storyParksAt(v).filter(o => (o.k === 'dock' || (typeof isPierS === 'function' && isPierS(o))) && (B => !!drDockAt((B.x0 + B.x1) / 2, B.x1 - B.x0))(strBox(o)));   // (by one - within STORY_PARK_M, as by any structure)
     let best = null, bd = Infinity;
-    for (const o of L) { const i = storyFreeSpot(o, v); if (i < 0) continue; const x = storySpotX(o, i, vehLenM(v)), d = Math.abs(x - v.x); if (d < bd) { bd = d; best = { x, o: o.id }; } }
+    for (const o of L) { const i = storyFreeSpot(o, v); if (i < 0) continue; const x = storySpotX(o, i, alongM(o, v)), d = Math.abs(x - v.x); if (d < bd) { bd = d; best = { x, o: o.id }; } }
     return best;
   }
   const D = drDockAt(v.x, half + DK_NEAR); if (!D) return null;
@@ -82123,7 +82131,7 @@ function folkGo(v, x, park, fish, at, near) {   // (near: tied up at the free sp
   if (!doorLeave(v, x - v.x)) { v.bay = 0; v.bayOut = 0; }                // (in her garage, or in a place's door: its gate up first - 50-zzzzz-place-door.js)
   if (v.berth != null) { v.berth = null; v.spot = null; }
   const G = park && carDoorPlace(v, park.id), D = G && placeDoor(G), gx = D ? D.cx : null;   // (going to put it away in a garage: to its door's middle - folkTie)
-  const to = park || at; FOLK.v[v.sid] = { x: G ? gx : park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v, near)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
+  const to = park || at; FOLK.v[v.sid] = { x: G ? gx : park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v, near)), alongM(park, v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
@@ -82132,7 +82140,7 @@ function folkTie(v, T) {
   const sp = storyFreeSpot(o, v); if (sp < 0) return;
   v.berth = o.id; v.spot = sp;
   if (carDoorPlace(v, o.id)) { doorIn(v, o); return; }   // (her garage: put away facing us in its door - 50-zzzzz-place-door.js)
-  v.x = storySpotX(o, sp, vehLenM(v));
+  v.x = storySpotX(o, sp, alongM(o, v));
 }
 /* (user Nov 20 00:55: "you should be able to also carry the fish from the boat to the car ... the same universal system for all characters")
    GOODS GO WITH WHOEVER STEPS OUT: out of a vehicle, what it holds is carried - a character's in hand (S.carry: { good: n }), the player's in
@@ -83906,7 +83914,7 @@ function workVehMake(W, who, sv = W.wv, tag = { wk: W.id }) {
   else v = storyCarMade({ sid, own: mine, sv, art: D.art, berth: null, spot: 0, hb: null, hs: null, x: W.x, dir: -dir });
   Object.assign(v, tag, { wfor: who }); if (!mine) v.fac = who;   // (its character's: theirs to drive, stolen from them as anything of theirs - vehOwnerVal)
   const P = workSpot(W, v, D.fam); if (!P) return null;
-  const [o, s] = P; v.berth = o.id; v.spot = s; v.x = storySpotX(o, s, vehLenM(v)); const on = strSpotOn(o, v.x); if (on) Object.assign(v, on);
+  const [o, s] = P; v.berth = o.id; v.spot = s; v.x = storySpotX(o, s, alongM(o, v)); const on = strSpotOn(o, v.x); if (on) Object.assign(v, on);
   if (D.fam === 'boat') v.y = waterLv(v.x);   // (afloat at her spot as she's made - newJetboat's rule; she wasn't made there)
   else v.fr = 1;   // (user Nov 22 16:40: "Why isn't the player car parked facing forward when the game starts?" - put away as she's made: facing us, as storyCarBody turns any car berthed with nobody at her wheel - the world may be paused, a story starting inside its lighthouse)
   if (D.fam === 'boat') jetboats.addRow(v); else storyCars.addRow(v);
@@ -84260,7 +84268,7 @@ function assignPlan() {
     const L = lotsFor(from, sv, D.fam, W);
     for (const o of L) {
       const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
-      const len = strTypeLenM(sv), R = craneUser(sv) ? null : craneKept(o);   // (a crane berth taken last - anything but a crane ship: craneKept)
+      const len = alongM(o, sv), R = craneUser(sv) ? null : craneKept(o);   // (a crane berth taken last - anything but a crane ship: craneKept)
       let best = R ? berthPick(o, new Set([...U, ...R]), len, from.x) : -1; if (best < 0) best = berthPick(o, U, len, from.x);   // (a dock: by its own length - berthPick)
       if (best >= 0) { berthTake(o, U, best, len); if (NC && !craneUser(sv)) berthTake(o, NC.get(o.id) || NC.set(o.id, new Set()).get(o.id), best, len); return [o, best]; }
     }
@@ -84339,7 +84347,7 @@ function assignEdDraw(o, X0, X1, Y0, q) {
       if (lab) drawText(C, lab, ix - gap - textWidth(lab) * q, y + (Math.max(h, 7 * q) >> 1) - 3 * q, e.red ? [255, 120, 110] : [150, 220, 255], q, 'left');
       y -= gap; continue;
     }
-    const x = storySpotX(o, e.s, strTypeLenM(e.sv)), wet = (STR_KINDS[o.k] || {}).water, on = !wet && strSpotOn(o, x);   // (afloat at a dock: its water's level, not its layer's ground)
+    const x = storySpotX(o, e.s, alongM(o, e.sv)), wet = (STR_KINDS[o.k] || {}).water, on = !wet && strSpotOn(o, x);   // (afloat at a dock: its water's level, not its layer's ground)
     const by = on ? PY(on.y) : wet ? PY(waterLv(clamp(x, 0, WORLD_W - 1))) + h * 0.3 : PY(B.foot);
     const ix = Math.round(PX(x) - w / 2), iy = Math.round(by - h);
     one(e, ix, iy, w, h, P, o.flip);
