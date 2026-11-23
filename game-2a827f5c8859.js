@@ -13139,7 +13139,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1339;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 21:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 22 21:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71613,6 +71613,7 @@ function drawStoryBanner() {
   storyBannerTop(); drawStoryObj();   // (the objective at the top - 50-zzzzz-story-lines.js)
   if (!slSayUp()) drawPhone(); drawShowroom();   // (the phone - 50-zzzzz-story-signup.js - none while a line is on screen, user Nov 22 11:22: "There should be no phone during the cutscene"; a CAR STAND's showroom - 50-zzzzz-car-stand.js)
   drawPlaceScreen();   // (inside a place: its screen over the world - 50-zzzzz-place-screen.js)
+  if (placeShown() || standIn()) drawStoryHave(undefined, placeShown() ? placeCame() : null);   // (what you have, still in view over it)
   drawStorySay();   // (a line on screen: over everything of the game's - 50-zzzzz-story-lines.js)
 }
 // (user Nov 2 14:58: "on the top right you should have Current Day, Coins, Current Object you are controlling") under the frame
@@ -71621,11 +71622,20 @@ function storyBannerTop() {
   const y = hudTop() + 12, R = uvw - 16, cur = storyTargets().find(q => q.cur);
   drawStoryDamaged(y - 18);
   // (Nov 7: under the corner's REPORT / version / FPS - drawFps; what the player carries under the coins - story.inv)
+  const yy = drawStoryHave(y);
+  if (cur) drawTextC(ug, cur.name, R, yy + 2, '#ffb02e', 2, 'right', '#04070f');
+}
+// the day, your coins and what you carry, top right (returns the y under them) - also over a place's screen and a stand's showroom (user Nov 22 20:36:
+// "When you are in a building, we should still see what the player has, how many coins, how much medicine, etc. So you can see what happens when you give
+// medicine or when you sell fish")
+// (inside: what the vehicle you came in carries too - the catch you're selling is in the boat's hold, not on you)
+function drawStoryHave(y = hudTop() + 12, V = null) {
+  const R = uvw - 16, N = k => storyInvN(k) + (V ? cargoN(V, k) : 0);
   drawTextC(ug, 'DAY ' + (W.day || 1), R, y + 70, '#ffffff', 2, 'right', '#04070f');   // (the countdown: under the objective - drawGoalWatch, 50-zzzzz-story-goals.js)
   drawTextC(ug, '$ ' + story.coins, R, y + 90, '#ffd23a', 2, 'right', '#04070f', 3);   // (the coin and your coins - drawTextC)
   let yy = y + 110;
-  for (const [k, lab] of CARGO_KINDS) { const n = storyInvN(k); if (n > 0 || (k === 'medicine' && cargoInv(k))) { drawTextC(ug, lab + ' ' + n, R, yy, '#9dff8a', 2, 'right', '#04070f'); yy += 20; } }
-  if (cur) drawTextC(ug, cur.name, R, yy + 2, '#ffb02e', 2, 'right', '#04070f');
+  for (const [k, lab] of CARGO_KINDS) { const n = N(k); if (n > 0 || (k === 'medicine' && cargoInv(k))) { drawTextC(ug, lab + ' ' + n, R, yy, '#9dff8a', 2, 'right', '#04070f'); yy += 20; } }
+  return yy;
 }
 // the air-raid siren: a hand-cranked wail, rising and falling twice
 function sfxSiren() {
