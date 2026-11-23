@@ -5899,7 +5899,7 @@ const VEH_REC = ['num: lost _hu _orph'];
 // a battleship: her side (id, fac), where and how she moves, her helm and engine (throttle, input), docked, berthed, moored, away from
 // home, her sections' state (lvl, fire, chip, dead, emit, fireAcc, dent - SECTIONS each), her burns, her guns' recoil, going down
 // (sinkT), mended (repairing, weld, fixIdx), her harbour (dock) and its gate, the autopilot, her smoke screen (smk)
-const ships = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy a w facing throttle throttleRate input docked bubbleAcc foamAcc bowAcc wakeAcc sinkT muzzle repairing weld dx tilt berthed moored away x0 fixIdx scareT',
+const ships = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy a w facing throttle throttleRate input docked bubbleAcc foamAcc bowAcc wakeAcc sinkT muzzle repairing weld dx tilt berthed moored away x0 fixIdx',
   'txt: state', 'val: dock lvl fire chip dead emit fireAcc dent scorch recoil gate auto smk turn dir gun recoilT recoilDir wet smokeAcc darkT breakAt zap kind', ...CIV_REC));
 // each side's own hull of each family: a row a side (0, 1), its row of each family's table (0: none)
 const sideOwn = new ColTable({ sd: 'id', ship: 'ref ships', sub: 'ref subs', plane: 'ref planes', tank: 'ref tanks', heli: 'ref helis' });
@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1358;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1359;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17842,8 +17842,7 @@ function subRepair(sb, dt) {
 }
 function stepSubWreck(sb, dt) {
   sb.sinkT += dt;
-  sb.scareT = (sb.scareT || 0) - dt;
-  if (sb.scareT <= 0 && sb.sinkT < 20) { sb.scareT = 0.4; const q = (sb.parts && sb.parts[0]) || sb; emit('scare', { x: q.x, y: q.y, r: SUB_L * 1.1, kind: 'fish' }); }
+  // (the fish keep clear of her going down: anything sinking is a threat - seaSinkers, 36-sea-storm-weather.js)
   let all = true;
   for (const q of sb.parts || []) {
     if (q.rest) {
@@ -22759,8 +22758,7 @@ function stepPiece(p, dt) {
 
 function stepSinkingShip(sh, dt) {
   sh.sinkT += dt;
-  sh.scareT = (sh.scareT || 0) - dt;
-  if (sh.scareT <= 0) { sh.scareT = 0.4; emit('scare', { x: sh.x, y: sh.y + 40, r: SHIP_L * 1.2, kind: 'fish' }); }    // the fish keep clear of a ship going down
+  // (the fish keep clear of a ship going down: anything sinking is a threat - seaSinkers, 36-sea-storm-weather.js)
   let sx = 0, n = 0;
   for (const p of pieces) if (p.owner === sh.id && p.gen === undefined) { sx += p.x; n++; }
   if (n) sh.x = sx / n;
@@ -23430,7 +23428,25 @@ function seaThreats() {
   for (const sb of subs) if (sb && (sb.state === 'out' || sb.state === 'docked') && !inHarbour(sb)) T.push(sb.x, sb.y, 110, 1, sb.vx || 0);
   { const P = torps.c; for (let i = 0; i < torps.n; i++) if (!P.spent[i]) T.push(P.x[i], P.y[i], 70, 0.8, P.vx[i] || 0); }   // (the torpedoes: a column table - 27-torpedoes.js)
   for (const k of sharks) T.push(k.x, k.y, 90, 0.5, k.dir * k.speed);
+  seaSinkers(T);
   return T;
+}
+/* (user Nov 22 21:49: "when a vehicle sinks, fish should move away scared from it. In fact, when anything is sinking, fish should move away scared") ANYTHING
+   GOING DOWN IN THE WATER IS A THREAT, one rule: every family's vehicle in its sinking state ('sink' / 'sinking' - a battleship, a sub, a yacht, a buoy, a Story
+   car or boat, a liner, a helicopter, a balloon, a blimp, a seaplane, an airliner, a tank, the space craft and junk) and a container falling through the
+   water - the fish round it flee as from a boat (stepSchool), as far as its size (its box - vehBox) and a margin. A new family that sinks joins SINK_LISTS. */
+const SINK_LISTS = () => [ships, subs, sailboats, buoys, storyCars, jetboats, civShips, civHelis, balloons, blimps, seaplanes, traffic, tanks, helis, typeof shuttles !== 'undefined' ? shuttles : [], typeof spaceJunk !== 'undefined' ? spaceJunk : []];
+function seaSinkers(T) {
+  for (const L of SINK_LISTS()) for (const o of L) {
+    if (!o || (o.state !== 'sink' && o.state !== 'sinking')) continue;
+    const B = vehBox({ v: o }); if (!B || !Number.isFinite(B[0])) continue;
+    const r = clamp((B[1] - B[0]) * 0.6, 40, 400) + 70;
+    for (const q of o.parts && o.parts.length ? o.parts : [null]) {   // (broken in pieces - a sub's halves: each)
+      const x = q ? q.x : (B[0] + B[1]) / 2, y = q ? q.y : (B[2] + B[3]) / 2; if (y < waterLv(x) - 4) continue;   // (still over the water: not going down in it yet)
+      T.push(x, y, q ? r * 0.7 : r, 1, (q || o).vx || 0);
+    }
+  }
+  for (const k of containers) if (k.where === 'free' && k.inWater && (k.vy || 0) > 1) T.push(k.x, k.y, contW(k) * 0.6 + 70, 1, k.vx || 0);
 }
 function stepSea(dt) {
   stepWeedBits(dt);
@@ -82878,7 +82894,7 @@ function slLayout(txt, sc, W) {
 }
 function drawStorySay() {
   if (!STORY || ui.title) return false;
-  const s = story.say, up = slSayUp(), fly = SAY.fly >= 0 ? time - SAY.fly : -1;
+  const s = story.say, up = slSayUp(), fly = SAY.fly >= 0 ? slNow() - SAY.fly : -1;
   if (!up && (fly < 0 || fly > 0.9)) { SAY.fly = -1; return false; }
   const Ls = up ? sayLines(s) : SAY.L || [], sc = ubw < 420 ? 2 : 3, W = Math.min(ubw - 40, 150 * sc * 2), lh = 9 * sc, nsc = Math.max(1, sc - 1);
   // (user Nov 22, his model: one block, left-aligned and centred as a whole - the speaker's name with ':' on its own line over
@@ -82907,7 +82923,7 @@ function drawStorySay() {
   return up;
 }
 // read it: this screen lets go of it, the simulation hears it (storySaid)
-function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid', storySlot != null ? 1 : 0); sound('click', 0); return true; }
+function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = slNow(); OBJFLY.t = slNow(); act(0, 'storySaid', storySlot != null ? 1 : 0); sound('click', 0); return true; }
 // a line just put up: when it started (its fade in)
 function slSayWatch() { if (slSayUp() && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }   // (its fade in from when it's shown - storyFramed)
 window.addEventListener('pointerdown', ev => { if (!slSayUp() || smapOwns(ev)) return; slSayNext();   /* (a press on the STORY MAP is the map's - 1243 a line up ate them) */ ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
@@ -82920,10 +82936,13 @@ window.addEventListener('keydown', ev => {
 // ---- the objective at the top: the destination (orange), what to do (white) under it, an arrow the way to go; after a line
 // is read, the pair flies up from the middle of the screen (OBJFLY)
 const OBJFLY = { t: -9 };
+// (user Nov 22 21:50, bug-20261122-214933-v1353: after dying and reloading, the objective stuck in the middle of the screen) the line's and the objective's
+// flight are this screen's presentation, timed by its own clock - never the game's (time goes back to the checkpoint's on a reload: they never moved)
+const slNow = () => performance.now() / 1000;
 function drawStoryObj() {
   if (slSayWaits()) return;   // (a line to say first: the objective flies up from it once read)
   const W = slObjWords(story.obj); if (!W) { drawGoalWatch(hudTop() + 14); return; }   // (the countdown always on - under the objective, or alone at the top)
-  const y = hudTop() + 14, cx = Math.round(uvw / 2), k = clamp((time - OBJFLY.t) / 0.7, 0, 1), e = 1 - Math.pow(1 - k, 3);
+  const y = hudTop() + 14, cx = Math.round(uvw / 2), k = clamp((slNow() - OBJFLY.t) / 0.7, 0, 1), e = 1 - Math.pow(1 - k, 3);
   const yy = Math.round(ubh / 2 + (y - ubh / 2) * e), sc = 3 - Math.round(e);
   const dest = trText(W.dest), what = trText(W.what);
   drawTextC(ug, dest, cx, yy, SL_COL.place, sc, 'center', '#04070f');
