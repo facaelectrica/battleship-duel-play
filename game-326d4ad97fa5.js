@@ -13138,7 +13138,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1338;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 1339;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'NOV 22 21:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -37851,9 +37851,11 @@ const FSH = (() => {
   for (let row = 0; row < 14; row++) for (let k = 0; k < 18; k++) { dusk[row * 36 + k * 2] = hash(row * 3.1 + k * 11.9); dusk[row * 36 + k * 2 + 1] = hash(k * 5.3 + row); }
   return { night, dusk };
 })();
+// (bug-20261122-203350-v1335, user: "At night, I'm seeing these floating blue lines above the water") the detail is the far water's: only from its horizon
+// down (hz - HZ_Y: close up only ~6 over the waterline, so its rows from WATER_Y - 20 stood in the sky over the horizon)
 function drawFarSeaDetail() {
   const ss = E.sunset, nt = E.night * (1 - E.fog), fg = E.fog;
-  const hb = PY(WATER_Y + 26);
+  const hb = PY(WATER_Y + 26), hz = PY(HZ_Y());
   if (nt > 0.05) {
     // night: long broken streaks across the sea
     // (user Nov 9 15:04, "Same for the sun/moon reflection, it's getting cut off": on down past its 16 rows to the deepest trough - seaFootY -
@@ -37861,6 +37863,7 @@ function drawFarSeaDetail() {
     for (let row = 0; row < 400; row++) {
       const wy = WATER_Y - 20 + row * 3, py = PY(wy);
       if (py > hb && (row < 16 || wy > SEA_FOOT_Y)) break;
+      if (py <= hz) continue;
       const R = row % 16, u = Math.min(1, row / 16), c = mix3([46, 128, 206], [30, 70, 160], u), a = nt * 0.8;   // (one colour a row: made once, not per streak)
       for (let k = 0; k < 10; k++) {
         const x = (FSH.night[R * 20 + k * 2] * (VWP + 200) + time * (3 + row) * (row % 2 ? 1 : -1)) % (VWP + 200) - 100;
@@ -37875,6 +37878,7 @@ function drawFarSeaDetail() {
     for (let row = 0; row < 400; row++) {   // (on down to the deepest trough as the night's - seaFootY)
       const wy = WATER_Y - 20 + row * 3.2, py = PY(wy);
       if (py > hb && (row < 14 || wy > SEA_FOOT_Y)) break;
+      if (py <= hz) continue;
       const R = row % 14, u = Math.min(1, row / 14), c = mix3([238, 150, 168], [150, 120, 190], u), a = ss * 0.9;
       for (let k = 0; k < 18; k++) {
         const h = hash(row * 31.7 + k * 7.3 + Math.floor((tick + row) / 3) * 0.13);
@@ -37887,9 +37891,9 @@ function drawFarSeaDetail() {
   }
   if (ss < 0.95 && nt < 0.95) {
     const k = (1 - ss) * (1 - nt) * (1 - fg);   // (the glitter fades with the dusk, the night and the fog)
-    drawSparkles(0.38, 7, WATER_Y - 19, 8, 0.85 * k);
-    drawSparkles(0.62, 5, WATER_Y - 11, 22, k);
-    if (SEA_FOOT_Y > WATER_Y + 14) drawSparkles(0.62, 5, WATER_Y + 11, 60, k);   // (a wave's trough: the glitter on down into it - seaFootY)
+    drawSparkles(0.38, 7, WATER_Y - 19, 8, 0.85 * k, hz);
+    drawSparkles(0.62, 5, WATER_Y - 11, 22, k, hz);
+    if (SEA_FOOT_Y > WATER_Y + 14) drawSparkles(0.62, 5, WATER_Y + 11, 60, k, hz);   // (a wave's trough: the glitter on down into it - seaFootY)
   }
 
   const mx = skyLightAt(true)[0], sx = skyLightAt(false)[0];   // (the sky's reflection - frameShared('sky.reflection'), 44-shadows-seafloor.js)
@@ -38576,7 +38580,7 @@ function spkNext(th, ph, f) {
   else return -Infinity;
   return (thn - ph) / f - 1e-6;
 }
-function drawSparkles(p, cell, yTop, yRange, alpha) {
+function drawSparkles(p, cell, yTop, yRange, alpha, hz) {   // (hz: the far water's horizon on screen - nothing over it)
   const L = { p, q: 0.55 + (p - 0.38) * 1.5 }, Sl = layerScale(L.q);
   const c0 = Math.floor(layerX(0, L, Sl) / cell) - 1, c1 = Math.ceil(layerX(VWP, L, Sl) / cell) + 1;
   const a0 = alpha * (0.25 + 0.75 * E.light);
@@ -38589,7 +38593,7 @@ function drawSparkles(p, cell, yTop, yRange, alpha) {
     if (tw < 0.45) { ON[i] = spkNext(th, PH[i], F[i]); continue; }
     const h2 = H2[i];
     const x = Math.round(layerPivX + Sl * (XO[i] - pr)), y = PY(WY[i]);
-    if (x >= VWP - SHX || x < -SHX - 2 || y < -SHY || y >= bh - SHY) continue;     // (off this view: nothing to paint)
+    if (x >= VWP - SHX || x < -SHX - 2 || y < -SHY || y >= bh - SHY || y <= hz) continue;     // (off this view, or over the horizon: nothing to paint)
     wrFill(x, y + midRowDy(x, y), h2 > 0.6 ? 2 : 1, 1, SPK_W, a0 * (tw - 0.45) / 0.55);   // (riding the middle sea's swells in a big sea - midRowDy, 42-render-sky.js; the far sea's rectangles - waterRects)
   }
 }
