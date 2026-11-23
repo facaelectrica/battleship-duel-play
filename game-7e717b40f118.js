@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1361;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1362;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -55484,7 +55484,7 @@ function spPlan(s, dt) {
     const toH = (s.home - s.x) * -s.out;                                  // (how far it still has to come)
     // (coming down to land: a steady glide - one in six - down to the water a good way short of its harbour, so it has slowed on the
     // water before it gets there: Nov 2, it keeps its speed when it touches now)
-    if (toH < 3200) { const yT = WATER_Y + 25 - Math.max(0, Math.min(WATER_Y + 25 - ai.alt, (toH - 900) / 6)); return [0, clamp((yT - s.y) / 90, -1, 0.75)]; }   // (aimed a little under the water, so it does touch - never floating on into its harbour)
+    if (toH < 3200) { const wl = waterLv(s.home), yT = wl + 25 - Math.max(0, Math.min(wl + 25 - ai.alt, (toH - 900) / 6));   /* (its harbour's own water, at its level - rules 4: every water is the ocean) */ return [0, clamp((yT - s.y) / 90, -1, 0.75)]; }   // (aimed a little under the water, so it does touch - never floating on into its harbour)
     // (user Oct 28: back from a lake in the other country it starts this side of the sea: turned for home, and clear of
     // the land on its way - spHold - as on any trip over the land)
     spFace(s, -s.out);
@@ -72270,10 +72270,14 @@ function strDoesLine(o) {
   return L.length ? L.join(' · ') : 'NOTHING';
 }
 // your vehicles at rest by a market (or by a structure touching it) - the one you're in too, once it's stopped
+// (rules 4, user Nov 22 21:40: goods at a place with rollers go aboard a ship with a hold "Always the crane" - the characters' rule, folkPlan / folkCrane) the
+// same for you (every character by the same rules): at a place with rollers, a vehicle with a hold is loaded and emptied only by a crane - never from a
+// place's screen (BUY into her, SELL or GIVE out of her: marketBuyer, marketSellers, stOffer)
+const holdByCrane = (v, o) => !!o && !!vehHoldOf(v) && placeRolls(o);
 function marketSellers(o) {
   const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, cur = storyCur();
   return storyVehs().filter(v => {
-    if (!storyYours(v) || !marketBuys(o).some(k => cargoN(v, k) > 0)) return false;   // (yours, or one you've taken - your family's: 50-zzzzz-story-folk.js; with something it buys)
+    if (!storyYours(v) || holdByCrane(v, o) || !marketBuys(o).some(k => cargoN(v, k) > 0)) return false;   // (yours, or one you've taken - your family's: 50-zzzzz-story-folk.js; with something it buys)
     if (v.driven != null && !(cur && cur.v === v && storyStill(v))) return false;
     const [a, b] = vehBox({ v }); return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; });
   });
@@ -72303,7 +72307,7 @@ const placeGoods = q => q.do === 'buy' || q.do === 'sell';
 // what you buy goes to you (a PLAYER INVENTORY kind) or into the vehicle of yours you came in, put away by the market
 function marketBuyer(o, k) {
   if (cargoInv(k)) return 'inv';
-  const cur = storyCur(), v = (cur && cur.v) || placeCame(); if (!v || !storyYours(v) || !storyStill(v)) return null;   // (in a place: the vehicle you came in, parked at its lot - 50-zzzzz-place-screen.js)
+  const cur = storyCur(), v = (cur && cur.v) || placeCame(); if (!v || !storyYours(v) || !storyStill(v) || holdByCrane(v, o)) return null;   // (in a place: the vehicle you came in, parked at its lot - 50-zzzzz-place-screen.js)
   const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, [a, b] = vehBox({ v });
   return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; }) ? v : null;
 }
@@ -73594,12 +73598,13 @@ function placedNotParked(v) {
 }
 /* (user Nov 20 21:57: the cargo ship by a PIER said NEEDS A DOCK - "it doesn't seem to care about that") why a structure doesn't take a vehicle of
    type sv (len: its length in metres - a vehicle's own, else its type's), or '': the same tests as storyParksAt / workTakes, in their order - it
-   takes its family, its RESTRICT, a hangar's SIZE, its design's MAX SIZE. One rule for every place that offers a structure (strWhyNot) */
+   takes its family, its RESTRICT, a hangar's SIZE, a garage's door, its design's MAX SIZE. One rule for every place that offers a structure (strWhyNot) */
 function strWhyNot(o, sv, len) {
   const D = STR_VEHS[sv], fam = D ? D.fam : null;
   if (fam && !(strTakes(o) || []).includes(fam)) return 'TAKES NO ' + fam.toUpperCase() + 'S';
   if (!strAllows(o, sv)) return 'RESTRICTED';
   if (isHangarS(o) && !strFits(o, sv)) return 'TOO SMALL';
+  if (typeof strDoorFits === 'function' && !strDoorFits(o, sv)) return 'DOOR TOO SMALL';   // (a garage: her front picture through its vehicle door - strFits, 50-zzzzz-place-door.js)
   const L = len != null ? len : strTypeLenM(sv);
   if (L != null && L > strMaxL(o) + 1e-6) return 'MAX SIZE ' + Math.floor(strMaxL(o)) + ' M < ' + Math.ceil(L) + ' M';
   return '';
@@ -75851,8 +75856,10 @@ function strPlaceBad(o) {
   if (strFree(o)) return 'OFF THE GROUND';
   { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }
   { const n = typeof lotBad === 'function' ? lotBad(o) : ''; if (n) return n; }   // (NEEDS PARKING / NEEDS DOCK - 50-zzzzz-story-work.js)
+  { const n = typeof spotBad === 'function' ? spotBad(o) : ''; if (n) return n; }   // (NO SPOT FOR ... - a vehicle that starts here with nowhere to be kept, 50-zzzzz-story-work.js)
   { const n = typeof rtBad === 'function' ? rtBad(o) : ''; if (n) return n; }   // (NEEDS A PLACE TO ... - a routine's step set on each placed one, 50-zzzzz-story-work.js)
   { const n = typeof craneDockBad === 'function' ? craneDockBad(o) : ''; if (n) return n; }   // (a ship's crane work here with no dock for it - 50-zzzzz-ship-crane.js)
+  { const n = typeof wayBad === 'function' ? wayBad(o) : ''; if (n) return n; }   // (NO FISH AREA, NO WAY TO ..., NO WAY HERE FOR ... - what its people would skip in play, 50-zzzzz-story-work.js)
   { const n = typeof assignShort === 'function' ? assignShort(o) : ''; if (n) return n; }   // (a parking too short for the vehicles it would hold - 50-zzzzz-story-work.js)   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
@@ -82058,8 +82065,10 @@ const folkJobs = c => { const S = FOLK.c[c.id]; return folkList(S && S.g ? S.g.j
 // (a structure kept over the water - a dock - counts as a way for either: a car drives its deck, a boat comes alongside)
 const folkDeck = x => strsUsed().some(o => o.k === 'dock' && (() => { const B = strBox(o); return x > B.x0 && x < B.x1; })());
 // whether vehicle v can go from a to b: a car over land all the way, a boat over water (the ends free within STORY_PARK_M)
-function folkReach(v, a, b) {
-  const lo = Math.min(a, b), hi = Math.max(a, b), r = STORY_PARK_M * UPM, st = 4 * UPM, boat = folkBoat(v);
+function folkReach(v, a, b) { return folkReachBy(folkBoat(v), a, b); }
+// (the same, by its family - a boat or not: what the editor asks of a type, wayBad - 50-zzzzz-story-work.js)
+function folkReachBy(boat, a, b) {
+  const lo = Math.min(a, b), hi = Math.max(a, b), r = STORY_PARK_M * UPM, st = 4 * UPM;
   // (user Nov 20 23:27: "KILAUEA POINT is an island. Boats are all supposed to pass islands, that the whole point??") a boat stops only where boats stop (coastAhead):
   // land that isn't an island at sea - every island at sea stands behind the water, and boats go by in front of it (isleCol)
   for (let x = lo + r; x < hi - r; x += st) { const dry = dryLand(x); if (boat ? dry && !isleCol(x) && !folkDeck(x) : !dry && !folkDeck(x)) return false; }
@@ -83790,7 +83799,7 @@ const stPays = (o, k, n, who) => stTakes(o, who, true).includes(k) ? cargoCoins(
 // what you could hand over here: [good, how many] - carried, and in your vehicles stopped by it
 function stOffer(o) {
   const ks = stTakes(o); if (!ks.length) return [];
-  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => storyYours(v) && storyStill(v) && (() => { const [a, b] = vehBox({ v }); return b > B.x0 - r && a < B.x1 + r; })());
+  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => storyYours(v) && storyStill(v) && !holdByCrane(v, o) && (() => { const [a, b] = vehBox({ v }); return b > B.x0 - r && a < B.x1 + r; })());
   return ks.map(k => [k, storyInvN(k) + V.reduce((s, v) => s + cargoN(v, k), 0), V]).filter(q => q[1] > 0);
 }
 function stDeliver(p, id) {
@@ -84449,6 +84458,57 @@ function lotBox(o, el, css) {
 function rtNewId(L) { let n = 0; for (const q of L || []) { const m = q && /^j(\d+)$/.exec(q.id || ''); if (m) n = Math.max(n, +m[1]); } return 'j' + (n + 1); }
 const rtPicks = o => (Array.isArray(o.rt) ? o.rt : []).filter(J => J && rtTo(J) === 'pick');
 const rtBad = o => { if (!STORY_WORLD || !strWork(o)) return ''; const J = rtPicks(o).find(q => workAt(o, q) == null); return J ? 'NEEDS A PLACE TO ' + famStepTxt(Object.assign({}, J, { n: 0 })) : ''; };
+// (strPlaceBad) a vehicle that starts here - a resident's or a worker's own, its WORK VEHICLES - that nothing here or at its lot takes (its lot can't:
+// strWhyNot): the editor's red NO SPOT FOR over it (workLinksDraw) is its ISSUES row too - in play it's never made (workVehMake), its jobs skipped (rules 6)
+const spotBad = o => {
+  if (!STORY_WORLD) return '';
+  const no = (sv, W) => { const D = STR_VEHS[sv]; return !!D && WORK_FAMS.includes(D.fam) && !lotsFor(o, sv, D.fam, W).length; };
+  for (const c of charsAll()) if (c.veh && (c.home === o.id || c.work === o.id) && (c === PLAYER_C || !stGone(c.id)) && no(c.veh, null)) return 'NO SPOT FOR ' + (c === PLAYER_C ? 'PLAYER' : String(c.name || '').toUpperCase()) + '\'S ' + STR_VEHS[c.veh].lab;
+  if (workVehD(o) && no(o.wv, o)) return 'NO SPOT FOR ITS ' + STR_VEHS[o.wv].lab + 'S';
+  return '';
+};
+/* (strPlaceBad) WAYS (rules 4: a requirement missing is an error - user Nov 22 22:06: "if something was universal and in the rules and it was skipped
+   by mistake, can you do a check"): what the characters would skip in play for want of a way there (a 'skip' in folkPlan) is in ISSUES:
+   - a HUNT with no area of its kind placed: NO FISH AREA (the routine's panel showed it red; in play the step is dropped - workJobs);
+   - a step the place's people can't get to: on foot it must be joined to the workplace (folkHops); else its WORK VEHICLE, from where it's kept
+     (workSpotsAt), must get there - over land, or over water (folkReachBy) - to the place or to its own DOCK / PARKING for it (folkCan); a hunt only by a
+     fishing boat: NO WAY TO <the step>;
+   - a worker who can't get from home to work: joined, or one of their own or their family's vehicles from home gets there: NO WAY HERE FOR <them>.
+   Worked out again only when the structures, the ground or the characters change (WAYS.key - the reach test walks the way there) */
+const WAYS = { key: '', bad: new Map() };
+function waysPlan() {
+  const key = STR_GEN + ':' + ISL_VER + ':' + NATURE.map(a => a.id + a.k + Math.round(a.x0) + ',' + Math.round(a.x1)).join('|') + ':' + JSON.stringify(charsAll().map(c => [c.id, c.home, c.work, c.veh, c.fam]));
+  if (WAYS.key === key) return WAYS.bad;
+  WAYS.key = key; const bad = WAYS.bad = new Map();
+  const isBoat = sv => !!STR_VEHS[sv] && STR_VEHS[sv].fam === 'boat';
+  const from = (o, sv, W) => { const D = STR_VEHS[sv]; return D && WORK_FAMS.includes(D.fam) ? lotsFor(o, sv, D.fam, W)[0] || null : null; };   // (where it's kept - lotsFor, as the start plan)
+  const reach = (sv, x0, T, J) => { const b = isBoat(sv); if (folkReachBy(b, x0, T.x)) return true; if (J && RT_GOODS.includes(J.do) && T.o) { const Lt = lotOf(T.o, STR_VEHS[sv].fam); if (Lt && folkReachBy(b, x0, Lt.x)) return true; } return false; };
+  for (const W of strsUsed()) {
+    if (!strWork(W)) continue;
+    let why = '';
+    for (const J of Array.isArray(W.rt) ? W.rt : []) if (J && J.do === 'hunt' && workAt(W, J) == null) { why = 'NO ' + ((NAT_KINDS[J.k] || {}).lab || 'AREA'); break; }
+    const D = workVehD(W), S = D ? from(W, W.wv, W) : null;
+    if (!why) for (const J of workJobs(W)) {
+      if (J.at === W.id) continue;   // (done here)
+      if (J.do === 'hunt') { const a = NATURE.find(q => q.id === J.at); if (!a) continue; if (D && S && D.fam === 'boat' && D.kind === 'fish' && folkReachBy(true, S.x, (a.x0 + a.x1) / 2)) continue; why = 'NO WAY TO ' + famStepTxt(Object.assign({}, J, { n: 0 })); break; }
+      const T = slStr(J.at); if (!T) continue;
+      if (folkHops(W, T) && !(placeRolls(T) && D && D.fam === 'boat' && (PIC_BOATS[D.kind] || {}).hold)) continue;   // (on foot: joined to it - a hold's goods at rollers go by crane: craneDockBad)
+      if (D && S && reach(W.wv, S.x, { x: T.x, o: T }, J)) continue;
+      if (D && craneUser(W.wv) && placeRolls(T)) continue;   // (a crane's: its dock in reach - craneDockBad says what's missing)
+      why = 'NO WAY TO ' + famStepTxt(Object.assign({}, J, { n: 0 })); break;
+    }
+    if (!why) for (const c of workers(W)) {
+      if (c === PLAYER_C) continue;   // (you go your own way)
+      const H = stHome(c); if (!H || H === W || folkHops(H, W)) continue;
+      const own = charsAll().filter(q => q.veh && (q === c || famOf(c.id, q.id)) && (q === PLAYER_C || !stGone(q.id)));
+      if (own.some(q => { const Hq = stHome(q), P = Hq && from(Hq, q.veh, null); return !!P && reach(q.veh, P.x, { x: W.x, o: W }, null); })) continue;
+      why = 'NO WAY HERE FOR ' + String(c.name || '').toUpperCase(); break;
+    }
+    if (why) bad.set(W.id, why);
+  }
+  return bad;
+}
+const wayBad = o => STORY_WORLD && strWork(o) ? waysPlan().get(o.id) || '' : '';
 const lotBad = o => { if (!STORY_WORLD) return ''; for (const [fam] of lotNeeds(o)) if (!lotOf(o, fam)) return 'NEEDS ' + LOT_FAMS[fam]; return ''; };
 // ---- the handles: on the one picked structure, a knob for each lot it needs (P / D) over its top right - dragged onto a lot, that's its lot;
 // its lots joined to it by an orange line (strStretchDraw pushes them into SE.hnd with lk: the family)
