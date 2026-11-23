@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1364;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1365;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -75781,7 +75781,10 @@ function strPick(X, Y, r) {
    ring, a white <->, joined to its end by a short line. Dragged, that end goes with the pointer and the other stays; let go, its spots are
    laid again (dockRefit). The handles' places as drawn this frame (SE.hnd) are what a press finds. */
 const STR_STRETCH = { runway: [120, 900], road: [10, 600], dock: [6, 160], pier: [60, 900], parking: [PARK_STALL_M, 120] };   // (metres: the shortest and longest)
-const strStretchOf = o => o ? STR_STRETCH[isPierS(o) ? 'pier' : o.k] || null : null;
+// (user Nov 22 22:28: "if there's a minimum size for a parking lot just for my car, shouldn't that be the minimum size of a parking by default? Why would we
+// make it smaller?") in the Story world a PARKING is never shorter than one of your cars and its gap (berthLen: STORY > CHARACTERS > PLAYER > VEHICLE)
+const parkMinM = () => STORY_WORLD ? Math.max(PARK_STALL_M, berthLen(strTypeLenM(PLAYER_C.veh || 'suv') || 0, { k: 'parking' }) * DOCK_CELL_M) : PARK_STALL_M;
+const strStretchOf = o => { const S = o ? STR_STRETCH[isPierS(o) ? 'pier' : o.k] || null : null; return S && o.k === 'parking' ? [parkMinM(), S[1]] : S; };
 // the ends that stretch: both, a pier its sea end only (away from its land end)
 const strStretchEnds = o => { if (!isPierS(o)) return [-1, 1]; const B = strBox(o), E = pierLandEnd(o); return [Math.abs(B.x0 - E) > Math.abs(B.x1 - E) ? -1 : 1]; };
 function strStretchDraw(q) {
