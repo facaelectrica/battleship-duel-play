@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1337;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 21:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1338;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 21:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74506,8 +74506,11 @@ const boxGap = (V, B) => Math.hypot(Math.max(0, B.x0 - V[1], V[0] - B.x1), Math.
 const vehGapBox = v => { const [x0, x1, top, foot] = isPierCrane(v) ? pierCraneBox(v) : vehBox({ v }); return { x0, x1, top, foot }; };
 // where vehicle v is left to go into something here: put away already - there (storyParkedAt); a car - the nearest place close to her that takes her with room
 // (she parks herself - storyStow); anything else is put away by itself first (a boat made fast - dockLock; a plane in its hangar)
+// (user Nov 22 20:33: "Just like a car, if I get close to the fish landing with the boat, the icon should appear for me to enter. It should not have to
+// wait for me to come to a full stop.") a boat as a car: going in, she's put away at her dock by herself (storyStow) - no stopping, no making fast first
+const storySelfStows = v => !!v && (v.car || civCat(v) === 'boat');
 function storyLotHere(v) {
-  const P = storyParkedAt(v); if (P || !v.car) return P;
+  const P = storyParkedAt(v); if (P || !storySelfStows(v)) return P;
   const V = vehBox({ v }), r = STORY_FRONT_M * UPM, cat = civCat(v);
   return strsUsed().filter(o => (strTakes(o) || []).includes(cat) && strAllows(o, v.sv) && strFits(o, v.sv) && !(strWork(o) && v.wk !== o.id) && storyFreeSpot(o, v) >= 0 && boxGap(V, strBox(o)) <= r)
     .sort((a, b) => boxGap(V, strBox(a)) - boxGap(V, strBox(b)))[0] || null;
@@ -74519,7 +74522,7 @@ function storyEnterables(v) {
   for (const o of strsUsed()) {
     if (strDrivesIn(o)) continue;
     const L = storyLotFor(v, o); if (!L) continue;                                       // (its own PARKING / DOCK for her - or itself)
-    if (P !== L && !(v.car && storyFreeSpot(L, v) >= 0)) continue;                        // (no room for her there: no arrow - the editor says the lot's SPOTS SHORT)
+    if (P !== L && !(storySelfStows(v) && storyFreeSpot(L, v) >= 0)) continue;                        // (no room for her there: no arrow - the editor says the lot's SPOTS SHORT)
     const d = P === L || at.includes(o) ? 0 : Math.min(boxGap(V, strBox(o)), boxGap(V, strBox(L))); if (d > r) continue;
     if (!storyVisit(o)) continue;                                                         // (last: what's in it is worked out only for what's close)
     out.push({ o, lot: L.id, d });
@@ -74617,6 +74620,7 @@ function storyStow(v, L) {
   const D = v.car && carDoorPlace(v, L.id) ? placeDoor(L) : null, x = D ? D.cx : storySpotX(L, sp, vehLenM(v));
   Object.assign(v, { x, vx: 0, drv: 0, vDrive: 0, cin: 0, turn: 0, berth: L.id, spot: sp, bay: 0, bayOut: 0 });
   if (v.car) { const on = strSpotOn(L, x); if (on) Object.assign(v, on); v.fr = 1; }   // (on the lot's ground, facing us - put away)
+  else if (jetboats.includes(v)) { v.y = waterLv(x); v.vy = 0; }   // (a boat put away moving: afloat at her spot at once - the world is paused inside, as workVehMake's)
   return true;
 }
 // out of vehicle v, left at L (none: where it's put away now - storyLeave)
@@ -81147,7 +81151,7 @@ function drawPlaceScreen() {
   }
   ug.globalAlpha = 1;
 }
-window.__place = { rows: () => placeScreenRows(stHere()), labels: k => { const o = stHere(), was = LANG; if (k) langPick(k); const L = o ? placeScreenRows(o).map(q => trText(placeRowLabel(q, o))) : []; if (k) langPick(was); return L; }, state: PS, frozen: () => storyFrozen(), shown: () => placeShown() };
+window.__place = { targets: () => storyTargets().map(q => q.key + (q.cur ? '*' : '')), rows: () => placeScreenRows(stHere()), labels: k => { const o = stHere(), was = LANG; if (k) langPick(k); const L = o ? placeScreenRows(o).map(q => trText(placeRowLabel(q, o))) : []; if (k) langPick(was); return L; }, state: PS, frozen: () => storyFrozen(), shown: () => placeShown() };
 
 //@src 50-zzzzz-ship-crane.js:1
 /* ================================================================
