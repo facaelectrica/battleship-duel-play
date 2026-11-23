@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1357;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1358;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71246,8 +71246,11 @@ function storyParksAt(v) {
 }
 // a structure's free spot nearest the vehicle - or nearest x, where it's going to work (a ship's crane over a place's door - folkCrane) (-1: every spot
 // taken by another)
+// (a crane berth - craneKept, 50-zzzzz-ship-crane.js: anything but a crane ship takes it last)
 function storyFreeSpot(o, v, x) {
   const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) { if (berthRun(o)) berthCover(o, U, j); else berthTake(o, U, j.spot, vehLenM(j)); }
+  const R = typeof craneKept === 'function' && !(typeof boatCrane === 'function' && boatCrane(v)) ? craneKept(o) : null;
+  if (R) { const i = berthPick(o, new Set([...U, ...R]), vehLenM(v), x ?? v.x); if (i >= 0) return i; }
   return berthPick(o, U, vehLenM(v), x ?? v.x);
 }
 // a run's cells under what stands at it - where it is and its length with its gap (never by its spot's number alone: one parked before a parking was a run
@@ -81414,6 +81417,8 @@ function craneWork(j, dt) {
    a ship with a hold and no crane of her own - a pier whose crane's run covers the door (pierCraneDockOk, 50-zzzzz-pier-crane.js). Missing, the job isn't
    done (skipped, as any job with no way to it) and the place is in the editor's ISSUES (craneDockBad - strPlaceBad) */
 const craneReach = K => K.jib * UPM * 0.9;
+// a design's own crane (a ship's - PIC_BOATS' crane), else null
+const craneSv = sv => { const d = STR_VEHS[sv]; const B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; return B && B.crane ? B.crane : null; };
 // (bug-20261122-210945-v1342: her reach was measured from her middle - her crane stands a quarter of her length aft of it) a ship of len metres at x reaches
 // door dx: from her crane's post on the door's side (she lies with it toward the door - craneFace), its jib's reach
 const craneOff = (K, len) => Math.abs(K.post[0] - 0.5) * len * UPM;
@@ -81430,6 +81435,37 @@ function craneDockOk(sv, o) {
   for (const q of docks) for (let i = 0, n = storyBerths(q); i + (berthRun(q) ? berthLen(len, q) : 1) <= n; i++) if (craneReaches(B.crane, len, storySpotX(q, i, len), D.cx)) return true;
   return false;
 }
+/* (user Nov 22 21:40, his fishing boat tied up at the KAWAI dock's end - the only spots in the cargo ship's crane reach: "It should be the same rule set as we
+   do with parking spots. There should always be enough space for those ships, otherwise the dock must be bigger") THE CRANE BERTH: at a dock where a
+   workplace's crane ship works a door (her routine's COLLECT / DELIVER at a place with rollers), the berth for her nearest the door is hers - every other
+   vehicle takes it last (storyFreeSpot, assignPlan's place); the start plan counts it as a spot (assignPlan: none left for her - N SPOT(S) SHORT on the
+   dock, as a parking's) */
+const CRB = { key: '', m: new Map() };
+// the crane jobs in the world: [{ sv: her design, o: the place with rollers, W: the workplace }]
+function craneJobs() {
+  const L = []; if (!STORY_WORLD || typeof workAt !== 'function') return L;
+  for (const W of STRS) {
+    if (!W.wv || !Array.isArray(W.rt)) continue; const d = STR_VEHS[W.wv], B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; if (!B || !B.crane) continue;
+    for (const J of W.rt) { if (!J || (J.do !== 'collect' && J.do !== 'deliver')) continue; const o = strById(workAt(W, J)); if (o && placeRolls(o) && !L.some(q => q.o === o && q.sv === W.wv)) L.push({ sv: W.wv, o, W }); }
+  }
+  return L;
+}
+// each dock's crane berths: dock id -> [{ i, k, sv, o }] (the berth nearest each door it works, in reach; one a job)
+function craneBerths() {
+  const key = STR_GEN + ':' + JSON.stringify(STRS.map(o => [o.id, o.x, o.wv, o.rt, o.len])); if (CRB.key === key) return CRB.m;
+  CRB.key = key; const M = CRB.m = new Map();
+  for (const { sv, o } of craneJobs()) {
+    const D = placeDoor(o), K = PIC_BOATS[STR_VEHS[sv].kind].crane, len = strTypeLenM(sv);
+    for (const q of strsUsed()) {
+      if (!(strTakes(q) || []).includes('boat') || !strAllows(q, sv) || !strFits(q, sv)) continue;
+      const i = berthPick(q, new Set(), len, D.cx); if (i < 0 || !craneReaches(K, len, storySpotX(q, i, len), D.cx)) continue;
+      (M.get(q.id) || M.set(q.id, []).get(q.id)).push({ i, k: berthRun(q) ? berthLen(len, q) : 1, sv, o });
+    }
+  }
+  return M;
+}
+// the cells of dock q kept for crane work (a Set; null: none)
+function craneKept(q) { const L = q && craneBerths().get(q.id); if (!L) return null; const U = new Set(); for (const b of L) for (let c = b.i; c < b.i + b.k; c++) U.add(c); return U; }
 // (strPlaceBad) a place with rollers that a workplace's ship works (its routine's COLLECT / DELIVER there, its WORK VEHICLE a ship with a crane or a hold)
 // with no dock for it: NO DOCK IN CRANE REACH / NO PIER CRANE
 function craneDockBad(o) {
@@ -82133,10 +82169,14 @@ function folkPlan(c, S) {
     if (J.do === 'clockout') { if (S.g && S.g.pri === 'work' && workAgain(c, S, T.o)) return; workOut(c, S, T.o); S.j++; return; }
     // (on foot at the place or one joined to it - a COLLECT at the terminal next door, user Nov 20 23:05) what it has into their hands - loaded into the vehicle they
     // take next (folkLoad; what doesn't fit stays in hand); where its market sells it, as many as their coins pay for
-    if (J.do === 'collect') { for (const k of rtAll(J) ? goodKs() : [J.k]) { let n = rtAll(J) ? stN(T.o, k) : folkN(J, stN(T.o, k)); const buy = J.pay < 0 || folkSoldAt(Object.assign({}, J, { k })); if (buy) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(k))); S.k = (S.k || 0) - n * cargoBuyPrice(k); }
+    // (user Nov 22 21:40: a crane ship's goods "Always the crane") a COLLECT / DELIVER at a place with rollers by someone whose vehicle has a hold: never by hand -
+    // they board her and it goes through her crane or the pier's (folkCrane / folkPierCrane)
+    if ((J.do === 'collect' || J.do === 'deliver') && placeRolls(T.o) && folkVehs(c).some(q => vehHoldOf(q))) { /* (on to boarding, below) */ }
+    else if (J.do === 'collect') { for (const k of rtAll(J) ? goodKs() : [J.k]) { let n = rtAll(J) ? stN(T.o, k) : folkN(J, stN(T.o, k)); const buy = J.pay < 0 || folkSoldAt(Object.assign({}, J, { k })); if (buy) { n = Math.min(n, Math.floor((S.k || 0) / cargoBuyPrice(k))); S.k = (S.k || 0) - n * cargoBuyPrice(k); }
         if (n > 0) { stAdd(T.o, k, -n); const H = folkHand(S) || (S.carry = {}); H[k] = (H[k] || 0) + n; folkLog({ t: 'job', who: c.id, verb: buy ? 'BUY' : 'COLLECT', k, n, at: slPlaceName(T.o) }); } } S.j++; return; }
+    if (!((J.do === 'collect' || J.do === 'deliver') && placeRolls(T.o) && folkVehs(c).some(q => vehHoldOf(q)))) {
     const H = folkHand(S); if (J.do === 'deliver' && H) for (const k of rtAll(J) ? Object.keys(H) : [J.k]) if (H[k] > 0) { const n = rtAll(J) ? H[k] : folkN(J, H[k]); S.k = (S.k || 0) + (J.pay > 0 ? folkSellPay(T.o, k, n) : stPays(T.o, k, n, c.id)); stHand(T.o, k, n); H[k] -= n; folkLog({ t: 'job', who: c.id, verb: J.pay > 0 ? 'SELL' : 'DELIVER', k, n, at: slPlaceName(T.o) }); }
-    if (H && !Object.values(H).some(q => q > 0)) S.carry = null; S.j++; return; }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
+    if (H && !Object.values(H).some(q => q > 0)) S.carry = null; S.j++; return; } }   // (on foot: what they carry handed over - sold if it's a SELL; nothing to collect it in)
   // a vehicle of theirs put away here or at a place joined to it: the one that can go all the way first, else one that takes them to it
   const near = V.filter(q => q.berth != null && folkHops(P, slStr(q.berth)) && !FOLK.v[q.sid]);
   const can = q => folkCan(q, J, T);
@@ -84159,13 +84199,15 @@ function assignPlan() {
   ASG.key = key; ASG.t = time; ASG.hit.clear(); const at = ASG.at = new Map(), short = ASG.short = new Map();   // (hit: drawn again from this plan - assignEdDraw)
   const put = (o, e) => { (at.get(o.id) || at.set(o.id, []).get(o.id)).push(e); };
   // a vehicle of type sv from structure W out by joins (W: a workplace whose own it is, else null): [the structure, its spot] / [null, the first that takes it]
+  let NC = null;   // (a shift's cells taken by anything but a crane ship - the crane berths' check)
   const place = (used, from, sv, W, miss) => {
     const D = STR_VEHS[sv]; if (!D || !WORK_FAMS.includes(D.fam)) return null;
     const L = lotsFor(from, sv, D.fam, W);
     for (const o of L) {
       const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
-      const len = strTypeLenM(sv), best = berthPick(o, U, len, from.x);   // (a dock: by its own length - berthPick)
-      if (best >= 0) { berthTake(o, U, best, len); return [o, best]; }
+      const len = strTypeLenM(sv), R = craneSv(sv) ? null : craneKept(o);   // (a crane berth taken last - anything but a crane ship: craneKept)
+      let best = R ? berthPick(o, new Set([...U, ...R]), len, from.x) : -1; if (best < 0) best = berthPick(o, U, len, from.x);   // (a dock: by its own length - berthPick)
+      if (best >= 0) { berthTake(o, U, best, len); if (NC && !craneSv(sv)) berthTake(o, NC.get(o.id) || NC.set(o.id, new Set()).get(o.id), best, len); return [o, best]; }
     }
     const want = L[L.length - 1] || null; if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);   // (short: the last it could go to - its lot)
     return [null, want];
@@ -84184,7 +84226,7 @@ function assignPlan() {
       }
     }
     for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); }
-  { const used = new Map(), miss = new Map();   // (a shift: the workers at work, everyone else at home)
+  { const used = new Map(), miss = new Map(); NC = new Map();   // (a shift: the workers at work, everyone else at home)
     const at0 = c => { const W0 = workOf(c); return W0 && !strDown(W0) ? W0 : null; };
     for (const c of live) { const H = stHome(c); if (c.veh && H && !at0(c)) place(used, H, c.veh, null, miss); }
     for (const c of live) { const W0 = at0(c); if (!W0) continue; if (c.veh) place(used, W0, c.veh, null, miss); if (workVehD(W0)) place(used, W0, W0.wv, W0, miss); }
@@ -84192,7 +84234,10 @@ function assignPlan() {
     // can go into from the road (a market, a workplace, a lighthouse) still has a spot at its lot for your car - each on its own
     const cp = M => new Map([...M].map(([k, U]) => [k, new Set(U)]));
     for (const o of strsUsed()) if (strWork(o) || strIsLh(o)) place(cp(used), o, PLAYER_C.veh || 'suv', null, miss);
-    for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n));
+    // (user Nov 22 21:40: "There should always be enough space for those ships, otherwise the dock must be bigger") on a shift, every crane job still has
+    // its berth in reach of the door free at a dock (craneBerths): none left - the dock nearest the door is short a spot
+    for (const [qid, L] of craneBerths()) { const U = NC.get(qid); for (const b of L) { let free = true; if (U) for (let c = b.i; c < b.i + b.k; c++) if (U.has(c)) { free = false; break; } if (!free && ![...craneBerths()].some(([q2, L2]) => q2 !== qid && L2.some(b2 => b2.o === b.o && b2.sv === b.sv && ![...Array(b2.k).keys()].some(d => (NC.get(q2) || new Set()).has(b2.i + d))))) miss.set(qid, (miss.get(qid) || 0) + 1); } }
+    for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); NC = null;
   }
   return ASG;
 }
