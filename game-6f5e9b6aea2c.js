@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1367;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 23 08:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1368;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 23 10:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69983,7 +69983,9 @@ function drawStoryCars(x0, x1, pass, inside) {
       if (eF && eF.ok) {
         const wf = PF.width * PF._m * UPM, hf = PF.height * PF._m * UPM, W = PX(c.x + wf / 2) - PX(c.x - wf / 2), H = PY(c.y + hf) - PY(c.y);
         const clip = strMaskBox(c, w / 2), sh = roofShade(c.x - wf / 2, c.x + wf / 2, c.y - hf, c.y), fc = sh < 1 ? fx.map(v => v * sh) : fx;
-        const M = thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + carSink(c))));
+        // (user Nov 23: "When I turn on a hill, the front view of the car should be slanted just like the side view is") turned by her body's
+        // lie on the ground (c.a - landBody), about the same point as her side; her pitch (nose up / down) is along her way - not seen head-on
+        const M = thgRotate(thgTranslate(thgMat(), Math.round(PX(c.x)), Math.round(PY(c.y + carSink(c)))), c.a || 0);
         const [cov] = dmgLook(PF, dmgOf(c));
         thingsQuad(M, -W / 2, -H, W, H, eF, THG_BODY, fc, cov, null, dmgCell(PF), dmgSeed(PF), thingsLit(PX(c.x), 0), clip);
         continue;
