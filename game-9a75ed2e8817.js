@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1347;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1348;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71229,10 +71229,11 @@ function storyParksAt(v) {
   const cat = civCat(v), len = storyBoatSize(v)[0] / UPM, r = STORY_PARK_M * UPM;
   return strsUsed().filter(o => { if (!(strTakes(o) || []).includes(cat) || len > strMaxL(o) || !strAllows(o, v.sv) || !strFits(o, v.sv)) return false; const B = strBox(o); return v.x > B.x0 - r && v.x < B.x1 + r && (V => V[3] > B.top - r && V[2] < B.foot + r)(vehBox({ v })) && storyFreeSpot(o, v) >= 0; });   // (within reach up and down too - user Nov 22 00:10)
 }
-// a structure's free spot nearest the vehicle (-1: every spot taken by another)
-function storyFreeSpot(o, v) {
+// a structure's free spot nearest the vehicle - or nearest x, where it's going to work (a ship's crane over a place's door - folkCrane) (-1: every spot
+// taken by another)
+function storyFreeSpot(o, v, x) {
   const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) { if (berthRun(o)) berthCover(o, U, j); else berthTake(o, U, j.spot, vehLenM(j)); }
-  return berthPick(o, U, vehLenM(v), v.x);
+  return berthPick(o, U, vehLenM(v), x ?? v.x);
 }
 // a run's cells under what stands at it - where it is and its length with its gap (never by its spot's number alone: one parked before a parking was a run
 // stood over the next stall)
@@ -80724,7 +80725,7 @@ function folkPierCrane(c, S, v, J, T) {
   // a pier with a crane over the door: tied up there
   let cr = pierCraneFor(v, D);
   if (!cr || v.berth == null) {
-    const P = folkPark(v, D.cx, q => pierCraneOver(q, D)); if (P && P.id !== v.berth) { folkGo(v, P.x, P); return 1; }
+    const P = folkPark(v, D.cx, q => pierCraneOver(q, D)); if (P && P.id !== v.berth) { folkGo(v, P.x, P, false, null, D.cx); return 1; }   // (tied up nearest the door)
     if (!P) return craneNoDock(c, S, J, T);                             // (no pier crane over the door: the job can't be done - ISSUES: craneDockBad)
     cr = pierCraneFor(v, D); if (!cr) return craneNoDock(c, S, J, T);
   }
@@ -81370,13 +81371,20 @@ function craneWork(j, dt) {
    a ship with a hold and no crane of her own - a pier whose crane's run covers the door (pierCraneDockOk, 50-zzzzz-pier-crane.js). Missing, the job isn't
    done (skipped, as any job with no way to it) and the place is in the editor's ISSUES (craneDockBad - strPlaceBad) */
 const craneReach = K => K.jib * UPM * 0.9;
+// (bug-20261122-210945-v1342: her reach was measured from her middle - her crane stands a quarter of her length aft of it) a ship of len metres at x reaches
+// door dx: from her crane's post on the door's side (she lies with it toward the door - craneFace), its jib's reach
+const craneOff = (K, len) => Math.abs(K.post[0] - 0.5) * len * UPM;
+const craneReaches = (K, len, x, dx) => Math.max(0, Math.abs(dx - x) - craneOff(K, len)) < craneReach(K);
+// tied up to work door dx: her crane's side toward it (boatPt: the post's x is -dir x (post - 0.5) x her length from her middle)
+function craneFace(v, K, dx) { const s = Math.sign(dx - v.x) || 1; v.dir = (K.post[0] > 0.5 ? -s : s); }
 function craneNoDock(c, S, J, T) { folkLog({ t: 'skip', who: c.id, verb: J.do, at: slPlaceName(T.o) }); S.j++; return 1; }
 // can a ship of design sv tie up to work place o's rollers: true / false; null - not a ship that works rollers, or o has none
 function craneDockOk(sv, o) {
   const d = STR_VEHS[sv], B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; if (!B || !(B.crane || B.hold) || !o || !placeRolls(o)) return null;
   const D = placeDoor(o), docks = strsUsed().filter(q => (strTakes(q) || []).includes('boat') && strAllows(q, sv) && strFits(q, sv));
   if (!B.crane) return pierCraneDockOk(D, docks);
-  for (const q of docks) for (let i = 0, n = storyBerths(q); i < n; i++) if (Math.abs(storySpotX(q, i, null) - D.cx) < craneReach(B.crane)) return true;
+  const len = strTypeLenM(sv);   // (her berths as the runtime lays them: her own length with its gap - berthPick)
+  for (const q of docks) for (let i = 0, n = storyBerths(q); i + (berthRun(q) ? berthLen(len, q) : 1) <= n; i++) if (craneReaches(B.crane, len, storySpotX(q, i, len), D.cx)) return true;
   return false;
 }
 // (strPlaceBad) a place with rollers that a workplace's ship works (its routine's COLLECT / DELIVER there, its WORK VEHICLE a ship with a crane or a hold)
@@ -81400,14 +81408,17 @@ function folkCrane(c, S, v, J, T) {
     else folkLog({ t: 'job', who: c.id, verb: J.do === 'collect' ? 'CRANED ABOARD' : 'CRANED ASHORE', k: J.k, n: Q.got || 0, at: slPlaceName(T.o) });
     v.crj = null; rtStep(S, J, T.o, v, !Q.far && (J.do === 'deliver' || Q.got > 0)); return 1;   // (a COLLECT / DELIVER of every good: the next good, while one's left)
   }
-  const reach = q => Math.abs(q - D.cx) < craneReach(K);              // (a tie-up whose spot has the door in her jib's reach)
+  const reach = q => craneReaches(K, vehLenM(v), q, D.cx);           // (a tie-up whose spot has the door in her jib's reach)
   const here = v.berth != null ? slStr(v.berth) : null;
   if (!(here && reach(v.x))) {
-    const P = folkPark(v, D.cx, q => reach(storySpotX(q, Math.max(0, storyFreeSpot(q, v)), vehLenM(v))));
-    if (P && P !== here) { folkGo(v, P.x, P); return 1; }
+    // (bug-20261122-210945-v1342: a dock in reach, but her spot was the free one nearest where she was - the dock's far end, out of reach: the free spot
+    // nearest the door)
+    const P = folkPark(v, D.cx, q => { const i = storyFreeSpot(q, v, D.cx); return i >= 0 && reach(storySpotX(q, i, vehLenM(v))); });
+    if (P && P !== here) { folkGo(v, P.x, P, false, null, D.cx); return 1; }
     if (!P) return craneNoDock(c, S, J, T);                             // (nowhere to tie up in reach: the job can't be done - the editor's ISSUES says so: craneDockBad)
   }
   const n = J.do === 'collect' ? Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)) : cargoN(v, J.k), boxes = Math.ceil(n / cargoPer(J.k));
+  craneFace(v, K, D.cx);
   v.crj = FOLK_FAST || tierAt(v.x) !== 0 ? { o: T.o.id, far: 1, until: time + boxes * CRANE_LIFT_S } : { t: J.do === 'collect' ? 'load' : 'unload', k: J.k, o: T.o.id, n: J.n || 0, got: 0, ph: 0, T: 0 };
   folkLog({ t: 'job', who: c.id, verb: 'CRANE AT', k: J.k, n: boxes, at: slPlaceName(T.o) });
   return 1;
@@ -81982,12 +81993,12 @@ const folkAtPlace = (P, T) => !!T.o && folkHops(P, T.o);
 // stopped by a place: within STORY_PARK_M of it (a market's sellers' rule)
 const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
 // send vehicle v off to x, to tie up at structure park (or to a fish area; or to stop beside structure at) - its trip's lay the layer it ends on (layRoadStick)
-function folkGo(v, x, park, fish, at) {
+function folkGo(v, x, park, fish, at, near) {   // (near: tied up at the free spot nearest it - storyFreeSpot)
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
   if (!doorLeave(v, x - v.x)) { v.bay = 0; v.bayOut = 0; }                // (in her garage, or in a place's door: its gate up first - 50-zzzzz-place-door.js)
   if (v.berth != null) { v.berth = null; v.spot = null; }
   const G = park && carDoorPlace(v, park.id), D = G && placeDoor(G), gx = D ? D.cx : null;   // (going to put it away in a garage: to its door's middle - folkTie)
-  const to = park || at; FOLK.v[v.sid] = { x: G ? gx : park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
+  const to = park || at; FOLK.v[v.sid] = { x: G ? gx : park ? storySpotX(park, Math.max(0, storyFreeSpot(park, v, near)), vehLenM(v)) : x, park: park ? park.id : 0, fish: fish ? 1 : 0, away: 0 }; if (to && !folkBoat(v)) FOLK.v[v.sid].lay = to.lay || 0;
 }
 // tied up: where it was going, as the player's would be (storyPark)
 function folkTie(v, T) {
