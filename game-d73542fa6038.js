@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1339;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 21:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1340;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 21:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81108,6 +81108,18 @@ function drawPlaceScreen() {
   const nm = storyStrName(o), ns = ts + 1, nw = textWidth(nm) * ns, pp = Math.round(3 * u);
   psPanel(Math.round(X + (W - nw) / 2 - pp), Y + m, nw + 2 * pp, 5 * ns + 2 * pp);
   drawText(ug, nm, Math.round(X + W / 2), Y + m + pp, SL_COL.place, ns, 'center');
+  // what it has: its goods in the picture's top right corner, at the one size (user Nov 22 20:42: "A PLACE can show what they have on the top right corner
+  // of the picture") - so nothing about it needs saying (goalPlaceWants)
+  let hasBot = 0;
+  { const G = stGoods(o) || {}, has = CARGO_KINDS.filter(([k]) => (G[k] || 0) >= 1), S0 = PS_SC();
+    if (has.length) {
+      const sp = textWidthRaw(' ') * S0 + S0, rows = has.map(([k, lab]) => ({ lab, n: String(G[k]), wl: textWidth(lab) * S0, wn: textWidthRaw(String(G[k])) * S0 }));
+      const iw = Math.max(...rows.map(r => r.wl + sp + r.wn)), lh = 7 * S0, ph = rows.length * lh - 2 * S0 + 2 * pp, px = X + W - m - iw - 2 * pp, py = Y + m;
+      psPanel(px, py, iw + 2 * pp, ph);
+      rows.forEach((r, i) => { const y = py + pp + i * lh; drawText(ug, r.lab, px + pp, y, '#9dff8a', S0); drawText(ug, r.n, px + pp + iw - r.wn, y, '#ffffff', S0); });
+      hasBot = py + ph;
+    }
+  }
   // its rows: buttons side by side across the room's foot - their words at the one size (PS_SC), wrapped by word, never shrunk; a word
   // too wide for a button with them all on one row: fewer buttons a row (rows stacked up from the foot, a short last row centred)
   const S = PS_SC(), lp = 2 * S, bp = Math.round(3 * u), gap = Math.round(4 * u), n = Math.max(1, R.length), wrapW = (t, w) => {
@@ -81137,7 +81149,7 @@ function drawPlaceScreen() {
   const s = story.say, here = [o, ...storyLinks(o)];
   const Ls = s && s.open && s.at != null && here.some(q => q.id === s.at) ? sayLines(s) : placeSays(o, here);
   if (Ls.length) {
-    const top = Y + m + 5 * ns + 2 * pp + Math.round(4 * u), bot = by - Math.round(4 * u), dw = W - 2 * m - Math.round(8 * u), lines = [];
+    const top = Math.max(Y + m + 5 * ns + 2 * pp, hasBot) + Math.round(4 * u), bot = by - Math.round(4 * u), dw = W - 2 * m - Math.round(8 * u), lines = [];
     // (user Nov 22 15:48: "the text you made that was too small inside the box because you crammed it in the bottom ... you should use the full picture for the
     // text") the scale: the largest (up to 3u) at which it all fits the room between its name and its buttons - every sentence starting a line of its own,
     // wrapped only when it's wider than the room
@@ -82285,9 +82297,12 @@ function slWantOf(c) {
 // a place's supply lines (said where it is - slWantsAt): a market out of what it sells; any place on a family chain's supply path, for that good
 // (user Nov 21 17:33-17:36: "Why is the message about fish?" / "you're once again doing if else and exclusions") ONE RULE: a conversation is about why
 // you came - the good of your objective, at a place that deals in it (sells it or keeps it). No objective, or a place with nothing to do with it: nothing.
+// (user Nov 22 20:26: at the fish landing, bringing your catch, it said WE HAVE # FISH HERE - "It's nonsense") these lines are where a good is to be had:
+// what they say is for an objective to GET it (GO TO / COLLECT / BUY - the chain's supply path); one to bring it (HUNT, SELL, DELIVER) hears none of them
+const GOAL_GETS = { go: 1, collect: 1, buy: 1 };
 function goalPlaceWants(o) {
-  const g = story.obj, k = g && g.k; if (!k || !(strKeeps(o, k) || (strMarket(o) && marketSells(o).includes(k)))) return [];
-  const pl = goalPlaceLine(o, k); if (!pl || (pl.ph === 'stock' && g.to === 's:' + o.id)) return [];   // (what they have of what you're bringing them: beside the point - user Nov 22 20:26 "It's nonsense")
+  const g = story.obj, k = g && g.k; if (!k || !GOAL_GETS[g.do] || !(strKeeps(o, k) || (strMarket(o) && marketSells(o).includes(k)))) return [];
+  const pl = goalPlaceLine(o, k); if (!pl) return [];
   const w = OWNERS.find(c => c.work === o.id && !stGone(c.id));
   return [{ id: pl.key, key: pl.key, row: pl.ph, who: w ? w.id : -1, at: o.id, txt: goalPh(pl.ph, pl.T), d: 1e9, k, to: '', do: 'go' }];
 }
@@ -83540,7 +83555,7 @@ function stDeliver(p, id) {
   let T = null, paid = 0; const ks = [];
   for (const [k, n, V] of stOffer(o)) { const c = stPays(o, k, n, 'player'); story.coins += c; paid += c; stHand(o, k, n); if (story.inv[k]) story.inv[k] = 0; for (const v of V) cargoPut(v, k, 0); ks.push(k); if (!T) { const H = slHanded(o, k); if (H.length) T = H; } }
   sound('clink', o.x, 1);
-  for (const k of ks) slObjEv('deliver', o.id, k);   // (first: what they say next is about what you're after now)
+  for (const k of ks) { slObjEv('deliver', o.id, k); if (paid > 0) slObjEv('sell', o.id, k); }   // (first: what they say next is about what you're after now; paid for it - a SELL done too: the planner's SELL at a workplace that buys its own catch is done here, its DELIVER row)
   // (user Nov 22 20:26: "After you've collected fish and you go back to the fish landing and you give the fish, the fisherman should say, here's X
   // number of coins for the fish you brought. Right now, it just says we have x fish here. It's nonsense.") paid: whoever works there says so (PAID)
   const P = paid > 0 ? slPaid(o, ks, paid) : [], S = [...P, ...(T || [])];
