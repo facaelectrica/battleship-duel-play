@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1371;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 23 11:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1372;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 23 11:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49996,11 +49996,12 @@ function drawIslChunks(x0, x1, inLand) {
   // from the grid on the GPU (50-land-zz-grid.js), as the ground in front is: its skins, stones, smooth edge, rims in the sun, the hour's light
   ggDraw(islSlices(x0, x1).filter(k => !sliceAtSea(k) === inLand), 1);   // (a slice in a country: the land's pass)
   C.imageSmoothingEnabled = ga;
-  // each layer of islands in front of them, back to front, in their plane: its back decks and its ground (each slice in its pass, as the islands' - layAtSea);
-  // what stands on it and its plants in front of it after the back's things (drawIslLays; in a country renderLandObjects0)
-  for (const L of LI) {
-    drawLayPlants(x0, x1, L, 'back', !inLand);
-    C.imageSmoothingEnabled = false; drawLay(x0, x1, L, inLand); C.imageSmoothingEnabled = ga;
+  // each layer of islands in front of them, back to front, in their plane: its back decks and its ground (each slice in its pass, as the islands' - layAtSea).
+  // Out at sea they're drawn in its own turn after the back's things and plants (drawIslLays - user Nov 23: a car on the hill's road drawn over the bush of
+  // the layer in front of it); in a country here, behind the ground in front, what stands on it after (renderLandObjects0)
+  if (inLand) for (const L of LI) {
+    drawLayPlants(x0, x1, L, 'back', false);
+    C.imageSmoothingEnabled = false; drawLay(x0, x1, L, true); C.imageSmoothingEnabled = ga;
   }
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
@@ -50013,8 +50014,17 @@ function drawIslFront(x0, x1) {
 // (user Nov 22, a cargo terminal on a layer of islands at sunset in its daylight colours, its cliff and the lighthouse behind it dusk-dark) each layer of
 // islands' share out at sea, back to front, after the back's (drawIslStructs, drawIslFront): what stands on it - its structures, their own plants and the
 // cars among them (drawStructs' order) - then its DECK 1 and DECK 0: in its ground's pass, the same light on both (the low sun's silhouette, renderObjects)
+// (user Nov 23: "the 'deck' vegetation of the layer in front should render in front of the car" - a car on the island's hill road, the layer of islands in front
+// of it) a layer in front of what's behind it, whole: its back decks, its ground, what stands on it, its DECK 1 and DECK 0 - all after the back's things and
+// plants (drawIslStructs, drawIslFront), as each layer on the land is after the ones behind it (renderLandObjects0)
 function drawIslLays(x0, x1) {
-  for (const L of SHP.layList) { if (!layIsl(L)) continue; drawStructs(x0, x1, true, L); for (const p of [null, 'front']) drawLayPlants(x0, x1, L, p, true); }
+  const ga = C.imageSmoothingEnabled;
+  for (const L of SHP.layList) {
+    if (!layIsl(L)) continue;
+    drawLayPlants(x0, x1, L, 'back', true);
+    C.imageSmoothingEnabled = false; drawLay(x0, x1, L, false); C.imageSmoothingEnabled = ga;
+    drawStructs(x0, x1, true, L); for (const p of [null, 'front']) drawLayPlants(x0, x1, L, p, true);
+  }
 }
 // the slices holding island columns in [x0, x1], each once, in the island lines' order
 function islSlices(x0, x1) {
@@ -69565,11 +69575,12 @@ const LB = { hit: 0, on: false, roof: false, blow: 0, fallH: 0, cx: 0, cy: 0, bo
 // whatever part of it the ground struck (its wheels coming down, its nose into a slope). How much of its health full it loses now (0: none)
 // (user Nov 22 00:15, a car landing nose-first off the slope by KAWAI MARKET, unhurt: "It's good, but there should be some sparks coming out from the front
 // because it hit the road pretty fast") a knock taken on its body from a fall of KNOCK_SPARK m up, or on its wheels or tracks twice that: sparks where it struck,
-// more the harder - hurt or not. Every land vehicle (after landBody: the cars, the tank)
+// more the harder - hurt or not, and the knock of its metal on the ground heard (sound 'knock'). Every land vehicle (after landBody: the cars, the tank)
 const KNOCK_SPARK = 0.3;
 function landKnockFx(o) {
   if (!(LB.fallH > (LB.body ? KNOCK_SPARK : 2 * KNOCK_SPARK))) return;   // (on its wheels, twice as hard: it bottoms out)
   const f = Math.min(1, LB.fallH / 3); spawnSparks(LB.cx, LB.cy, Math.round(4 + 14 * f), 80 + 160 * f);
+  sound('knock', LB.cx, f);   // (user Nov 23: the metal of it hitting the ground, as loud as the sparks are many - sfxKnock)
 }
 function landHurt(T, full) {
   const h = LB.fallH, a = T.hurt ?? 1.5, b = Math.max(a + 0.1, T.fall ?? 6);
@@ -85715,6 +85726,18 @@ function sfxImpact(x) {
   noiseShot(out, t, 0.9, 'lowpass', 1200, 120, 0.8, 0.7);
   thump(out, t, 110, 45, 0.4, 0.6);
 }
+// (user Nov 23: "When your car does a jump and hits the ground and does sparks, we should hear the metal of the car hitting the ground") a vehicle's body
+// struck by the ground (landKnockFx - with its sparks, every land vehicle): the heavy thud of its weight, its panels' short dull clank, a scrape of
+// steel on the ground - amt 0..1, how hard (its fall's height)
+function sfxKnock(x, amt) {
+  if (!SFX.ctx) return;
+  const a = Math.max(0.15, Math.min(1, amt || 0)), out = sfxOut(x, 0.45 + 0.55 * a); if (!out) return;
+  const t = SFX.ctx.currentTime;
+  thump(out, t, 85 + 25 * a, 32, 0.25 + 0.25 * a, 0.55 + 0.35 * a);                        // its weight coming down
+  noiseShot(out, t, 0.12 + 0.1 * a, 'bandpass', 950 + 300 * seenR('audio'), 520, 5, 0.45 + 0.35 * a, 0.002);   // the panels' clank: sheet steel, dull
+  noiseShot(out, t + 0.03, 0.18 + 0.25 * a, 'bandpass', 2600, 1300, 2.5, 0.12 + 0.2 * a, 0.01);   // steel scraping the ground
+  noiseShot(out, t, 0.3, 'lowpass', 900, 140, 0.8, 0.35 * a);                                 // the knock's body
+}
 // a shell into the sea: a deep plunge and a falling spray
 function sfxSplash(x, amt) {
   if (!SFX.ctx) return;
@@ -85805,7 +85828,7 @@ function sfxCrash(x, amt) {
 // (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
 // own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
 // other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
-const SND = { explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, hullSlap: sfxHullSlap, waveBreak: sfxWaveBreak, crash: sfxCrash, rubble: sfxRubble,
+const SND = { explosion: sfxExplosion, impact: sfxImpact, knock: sfxKnock, tankBlow: sfxTankBlow, splash: sfxSplash, hullSlap: sfxHullSlap, waveBreak: sfxWaveBreak, crash: sfxCrash, rubble: sfxRubble,
   anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
   click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
   fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
