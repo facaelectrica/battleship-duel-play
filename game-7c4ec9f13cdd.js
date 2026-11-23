@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1341;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1342;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -37064,14 +37064,16 @@ const ED_CSS = `
 #skyEd .opane { display: flex; gap: 10px; align-items: flex-start; }
 /* (user Nov 20 13:15: "when I'm inside a section ... and I need to scroll down, it should have a scroll bar. And while I'm scrolling, it should not scroll
    the other sections") EACH COLUMN SCROLLS ON ITS OWN: a tab of columns side by side - a list and its picked entry's settings (.dsn: .dlist | .dbody), a tab's
-   tools and SELECTED (.opane: .osec | .osec) - fills the panel's height, and each column has its own scroll bar; the panel itself doesn't scroll them */
+   tools and SELECTED (.opane: .osec | .osec) - each column at most the panel's height, with its own scroll bar; the panel itself doesn't scroll them.
+   (user Nov 22 20:40: "making the editor sections small based on the content they have, but now they're gigantic and taking the whole space") EVERY COLUMN
+   AS BIG AS WHAT'S IN IT - as wide as its sections need, as tall as its rows, never stretched over the panel's empty room. A tools column's sections are
+   350 wide each (a width, not a flex basis: a browser sizing the column by its text - iPad Safari - had a note's whole line as its width) */
 #skyEd .body > .dsn, #skyEd .body > .opane, #skyEd .body > :has(> .opane), #skyEd .body > * > .opane { height: 100%; }
-#skyEd .body > .dsn, #skyEd .body > .opane, #skyEd .body > * > .opane { align-items: stretch; }
+#skyEd .body > .dsn, #skyEd .body > .opane, #skyEd .body > * > .opane { align-items: flex-start; }
 #skyEd .dsn > *, #skyEd .opane > .osec { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; }
-#skyEd .opane > .osec { flex: 1 1 0; min-width: 0; }
-#skyEd .opane > .osec:first-child { flex: 0 1 auto; }   /* (the tools' half as wide as its sections need - the room left is SELECTED's) */
+#skyEd .opane > .osec { flex: 0 1 auto; min-width: 0; }
 #skyEd .opane > .osec:first-child > .cats { display: flex; flex-wrap: wrap; }   /* (its sections side by side as far as the room goes) */
-#skyEd .opane > .osec:first-child > .cats > * { flex: 0 1 350px; }
+#skyEd .opane > .osec:first-child > .cats > * { flex: 0 1 auto; width: 350px; }
 #skyEd .osec { border: 1px solid #3a4a68; border-radius: 8px; padding: 6px 10px 8px; margin: 0; background: rgba(255,255,255,0.02); }
 #skyEd .osec > h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; color: #ffb347; font-weight: bold; }
 #skyEd .osec > h3 .olab { color: #9aa3b8; }
@@ -75785,6 +75787,7 @@ function strPlaceBad(o) {
   { const one = typeof strOneBad === 'function' ? strOneBad(o) : ''; if (one) return one; }
   { const n = typeof lotBad === 'function' ? lotBad(o) : ''; if (n) return n; }   // (NEEDS PARKING / NEEDS DOCK - 50-zzzzz-story-work.js)
   { const n = typeof rtBad === 'function' ? rtBad(o) : ''; if (n) return n; }   // (NEEDS A PLACE TO ... - a routine's step set on each placed one, 50-zzzzz-story-work.js)
+  { const n = typeof craneDockBad === 'function' ? craneDockBad(o) : ''; if (n) return n; }   // (a ship's crane work here with no dock for it - 50-zzzzz-ship-crane.js)
   { const n = typeof assignShort === 'function' ? assignShort(o) : ''; if (n) return n; }   // (a parking too short for the vehicles it would hold - 50-zzzzz-story-work.js)   // (a second police station, market... on a land - 50-zzzzz-story-cities.js)
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
@@ -78132,7 +78135,7 @@ const DSN_CSS = `
 #skyEd .dsn > .dlist { flex: 0 0 210px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid #2c3850; border-radius: 6px; padding: 5px; }
 #skyEd .dsn > .dlist h4 { margin: 6px 0 2px; }
 #skyEd .dsn > .dlist button { text-align: left; }
-#skyEd .dsn > .dbody { flex: 1 1 0; min-width: 0; }
+#skyEd .dsn > .dbody { flex: 0 1 auto; min-width: 0; }   /* (as wide as its settings - 90-editor.js, every column as big as what's in it) */
 `;
 const dsnCss = () => { if (!document.getElementById('dsnCss')) { const st = document.createElement('style'); st.id = 'dsnCss'; st.textContent = DSN_CSS; document.head.appendChild(st); } };
 // the list: [heading, [[id, name], ...]] - structures by their type (every house one HOUSE), vehicles by family
@@ -80695,6 +80698,10 @@ function pierCraneFor(j, D) {
    DELIVER with a ship that has a hold and no crane of her own, at a place with rollers that a pier crane's run covers - she ties up at that pier, her captain
    steps over to the crane (FOLK's log: TO THE CRANE), works it (cr.crj: a job as the ship's own crane's - craneJobStep, from stepCrane) and steps back aboard
    when it's done (BACK ABOARD). Out of every view: the goods moved by numbers, CRANE_LIFT_S a container. ---- */
+// pier q has a crane whose run covers door D (its middle within 2 m of the run)
+const pierCraneOver = (q, D) => isPierS(q) && [...cranes].some(k => isPierCrane(k) && Math.abs(k.d.px0 + k.d.pl / 2 - q.x) < pierLenOf(q) && (() => { const R = craneRun(k.d); return D.cx >= Math.min(R.mid0, R.mid1) - 2 * UPM && D.cx <= Math.max(R.mid0, R.mid1) + 2 * UPM; })());
+// (craneDockOk) any of these docks a pier with a crane over door D
+const pierCraneDockOk = (D, docks) => docks.some(q => pierCraneOver(q, D));
 function folkPierCrane(c, S, v, J, T) {
   if (boatCrane(v) || !vehHoldOf(v) || !T.o || (J.do !== 'collect' && J.do !== 'deliver') || !placeRolls(T.o)) return 0;
   const D = placeDoor(T.o), Q = v.crj;
@@ -80708,10 +80715,9 @@ function folkPierCrane(c, S, v, J, T) {
   // a pier with a crane over the door: tied up there
   let cr = pierCraneFor(v, D);
   if (!cr || v.berth == null) {
-    const piers = strsUsed().filter(q => isPierS(q)), ok = q => piers.includes(q) && [...cranes].some(k => isPierCrane(k) && Math.abs(k.d.px0 + k.d.pl / 2 - q.x) < pierLenOf(q) && (() => { const R = craneRun(k.d); return D.cx >= Math.min(R.mid0, R.mid1) - 2 * UPM && D.cx <= Math.max(R.mid0, R.mid1) + 2 * UPM; })());
-    const P = folkPark(v, D.cx, ok); if (P && P.id !== v.berth) { folkGo(v, P.x, P); return 1; }
-    if (!P) return 0;
-    cr = pierCraneFor(v, D); if (!cr) return 0;
+    const P = folkPark(v, D.cx, q => pierCraneOver(q, D)); if (P && P.id !== v.berth) { folkGo(v, P.x, P); return 1; }
+    if (!P) return craneNoDock(c, S, J, T);                             // (no pier crane over the door: the job can't be done - ISSUES: craneDockBad)
+    cr = pierCraneFor(v, D); if (!cr) return craneNoDock(c, S, J, T);
   }
   if (cr.crj && !cr.crj.done) return 1;                                  // (someone else at it: they wait)
   const n = J.do === 'collect' ? Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)) : cargoN(v, J.k), T2 = vehHoldOf(v).teu || 1, boxes = Math.ceil(n / (cargoPer(J.k) * T2));
@@ -81341,6 +81347,32 @@ function craneWork(j, dt) {
       return; }
   }
 }
+/* (user Nov 22 20:41-20:58, bug-20261122-203713-v1337: the cargo ship stopped beside KAWAI CARGO TERMINAL with no dock in her crane's reach, and her container
+   was handed over by numbers - it vanished; "We should get the error missing x if there is a requirement like this"; "we just decided that the game editor
+   would show us what's missing") A SHIP'S CRANE WORK NEEDS ITS DOCK: her own crane's - a dock that takes her with a spot whose door is in her jib's reach;
+   a ship with a hold and no crane of her own - a pier whose crane's run covers the door (pierCraneDockOk, 50-zzzzz-pier-crane.js). Missing, the job isn't
+   done (skipped, as any job with no way to it) and the place is in the editor's ISSUES (craneDockBad - strPlaceBad) */
+const craneReach = K => K.jib * UPM * 0.9;
+function craneNoDock(c, S, J, T) { folkLog({ t: 'skip', who: c.id, verb: J.do, at: slPlaceName(T.o) }); S.j++; return 1; }
+// can a ship of design sv tie up to work place o's rollers: true / false; null - not a ship that works rollers, or o has none
+function craneDockOk(sv, o) {
+  const d = STR_VEHS[sv], B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; if (!B || !(B.crane || B.hold) || !o || !placeRolls(o)) return null;
+  const D = placeDoor(o), docks = strsUsed().filter(q => (strTakes(q) || []).includes('boat') && strAllows(q, sv) && strFits(q, sv));
+  if (!B.crane) return pierCraneDockOk(D, docks);
+  for (const q of docks) for (let i = 0, n = storyBerths(q); i < n; i++) if (Math.abs(storySpotX(q, i, null) - D.cx) < craneReach(B.crane)) return true;
+  return false;
+}
+// (strPlaceBad) a place with rollers that a workplace's ship works (its routine's COLLECT / DELIVER there, its WORK VEHICLE a ship with a crane or a hold)
+// with no dock for it: NO DOCK IN CRANE REACH / NO PIER CRANE
+function craneDockBad(o) {
+  if (!STORY_WORLD || !placeRolls(o)) return '';
+  for (const W of STRS) {
+    if (!W.wv || !Array.isArray(W.rt) || typeof workAt !== 'function') continue;
+    if (!W.rt.some(J => J && (J.do === 'collect' || J.do === 'deliver') && workAt(W, J) === o.id)) continue;
+    const ok = craneDockOk(W.wv, o); if (ok === false) return (PIC_BOATS[STR_VEHS[W.wv].kind] || {}).crane ? 'NO DOCK IN CRANE REACH' : 'NO PIER CRANE';
+  }
+  return '';
+}
 // (folkPlan) character c's ship v, COLLECT / DELIVER job J at T.o: with her crane at its rollers. 0: not this way; 1: under way (S.j moved on when done)
 function folkCrane(c, S, v, J, T) {
   if (!boatCrane(v) || !T.o || (J.do !== 'collect' && J.do !== 'deliver') || !placeRolls(T.o)) return 0;
@@ -81351,12 +81383,12 @@ function folkCrane(c, S, v, J, T) {
     else folkLog({ t: 'job', who: c.id, verb: J.do === 'collect' ? 'CRANED ABOARD' : 'CRANED ASHORE', k: J.k, n: Q.got || 0, at: slPlaceName(T.o) });
     v.crj = null; rtStep(S, J, T.o, v, !Q.far && (J.do === 'deliver' || Q.got > 0)); return 1;   // (a COLLECT / DELIVER of every good: the next good, while one's left)
   }
-  const reach = q => Math.abs(q - D.cx) < K.jib * UPM * 0.9;          // (a tie-up whose spot has the door in her jib's reach)
+  const reach = q => Math.abs(q - D.cx) < craneReach(K);              // (a tie-up whose spot has the door in her jib's reach)
   const here = v.berth != null ? slStr(v.berth) : null;
   if (!(here && reach(v.x))) {
     const P = folkPark(v, D.cx, q => reach(storySpotX(q, Math.max(0, storyFreeSpot(q, v)), vehLenM(v))));
     if (P && P !== here) { folkGo(v, P.x, P); return 1; }
-    if (!P) return 0;                                                  // (nowhere to tie up in reach: as before - beside it, by numbers)
+    if (!P) return craneNoDock(c, S, J, T);                             // (nowhere to tie up in reach: the job can't be done - the editor's ISSUES says so: craneDockBad)
   }
   const n = J.do === 'collect' ? Math.min(folkN(J, stN(T.o, J.k)), vehRoom(v, J.k)) : cargoN(v, J.k), boxes = Math.ceil(n / cargoPer(J.k));
   v.crj = FOLK_FAST || tierAt(v.x) !== 0 ? { o: T.o.id, far: 1, until: time + boxes * CRANE_LIFT_S } : { t: J.do === 'collect' ? 'load' : 'unload', k: J.k, o: T.o.id, n: J.n || 0, got: 0, ph: 0, T: 0 };
@@ -82046,7 +82078,9 @@ function folkDrive(v, T, dt) {
     if (Math.abs(T.x - v.x) < 1) { if (T.park) folkTie(v, T); else { delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } }
     return;
   }
-  if (T.away) { T.away = 0; if (!folkBoat(v)) { v.rest = 0; v.set = 0; } }   // (in view: the real vehicle again, where the node is)
+  // (in view: the real vehicle again, where the node is - on its own layer's road at its height (bug-20261122-204601-v1337: settled afresh - set 0 - she
+  // was put on the highest ground there, the hill's road over the quay's); only her motion started again)
+  if (T.away) { T.away = 0; if (!folkBoat(v)) { v.rest = 0; v.vx = v.vy = v.av = 0; } }
   if (T.fish) {                                                            // (near: the net worked to and fro)
     const A = NATURE.find(a => Math.abs((a.x0 + a.x1) / 2 - T.x) < 1);
     if (cargoN(v, 'fish') >= (T.n || NETP.HOLD)) { if (v.net) v.net.cmd = -1; delete FOLK.v[v.sid]; folkLog({ t: 'job', who: folkWho(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); return; }
