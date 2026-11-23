@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1359;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1360;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71265,7 +71265,7 @@ function storyParksAt(v) {
 // (a crane berth - craneKept, 50-zzzzz-ship-crane.js: anything but a crane ship takes it last)
 function storyFreeSpot(o, v, x) {
   const U = new Set(); for (const j of storyVehs()) if (j !== v && j.berth === o.id && j.spot != null) { if (berthRun(o)) berthCover(o, U, j); else berthTake(o, U, j.spot, vehLenM(j)); }
-  const R = typeof craneKept === 'function' && !(typeof boatCrane === 'function' && boatCrane(v)) ? craneKept(o) : null;
+  const R = typeof craneKept === 'function' && !(typeof craneUser === 'function' && craneUser(v.sv)) ? craneKept(o) : null;
   if (R) { const i = berthPick(o, new Set([...U, ...R]), vehLenM(v), x ?? v.x); if (i >= 0) return i; }
   return berthPick(o, U, vehLenM(v), x ?? v.x);
 }
@@ -81435,6 +81435,8 @@ function craneWork(j, dt) {
 const craneReach = K => K.jib * UPM * 0.9;
 // a design's own crane (a ship's - PIC_BOATS' crane), else null
 const craneSv = sv => { const d = STR_VEHS[sv]; const B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; return B && B.crane ? B.crane : null; };
+// (user Nov 22 21:59: "Shouldn't this rule be universal?") a design whose goods go by crane: a ship with her own crane, or a hold and none (the pier's)
+const craneUser = sv => { const d = STR_VEHS[sv]; const B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; return !!B && !!(B.crane || B.hold); };
 // (bug-20261122-210945-v1342: her reach was measured from her middle - her crane stands a quarter of her length aft of it) a ship of len metres at x reaches
 // door dx: from her crane's post on the door's side (she lies with it toward the door - craneFace), its jib's reach
 const craneOff = (K, len) => Math.abs(K.post[0] - 0.5) * len * UPM;
@@ -81461,20 +81463,21 @@ const CRB = { key: '', m: new Map() };
 function craneJobs() {
   const L = []; if (!STORY_WORLD || typeof workAt !== 'function') return L;
   for (const W of STRS) {
-    if (!W.wv || !Array.isArray(W.rt)) continue; const d = STR_VEHS[W.wv], B = d && d.fam === 'boat' ? PIC_BOATS[d.kind] : null; if (!B || !B.crane) continue;
+    if (!W.wv || !Array.isArray(W.rt) || !craneUser(W.wv)) continue;
     for (const J of W.rt) { if (!J || (J.do !== 'collect' && J.do !== 'deliver')) continue; const o = strById(workAt(W, J)); if (o && placeRolls(o) && !L.some(q => q.o === o && q.sv === W.wv)) L.push({ sv: W.wv, o, W }); }
   }
   return L;
 }
-// each dock's crane berths: dock id -> [{ i, k, sv, o }] (the berth nearest each door it works, in reach; one a job)
+// each dock's crane berths: dock id -> [{ i, k, sv, o }] (the berth nearest each door it works - in her crane's reach, or on the pier whose crane runs over
+// the door; one a job)
 function craneBerths() {
   const key = STR_GEN + ':' + JSON.stringify(STRS.map(o => [o.id, o.x, o.wv, o.rt, o.len])); if (CRB.key === key) return CRB.m;
   CRB.key = key; const M = CRB.m = new Map();
   for (const { sv, o } of craneJobs()) {
-    const D = placeDoor(o), K = PIC_BOATS[STR_VEHS[sv].kind].crane, len = strTypeLenM(sv);
+    const D = placeDoor(o), K = craneSv(sv), len = strTypeLenM(sv);
     for (const q of strsUsed()) {
-      if (!(strTakes(q) || []).includes('boat') || !strAllows(q, sv) || !strFits(q, sv)) continue;
-      const i = berthPick(q, new Set(), len, D.cx); if (i < 0 || !craneReaches(K, len, storySpotX(q, i, len), D.cx)) continue;
+      if (!(strTakes(q) || []).includes('boat') || !strAllows(q, sv) || !strFits(q, sv) || (!K && !pierCraneOver(q, D))) continue;   // (no crane of her own: a pier with a crane over the door)
+      const i = berthPick(q, new Set(), len, D.cx); if (i < 0 || (K && !craneReaches(K, len, storySpotX(q, i, len), D.cx))) continue;
       (M.get(q.id) || M.set(q.id, []).get(q.id)).push({ i, k: berthRun(q) ? berthLen(len, q) : 1, sv, o });
     }
   }
@@ -84224,9 +84227,9 @@ function assignPlan() {
     const L = lotsFor(from, sv, D.fam, W);
     for (const o of L) {
       const U = used.get(o.id) || used.set(o.id, new Set()).get(o.id);
-      const len = strTypeLenM(sv), R = craneSv(sv) ? null : craneKept(o);   // (a crane berth taken last - anything but a crane ship: craneKept)
+      const len = strTypeLenM(sv), R = craneUser(sv) ? null : craneKept(o);   // (a crane berth taken last - anything but a crane ship: craneKept)
       let best = R ? berthPick(o, new Set([...U, ...R]), len, from.x) : -1; if (best < 0) best = berthPick(o, U, len, from.x);   // (a dock: by its own length - berthPick)
-      if (best >= 0) { berthTake(o, U, best, len); if (NC && !craneSv(sv)) berthTake(o, NC.get(o.id) || NC.set(o.id, new Set()).get(o.id), best, len); return [o, best]; }
+      if (best >= 0) { berthTake(o, U, best, len); if (NC && !craneUser(sv)) berthTake(o, NC.get(o.id) || NC.set(o.id, new Set()).get(o.id), best, len); return [o, best]; }
     }
     const want = L[L.length - 1] || null; if (want) miss.set(want.id, (miss.get(want.id) || 0) + 1);   // (short: the last it could go to - its lot)
     return [null, want];
