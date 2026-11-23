@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1363;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1364;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71207,7 +71207,11 @@ const STORY_PARK_M = 15;                                 // (how far past a stru
 // length: a 7 m truck ran over the next stall, and a car parked there stood in it)
 const DOCK_CELL_M = 1, DOCK_GAP_M = 2, PARK_GAP_M = 0.6;
 const berthRun = o => STORY_WORLD && !!o && (o.k === 'dock' || o.k === 'parking');
-const dockCells = o => Math.max(1, Math.floor((o.k === 'parking' ? parkLenM(o) : dockLenM(o)) / DOCK_CELL_M));
+const dockCells = o => Math.max(1, Math.floor((o.k === 'parking' ? parkLenM(o) : dockLenM(o)) / DOCK_CELL_M + 1e-6));   // (+1e-6: a length read back from its box - a 5 m parking's 4.9999999 - is its whole cells, as strSpots)
+// (user Nov 22 22:03, bug-20261122-220240-v1356: no car at KAWAI LIGHTHOUSE's dock - its 4 m PARKING passed the editor's test (her 3.8 m <= 4 m) but
+// berthPick wants her length and her gap, 5 cells: the car was never made and nothing said why) the longest thing a Story dock or parking holds: its
+// cells less the gap each takes - the same test berthPick makes, so the editor (strFits, strWhyNot, lotChoices) and the game never disagree
+const berthMaxM = o => dockCells(o) * DOCK_CELL_M - (o.k === 'parking' ? PARK_GAP_M : DOCK_GAP_M);
 const berthLen = (len, o) => Math.max(1, Math.ceil(((len || 0) + (o && o.k === 'parking' ? PARK_GAP_M : DOCK_GAP_M)) / DOCK_CELL_M));   // (cells something len metres long takes)
 const storyBerths = o => berthRun(o) ? dockCells(o) : Math.max(1, strSpots(o));   // (elsewhere: as many as fit along it - strSpots, 50-zz-struct.js)
 // the middle of berth i (len: the length in metres of what stands there - a dock's run; none: one cell)
@@ -75161,7 +75165,7 @@ const dockLenM = o => isPierS(o) ? pierLenOf(o) / UPM : (o.len || 24);
 // (user Nov 1 21:38-21:44: a hangar's SIZE, SMALL or LARGE: SMALL the Cessna, the small helicopters, the boats and the minisub;
 // LARGE everything - the types marked big in STR_VEHS) a hangar's size decides what it takes, not a length
 const isHangarS = o => o.k === 'hangarAir' || o.k === 'hangarSea';
-const strMaxL = o => o.k === 'dock' ? (STORY_WORLD ? dockLenM(o) : Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o))) : o.k === 'parking' && STORY_WORLD ? parkLenM(o) :   /* (the Story world: a PARKING holds cars by their own lengths too - berthRun) */   /* (the Story world: a dock takes any boat as long as it is - its boats laid by their own lengths, berthRun - 50-story.js) */ isHangarS(o) ? Infinity : o.maxL || (STR_KINDS[o.k] || {}).maxL || 30;   // (a kind's own: the PARKING's bollards)
+const strMaxL = o => o.k === 'dock' ? (STORY_WORLD ? berthMaxM(o) : Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o))) : o.k === 'parking' && STORY_WORLD ? berthMaxM(o) :   /* (the Story world: a PARKING holds cars by their own lengths too - berthRun) */   /* (the Story world: a dock takes any boat as long as it is - its boats laid by their own lengths, berthRun - 50-story.js) */ isHangarS(o) ? Infinity : o.maxL || (STR_KINDS[o.k] || {}).maxL || 30;   // (a kind's own: the PARKING's bollards)
 /* (user Nov 20 11:06: "the parking lot needs to have enough length, like a dock, in order to store vehicles") a PARKING's spots: one a PARK_STALL_M
    along its length - its vehicles stand in it seen from the front (50-story-cars.js), the widest a bus's 2.5 m; stretched by its ends' handles */
 const PARK_STALL_M = 3;
@@ -83928,7 +83932,7 @@ const isleCarOf = v => v && v.cv >= CV_ISLE ? v.cv - CV_ISLE : null;   // (the l
 // the world, your home, your car or a dock's lot changes (finding each lot's land is ~2 ms - Nov 21, the frame check)
 const PISLES = { key: null, L: [] };
 function playerIsles() {
-  const H = storyHome(), D = strsUsed().filter(o => o.k === 'dock'), key = [STR_GEN, ISL_VER, H ? H.id : 0, PLAYER_C.veh || '', ...D.map(d => d.id + ':' + (d.lot ? d.lot.car : ''))].join();
+  const H = storyHome(), D = strsUsed().filter(o => o.k === 'dock'), key = [STR_GEN, ISL_VER, land.cell ? land.cols : 0,   /* (no ground yet: every land null - not kept once it's built) */ H ? H.id : 0, PLAYER_C.veh || '', ...D.map(d => d.id + ':' + (d.lot ? d.lot.car : ''))].join();
   if (PISLES.key === key) return PISLES.L;
   const home = H ? strLand(H) : null, out = new Map();
   for (const d of D.sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => Math.abs(b.x - d.x) < Math.abs(a.x - d.x) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
@@ -83939,7 +83943,7 @@ function keptVehStep() {
     if (c !== PLAYER_C && stGone(c.id)) continue;
     const who = whoOf(c), H = stHome(c), veh = (c === PLAYER_C && STR_VEHS[story.car] && story.car) || c.veh;   // (a pick whose design is gone - the MOTORCYCLE, user Nov 22 - lets go of it)   // (the player's own car: the one picked at a CAR STAND - 50-zzzzz-car-stand.js)
     if (veh && STR_VEHS[veh] && H && !strDown(H) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) == null))) workVehMake(H, who, veh, { cv: 1 });
-    if (c === PLAYER_C) for (const [I, lot] of playerIsles()) { const sv = (s => STR_VEHS[s] ? s : veh)((story.cars || {})[I.id]); if (sv && STR_VEHS[sv] && !strDown(lot) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) === I.id))) workVehMake(lot, who, sv, { cv: CV_ISLE + I.id }); }
+    if (c === PLAYER_C) for (const [I, lot] of playerIsles()) { const sv = (s => STR_VEHS[s] ? s : veh)((story.cars || {})[I.id]); if (sv && STR_VEHS[sv] && !strDown(lot) && workTakes(lot, sv, 'car', null) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) === I.id))) workVehMake(lot, who, sv, { cv: CV_ISLE + I.id }); }   // (only at its dock's lot: one that can't take her - the dock red in ISSUES, lotBad - never another place)
     for (const W0 of c === PLAYER_C ? playerWorks() : [workOf(c)]) if (W0 && !strDown(W0) && workVehD(W0) && keptMissing(workVehsOf(who).filter(v => v.wk === W0.id))) workVehMake(W0, who);   // (the player: one at each place he's signed up at - 50-zzzzz-story-signup.js)
   }
   for (const v of [...storyCars, ...jetboats]) if (v.wk != null && vehWhole(v) && v.driven == null && !folkTrip(v) && !folkMine(v)) {
@@ -84267,6 +84271,8 @@ function assignPlan() {
         const cid = c ? c.id : null; if (r && r[0]) put(r[0], { sv: W0.wv, who, cid, s: r[1] }); else put(W0, { sv: W0.wv, who, cid, s: -1, red: 1 });
       }
     }
+    // (user Nov 22 22:03: "there would always be a car for the player at every dock") the island's car at its dock's lot, as keptVehStep makes it - counted
+    for (const [I, lot] of playerIsles()) { const sv = (s => STR_VEHS[s] ? s : PLAYER_C.veh)((story.cars || {})[I.id]); if (!sv || !workTakes(lot, sv, 'car', null)) continue; const r = place(used, lot, sv, null, miss); if (r && r[0]) put(r[0], { sv, who: 'PLAYER', cid: PLAYER_C.id, s: r[1] }); else put(lot, { sv, who: 'PLAYER', cid: PLAYER_C.id, s: -1, red: 1 }); }
     for (const [id, n] of miss) short.set(id, Math.max(short.get(id) || 0, n)); }
   { const used = new Map(), miss = new Map(); NC = new Map();   // (a shift: the workers at work, everyone else at home)
     const at0 = c => { const W0 = workOf(c); return W0 && !strDown(W0) ? W0 : null; };
@@ -84509,7 +84515,7 @@ function waysPlan() {
   return bad;
 }
 const wayBad = o => STORY_WORLD && strWork(o) ? waysPlan().get(o.id) || '' : '';
-const lotBad = o => { if (!STORY_WORLD) return ''; for (const [fam] of lotNeeds(o)) if (!lotOf(o, fam)) return 'NEEDS ' + LOT_FAMS[fam]; return ''; };
+const lotBad = o => { if (!STORY_WORLD) return ''; for (const [fam, sv] of lotNeeds(o)) { const q = lotOf(o, fam); if (!q) return 'NEEDS ' + LOT_FAMS[fam]; const w = lotWhyNot(o, fam, sv, q); if (w) return LOT_FAMS[fam] + ' ' + w; } return ''; };   // (its lot set but unable to take them - too short: PARKING MAX SIZE 3 M < 4 M)
 // ---- the handles: on the one picked structure, a knob for each lot it needs (P / D) over its top right - dragged onto a lot, that's its lot;
 // its lots joined to it by an orange line (strStretchDraw pushes them into SE.hnd with lk: the family)
 const LOTD = { d: null };   // (d: { id: pointer, o, fam, x, y } the knob being dragged, world units)
