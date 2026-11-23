@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1353;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1354;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -81014,7 +81014,7 @@ function placeScreenRows(o) {
   return R;
 }
 // something in place o for you now: a row besides EXIT, or something said there (storyVisit - no arrow, no going in, without it)
-const placeHas = o => placeScreenRows(o).some(q => q.do !== 'exit') || [o, ...storyLinks(o)].some(q => slWantsAt(q).some(l => l.txt));
+const placeHas = o => placeScreenRows(o).some(q => q.do !== 'exit') || slWantsAt(o).some(l => l.txt);
 // a row's words, and why it can't be done now ('' - it can)
 const PLACE_WORDS = { start: 'START WORKING', stop: 'STOP WORKING', signup: 'SIGN UP', sleep: 'SLEEP' };
 // EXIT's words: what it puts you in (user Nov 22 20:14: "Instead of exit, you should say get in car") - whole rows, each translated
@@ -81098,6 +81098,7 @@ function placePress(X, Y) {
   if (!placeShown()) return false;
   const i = (PS.rows || []).findIndex(r => X >= r[0] && X <= r[0] + r[2] && Y >= r[1] && Y <= r[1] + r[3]);
   if (i >= 0) { PS.sel = i; placeDoRow(placeScreenRows(stHere())[i]); }
+  else if (PS.glass && PS.pages > 1 && X >= PS.glass[0] && X <= PS.glass[0] + PS.glass[2] && Y >= PS.glass[1] && Y <= PS.glass[1] + PS.glass[3]) { PS.pg = (PS.pg + 1) % PS.pages; PS.pgT = performance.now() / 1000; }   // (a tap on what's said: its next page)
   return true;
 }
 // (user Nov 22 14:55: "just like we see the inside of the car stand, we see the inside of the fishery, the lighthouse, and the marketplace"; 15:14: "The text
@@ -81112,6 +81113,7 @@ function placePress(X, Y) {
 const PS_ROOM_X = 1.5, PS_ROOM = [497, 280];   // (a room's size in its own pixels - every interior is cut the same)
 // the one size of all a place's words - what's said and its buttons' (user Nov 22 20:16: "We need a default size so it's always readable and predictable"):
 // the size of what's said outside (drawStorySay's), never grown to fill or shrunk to fit
+const PS_PAGE_S = 6;   // (what's said in pages: the next by itself after this many seconds)
 const PS_SC = () => ubw < 420 ? 2 : 3;
 const placeRoom = o => { const P = img[(STR_KINDS[strIsLh(o) ? 'lighthouse' : o.k] || {}).room]; return P && P.width ? P : null; };
 // a dark glass panel: its fill, a hairline round it
@@ -81182,7 +81184,10 @@ function drawPlaceScreen() {
   });
   // what's said there, in the middle: what was just said, else what they'd say now (user Nov 22 15:16: "you must always get your grandfather details") -
   // the speaker's name, then each sentence on a line of its own (wrapped only if it can't fit), every line centred
-  const s = story.say, here = [o, ...storyLinks(o)];
+  // (user Nov 22 21:30, bug-20261122-212954-v1350: KEAWE FISH LANDING's FISHERMAN telling KAWAI CARGO TERMINAL's shipment of medicine - the two share their
+  // parking and dock, and a place's screen said what every place joined to it says: "Message makes no sense") a place's screen: only what's said at it
+  const s = story.say, here = [o];
+  PS.pages = 0;
   const Ls = s && s.open && s.at != null && here.some(q => q.id === s.at) ? sayLines(s) : placeSays(o, here);
   if (Ls.length) {
     const top = Math.max(Y + m + 5 * ns + 2 * pp, hasBot) + Math.round(4 * u), bot = by - Math.round(4 * u), dw = W - 2 * m - Math.round(8 * u), lines = [];
@@ -81200,15 +81205,26 @@ function drawPlaceScreen() {
       return out;
     };
     const ts = S, L = layout(ts);   // (user Nov 22 20:16: "Text should not be increasing in size if there's more space ... or reduce in size if there isn't enough space" - the one size, PS_SC)
-    const lh = 9 * ts; lines.push(...L);
-    const tl = lh, th = lines.length * tl, ph = bot - top, py = top;   // (the panel the whole middle of the room)
+    lines.push(...L);
+    // (user Nov 22 21:30, bug-20261122-212954-v1350: the last sentence cut off at the glass's foot - "its cut off") more than fits: in pages, never cut -
+    // the next page by itself every PS_PAGE_S seconds or at a tap on the glass, its number (1/2) at the glass's foot
+    const tl = 8 * ts, ph = bot - top, py = top, pad = Math.round(4 * u), fit = Math.max(1, Math.floor((ph - 2 * pad) / tl)), cap = lines.length > fit ? Math.max(1, fit - 1) : fit;
+    const pages = []; let cur = [];
+    for (const ln of lines) { if (cur.length >= cap) { pages.push(cur); cur = []; } if (!ln && !cur.length) continue; cur.push(ln); }
+    if (cur.length) pages.push(cur);
+    const pk = Ls.map(l => l.id).join('|'), now = performance.now() / 1000;
+    if (PS.pk !== pk) { PS.pk = pk; PS.pg = 0; PS.pgT = now; }
+    if (pages.length > 1 && now - PS.pgT > PS_PAGE_S) { PS.pg = (PS.pg + 1) % pages.length; PS.pgT = now; }
+    PS.pg = Math.min(PS.pg || 0, pages.length - 1); PS.pages = pages.length; PS.glass = [X + m, py, W - 2 * m, ph];
+    const pl = pages[PS.pg] || [], th = pl.length * tl;
     psPanel(X + m, py, W - 2 * m, ph, 0.6);   // (lighter: the room seen through it)
-    ug.save(); ug.beginPath(); ug.rect(X + m, py, W - 2 * m, ph); ug.clip();   // (more than fits: cut at the glass's edge, never drawn over the buttons)
-    let y = Math.round(py + Math.max(Math.round(4 * u), (ph - th) / 2) + (tl - 5 * ts) / 2);   // (centred; more than fits: from the top, the rest under the buttons' glass)
-    for (const ln of lines) {
+    ug.save(); ug.beginPath(); ug.rect(X + m, py, W - 2 * m, ph); ug.clip();
+    let y = Math.round(py + Math.max(pad, (ph - th - (pages.length > 1 ? tl : 0)) / 2) + (tl - 5 * ts) / 2);   // (centred)
+    for (const ln of pl) {
       if (ln) { const lw = ln[ln.length - 1].x + ln[ln.length - 1].ww, x0 = Math.round(X + (W - lw) / 2); for (const w of ln) drawText(ug, w.w, x0 + w.x, y, w.col, ts); }
       y += tl;
     }
+    if (pages.length > 1) drawText(ug, (PS.pg + 1) + '/' + pages.length, X + W - m - pad, py + ph - pad - 5 * ts, '#ffb02e', ts, 'right');
     ug.restore();
   }
   ug.globalAlpha = 1;
@@ -82714,11 +82730,12 @@ function slineSayAll(W, o) {
 // a place's lines (TALK, at an objective's destination): all it has to say, at once, as arriving (fresh: only those it hasn't said, or a new objective)
 function slinePlay(o, fresh) { if (!STORY || !o || (story.say && story.say.open) || edTesting()) return false;   // (the editor's PLAY, a test: no lines - 50-zzz-world-ed.js edTesting)
  const W = slWantsAt(o).filter(l => !fresh || slineFresh(l)); if (!W.length) return false; slineSayAll(W, o); return true; }
-// arriving somewhere: every fresh want of the place and of the ones it connects to, at once (but: those just read - not again straight away)
+// arriving somewhere: every fresh want of the place, at once (but: those just read - not again straight away) - its own only, never what a place joined
+// to it says (user Nov 22 21:30: the fish landing said the cargo terminal's shipment, the two sharing a parking - "Message makes no sense")
 function slineArrive(o, but) {
   if (!o || !STORY || (story.say && story.say.open) || edTesting()) return;
   const seen = new Set(but || []), W = [];
-  for (const q of [o, ...storyLinks(o)]) for (const l of slWantsAt(q)) if (!seen.has(l.id) && slineFresh(l)) { seen.add(l.id); W.push(l); }
+  for (const l of slWantsAt(o)) if (!seen.has(l.id) && slineFresh(l)) { seen.add(l.id); W.push(l); }
   slineSayAll(W, o);
 }
 // the line read (A): off the screen; then whatever the place has next
