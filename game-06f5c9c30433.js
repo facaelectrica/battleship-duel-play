@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1360;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1361;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71172,8 +71172,19 @@ ACTS.storyGo = (p, id) => storyGo(p, id);
 // (user Nov 9) a loaded story goes on at its checkpoint - the lighthouse it was saved at (a story is saved only there, never
 // aboard a vehicle: every vehicle is where it was then). Already there: no new save
 const storyCpO = () => story.cp ? strsUsed().find(o => o.id === story.cp) || null : null;
+// (user Nov 22 22:06: his POLICE CAR design was set to the police car's MODEL, but the story saved before kept the ambulance's picture - a copy's
+// look was copied from her design once, when she was made, and saved with her) a copy is what her design is: whenever a game is put back, every
+// story vehicle takes her design's look again (a design's MODEL - pfVehBox) - a car her picture, a boat her kind and colour, a helicopter its type
+const DESIGN_LOOK = [[() => storyCars, 'car', D => ({ art: D.art })], [() => jetboats, 'boat', D => ({ kind: D.kind, col: D.col })], [() => civHelis, 'heli', D => ({ kind: D.ch })]];
+function designLooks() {
+  for (const [T, fam, look] of DESIGN_LOOK) for (const r of T()) {
+    const D = r && r.story && r.sv && STR_VEHS[r.sv]; if (!D || D.fam !== fam) continue;
+    const L = look(D); for (const k in L) if (L[k] != null && r[k] !== L[k]) r[k] = L[k];
+  }
+}
 function storyResume(p) {
-  if (!STORY) return; const h = storyCpO() || storyHome(); if (!h) return;
+  if (!STORY) return; designLooks();
+  const h = storyCpO() || storyHome(); if (!h) return;
   if (crew[p].mode === 'civ') civRelease(p);
   story.view = 0;                                        // (outside till the place's screen is shown - storyFrozen)
   storyGo(p, h.id, true, false, true);
