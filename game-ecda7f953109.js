@@ -13138,8 +13138,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1346;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 22:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1347;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 22:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70902,19 +70902,22 @@ async function storySaveNow(quiet) {
 }
 // each frame (drawStoryBanner): a checkpoint asked for, saved - while you're at it (an ask made elsewhere is let go); a death, the
 // checkpoint loaded again
-let storySavedAt = 0;
+let storySavedAt = 0, storyDeadSeen = null;   // (storyDeadSeen: story.dead as this story was loaded - none yet: read at the next watch)
 // (user Nov 4 22:25: saving aboard a vehicle "should be impossible")
 const storyAboard = () => crew[0].mode === 'civ';
 function storySaveWatch() {
   if (!(STORY && storySlot != null && !storyLoading && !ui.title)) return;
-  // (a death no longer loads the slot again - user Nov 20 09:28: the world goes on, only you are back at your checkpoint with your things as they were: storyDie, 50-zzzzz-story-death.js)
+  // (a death, its YOU DIED read: the saved game loaded again - user Nov 22 21:12: "It just reloads the save game itself" (Nov 20 09:28 it had been the world
+  // going on - storyDie, now only the editor's PLAY's); story.dead counts the deaths, so one counted since this story was loaded is a new one)
+  if (storyDeadSeen == null) storyDeadSeen = story.dead;
+  if (story.dead > storyDeadSeen) { storyDeadSeen = null; storyLoad(storySlot, true); return; }
   if (story.wake || storyAboard() || story.saveN === storySavedN) return;
   if (!story.cp || (story.at === story.cp && crew[0].mode === 'dock')) storySaveNow(true); else storySavedN = story.saveN;   // (no checkpoint: a world with no home of yours - its start)
 }
 // NEW in slot n: a fresh story there (its first save comes as it starts)
 function storyNew(n) {
   SSL.open = false; SSL.confirm = null;
-  storySlot = n; storySavedN = -1;
+  storySlot = n; storySavedN = -1; storyDeadSeen = null;
   storyOpenAsk();                                        // (the opening shot - 50-zzzz-story-open.js)
   menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false;
 }
@@ -70955,7 +70958,7 @@ function storyPutBack(G, done) {
     storyPlayNow = true; menuPlay(false); storyPlayNow = false;
     swSettled().then(() => swHold('storyLoad')).then(() => {
       try { edGameBack(JSON.parse(G)); computeEnv(); if (NSKY.snap) NSKY.snap(); cutTo(0); } catch (e) { console.warn('story load', e); showToast('COULD NOT LOAD'); storySlot = null; }   // (not loaded: the fresh world never saved over the slot)
-      storySavedN = story.saveN; storyLoading = false;
+      storySavedN = story.saveN; storyLoading = false; storyDeadSeen = story.dead;
       swRelease('storyLoad');
       act(0, 'storyResume');                             // (on at the checkpoint - the structure of yours it was saved at, user Nov 9)
       lift();
@@ -71486,7 +71489,7 @@ function storyLosses() {
   // cliff in story mode. My car exploded" - a wreck on land was never lost, so nobody died)
   for (const q of [...jetboats, ...storyCars]) { if ((q.car || q.story) && (q.state !== 'run' || q.hp <= 0) && q.lostT == null) { q.lostT = time; q.lostDay = W.day; q.own = false; q.berth = null; } }
   const c = crew[0], v = c.mode === 'civ' ? c.civ : null;
-  if (v && v.story && v.lostT != null && time - v.lostT > STORY_LOST_S) storyDied();   // (lost aboard it: YOU DIED, then back at the checkpoint - 50-zzzzz-story-death.js)
+  if (v && v.story && v.lostT != null && time - v.lostT > STORY_LOST_S) storyDied(v);   // (lost aboard it: YOU DIED, then back at the checkpoint - 50-zzzzz-story-death.js)
 }
 function stepStory(dt) {
   if (!STORY) { { stepStoryCars(dt); netsStep(dt); stepStructs(dt); } return; }   // (a fishing boat's net wherever there is one - 50-story-net.js)   // (the cars step wherever there are any - OPEN WORLD's at structures, placed ones - editor chat, Nov 1; BATTLE's placed ones too - user Nov 2, a taxi left floating over a crater: it was never stepped there; the structures' own life - chimney smoke - stepStructs)
@@ -81689,7 +81692,9 @@ function placeOpts(ok, val, none, what) {
    "If all lighthouses are destroyed, its game over".
    - A character whose vehicle is lost with them in it is dead till the next morning, then back at their HOME and on with their day as any other
      (what they carried is lost). Their home destroyed (strDown): gone for good (stGone) - wherever they are.
-   - The player lost aboard a vehicle (sunk, or destroyed where it is): STORY_LOST_S later YOU DIED on the story screen; its press - RESTART - and he is back at his checkpoint - the lighthouse he last entered (another still standing if it's down) - with his
+   - The player lost aboard a vehicle (sunk, or destroyed where it is): STORY_LOST_S later YOU DIED on the story screen; its press - RESTART - loads the story's
+     saved game again (user Nov 22 21:12: "It just reloads the save game itself" - storySaveWatch, 50-story-saves.js). A story with no save (the GAME
+     EDITOR's PLAY): he is back at his checkpoint - the lighthouse he last entered (another still standing if it's down) - with his
      coins and what he carried as they were there (story.cpk), asleep till the next morning; the world goes on as it is (it no longer loads the
      slot again). Their vehicles come back as everyone's: a lost one at its place the next morning (50-zzzzz-story-work.js).
    - Every lighthouse in the world destroyed: GAME OVER.
@@ -81698,12 +81703,15 @@ function placeOpts(ok, val, none, what) {
 function storyCpKeep() { story.cpk = { coins: story.coins, inv: Object.assign({}, story.inv) }; }
 const storyLhs = () => strsUsed().filter(strIsLh);
 // (user Nov 22 21:02: "a few seconds later, it should show up on the middle of the screen saying 'you died', and a press to restart from saved game")
-// lost aboard a vehicle: YOU DIED on the story screen (50-zzzzz-story-lines.js - the say's own press word, RESTART); read, you're back (storyDie - ACTS.storySaid)
-function storyDied() {
-  if (story.say && story.say.die && story.say.open) return;
+// lost aboard a vehicle: YOU DIED on the story screen (50-zzzzz-story-lines.js - the say's own press word, RESTART); read: storyRestart
+let STORY_DIED = null;   // (the loss it was said for - not said again while the saved game is being loaded)
+function storyDied(v) {
+  const k = v ? v.sid + ':' + v.lostT : null; if ((story.say && story.say.die && story.say.open) || (k && STORY_DIED === k)) return; STORY_DIED = k;
   const L = [{ id: 'die', txt: 'YOU DIED.', who: null, row: '' }];
   story.say = { id: 'die', txt: L[0].txt, who: null, L, at: 0, n: ((story.say && story.say.n) || 0) + 1, open: 1, die: 1, hint: 'RESTART' };
 }
+// RESTART: a story with a save - counted (story.dead), the page loads the save (storySaveWatch); none (the editor's PLAY) - back at the checkpoint here
+function storyRestart(slot) { if (slot) story.dead++; else storyDie(); }
 function storyDie() {
   civRelease(0); story.dead++;
   const L = storyLhs().filter(o => !strDown(o)), cp = storyCpO();
@@ -82687,7 +82695,7 @@ function slineArrive(o, but) {
   slineSayAll(W, o);
 }
 // the line read (A): off the screen; then whatever the place has next
-ACTS.storySaid = p => { if (p !== 0 || !story.say || !story.say.open) return; if (story.say.die) { story.say = Object.assign({}, story.say, { open: 0 }); storyDie(); return; }   // (YOU DIED read: back at the checkpoint - 50-zzzzz-story-death.js)
+ACTS.storySaid = (p, slot) => { if (p !== 0 || !story.say || !story.say.open) return; if (story.say.die) { story.say = Object.assign({}, story.say, { open: 0 }); storyRestart(!!slot); return; }   // (YOU DIED read: the saved game loaded again - 50-zzzzz-story-death.js)
   const at = slStr(story.say.at), was = sayLines(story.say).map(l => l.id); story.say = Object.assign({}, story.say, { open: 0 }); if (at) slineArrive(at, was); };
 // a say's sentences (one from before Nov 21 has only its own)
 const sayLines = s => !s ? [] : Array.isArray(s.L) && s.L.length ? s.L : [{ id: s.id, txt: s.txt, who: s.who, row: '' }];
@@ -82800,7 +82808,7 @@ function drawStorySay() {
   return up;
 }
 // read it: this screen lets go of it, the simulation hears it (storySaid)
-function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid'); sound('click', 0); return true; }
+function slSayNext() { if (!slSayUp()) return false; SAY.n = story.say.n; SAY.txt = story.say.txt; SAY.L = sayLines(story.say); SAY.fly = time; OBJFLY.t = time; act(0, 'storySaid', storySlot != null ? 1 : 0); sound('click', 0); return true; }
 // a line just put up: when it started (its fade in)
 function slSayWatch() { if (slSayUp() && story.say.n !== SAY.seen) { SAY.seen = story.say.n; SAY.t = time; } }   // (its fade in from when it's shown - storyFramed)
 window.addEventListener('pointerdown', ev => { if (!slSayUp() || smapOwns(ev)) return; slSayNext();   /* (a press on the STORY MAP is the map's - 1243 a line up ate them) */ ev.stopImmediatePropagation(); ev.preventDefault(); }, { capture: true, passive: false });
