@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1365;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 22 23:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1366;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 22 23:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -74580,7 +74580,7 @@ function storyPlace(cur) {
 // mechanic if there is nothing to do?") Only with something in it for you now: a row of its screen besides EXIT, or something its people say (placeHas)
 const storyVisit = o => !!o && (storyEnterable(o) || strMarket(o) || strWork(o) || stOffer(o).length > 0) && placeHas(o);
 // a vehicle you may take: yours, your family's while free (no stealing - user Nov 20 21:16), one placed by hand in the editor's PLAY
-const storyMayTake = v => !!v && (!!v.own || folkMine(v) || (folkOwner(v) ? folkFamFree(v) : storyTestVeh(v)));
+const storyMayTake = v => !!v && (!!v.own || folkMine(v) || signTaskVeh(v) || (folkOwner(v) ? folkFamFree(v) : storyTestVeh(v)));   // (a task held for you: its worker's vehicle - 50-zzzzz-story-signup.js)
 // where vehicle v is put away to go into place o: o itself where it takes v, else its own PARKING / DOCK for it (lotOf) - null: none
 function storyLotFor(v, o) {
   if (!v || !o) return null; const cat = civCat(v), ok = q => !!q && (strTakes(q) || []).includes(cat) && strAllows(q, v.sv) && strFits(q, v.sv) && !(strWork(q) && v.wk !== q.id);
@@ -74726,7 +74726,7 @@ function storySwap(p, key) {
   const c = crew[p], v = c.mode === 'civ' ? c.civ : null; if (!v) return;
   const lot = T.lot != null ? slStr(T.lot) : null;
   if (T.stand) { if (storyStow(v, lot)) storyArrive(lot.id); return; }   // (a CAR STAND: she's in it with you - its showroom, 50-zzzzz-car-stand.js)
-  if (T.v && (!(T.v.own || folkMine(T.v) || folkFamFree(T.v) || storyTestVeh(T.v) || isPierCrane(T.v)) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }
+  if (T.v && (!(T.v.own || folkMine(T.v) || folkFamFree(T.v) || signTaskVeh(T.v) || storyTestVeh(T.v) || isPierCrane(T.v)) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }
   if (lot && v.berth !== lot.id && storyFreeSpot(lot, v) < 0) { sound('empty', T.wx); return; }
   if (T.o) { storyLeaveAt(p, v, lot); story.came = v.sid; storyGo(p, T.o.id, true, false); sound('storyEnter', T.wx, 'home'); return; }   // (in the place: its screen, the world paused - 50-zzzzz-place-screen.js)
   storyLeaveAt(p, v, lot); storySwapTo(p, T, C0);
@@ -81040,7 +81040,7 @@ ACTS.storyView = (p, on) => { if (p === 0) story.view = on ? 1 : 0; };
 // the vehicle you came in (story.came) / your own you left to start working (story.back) - still there to get back into
 const storyVehSid = sid => sid ? storyVehs().find(v => v.sid === sid) || null : null;
 const placeCame = () => stHere() ? storyVehSid(story.came) : null;
-const workVehAt = (v, o) => !!v && !!o && v.wk === o.id && v.wfor === 'player';
+const workVehAt = (v, o) => !!v && !!o && v.wk === o.id && (v.wfor === 'player' || signTaskVeh(v));   // (or its worker's, a task of yours in it - 50-zzzzz-story-signup.js)
 // yours to get into at place o when the one remembered is gone: put away at it, its lots or what touches it (a car before a boat) - only what's there
 // (user Nov 22 21:16, his car destroyed at KAWAI LIGHTHOUSE: "I pressed get in car, and it took me to another island" - any car of his anywhere was taken)
 function placeOwnVeh(o, notWork) {
@@ -81054,7 +81054,7 @@ function placeScreenRows(o) {
   const R = placeRows(o).slice(), came = placeCame(), working = workVehAt(came, o);
   if (actOf(o)) {
     const T = FOLK.tk;
-    if (working) R.push({ do: 'keep' }, { do: 'stop' });   // (user Nov 22 21:42: back with the catch - "I could have the option get in car or keep fishing")
+    if (working) R.push(...(actAlways(o) ? [{ do: 'keep' }] : []), { do: 'stop' });   // (KEEP: work that's always open - fishing; a task is one run)   // (user Nov 22 21:42: back with the catch - "I could have the option get in car or keep fishing")
     else if (actAlways(o) || (signedAt(o) && T && T.at === o.id && !T.mine)) R.push({ do: 'start' });
     else if (!signedAt(o)) R.push({ do: 'signup' });
   }
@@ -81100,7 +81100,7 @@ function placeStart(p, o) {
   if (!actOf(o)) return;
   if (!signedAt(o)) signToggle(o);                       // (fishing: signed up as you start - its work vehicle kept here)
   keptVehStep();
-  const w = workVehsOf('player').find(v => v.wk === o.id && vehWhole(v) && v.driven == null); if (!w) { sound('empty', o.x); return; }
+  const w = workVehsOf('player').find(v => v.wk === o.id && vehWhole(v) && v.driven == null) || [...storyCars, ...jetboats].find(v => signTaskVeh(v) && v.wk === o.id && vehWhole(v) && v.driven == null); if (!w) { sound('empty', o.x); return; }   // (a task held for you: its worker's vehicle)
   story.back = story.came || (placeOwnVeh(o, true) || {}).sid || 0;
   placeOut(p, w);
 }
@@ -82154,7 +82154,7 @@ const folkFree = v => v.driven == null && !folkTrip(v) && !Object.values(FOLK.c)
 const folkFam = v => { const c = folkOwner(v); return !!c && v.wk == null && famOf('player', c.id); };   // (a work vehicle is the job's, not the family's)
 const folkFamFree = v => !!v && folkFam(v) && !folkMine(v) && folkFree(v);
 // a vehicle that's yours to use: your own, or your family's you've taken (selling from it, what you carry, your objectives)
-const storyYours = v => !!v && (!!v.own || folkMine(v));
+const storyYours = v => !!v && (!!v.own || folkMine(v) || (!!FOLK.tk && !!FOLK.tk.mine && signTaskVeh(v)));   // (a task's vehicle while it's yours - 50-zzzzz-story-signup.js)
 // boarding one of your family's: kept as taken (folkMine) - where it was, to tell its owner
 function folkFamTake(v) { if (folkFamFree(v)) FOLK.st = Object.assign({}, FOLK.st, { [v.sid]: { berth: v.berth, spot: v.spot, x: v.x, fam: 1 } }); }
 // one of theirs taken from them: a family member using it, or someone else at its wheel
@@ -83545,6 +83545,7 @@ function signHold(c, S, J) {
   const T = FOLK.tk;
   if (T && T.at === W0.id && T.who === c.id) {
     if (!T.mine && time < T.start) { S.duty = 1; S.nx = Math.min(T.start, time + 1); return true; }   // (waiting for it to start)
+    if (T.mine) { S.duty = 1; S.nx = time + 1; return true; }                                      // (you took it, in their vehicle: they wait till it's done)
     if (!T.mine) FOLK.tk = null;                                                                     // (started without you: theirs)
     return false;
   }
@@ -83560,6 +83561,11 @@ function signHold(c, S, J) {
   folkLog({ t: 'job', who: c.id, verb: 'HELD FOR YOU TILL ' + hhmm(FOLK.tk.h) + ':', k: FOLK.tk.k, n, at: slPlaceName(W0) });
   S.duty = 1; S.nx = time + 1; return true;
 }
+// (user Nov 22 22:00: "when I sign up to work at the marketplace, there are now 2 trucks in the parking. But what we decided is that they only have 1 truck. You
+// either take the job, if you get there on time, or the NPC does it") a task's vehicle is its worker's: the one their run would go out in (their work vehicle at
+// that place) - boarded before its start it's yours for the task (T.v); signed up you get none of your own there (keptVehStep - only fishing, always open, has
+// a boat for you)
+const signTaskVeh = v => { const T = FOLK.tk; return !!T && !!v && v.wk === T.at && v.wfor === T.who && (T.mine ? T.v === v.sid : time < T.start); };
 // goods of task T from place F into your vehicle v; your objective then to hand them over at D
 // (a task with no good - T.k '': every good there, as much as fits - T.g what was loaded)
 const signKs = T => T.k ? [T.k] : Object.keys(T.g || {});
@@ -83585,10 +83591,10 @@ function signStep() {
   if (!T.mine) {
     if (time >= T.start + 2) { FOLK.tk = null; return; }                       // (its NPC has it)
     const c = crew[0], v = c.mode === 'civ' ? c.civ : null;
-    if (v && v.wk === W0.id && v.wfor === 'player') signTake(T, W0, v);       // (in your work vehicle there before it starts: yours)
+    if (v && signTaskVeh(v)) { T.v = v.sid; signTake(T, W0, v); }            // (in its worker's vehicle there before it starts: yours)
     return;
   }
-  const V = workVehsOf('player').filter(q => q.wk === W0.id), F = slStr(T.to);
+  const V = [folkSid(T.v)].filter(Boolean), F = slStr(T.to);
   if (T.do === 'collect' && !T.got) { const v = V.find(q => F && q.state === 'run' && storyPlace({ v: q }).includes(F)); if (v) signLoad(T, F, v, W0); return; }   // (a COLLECT: parked at the place - storyPlace -, its goods aboard - then home with them)
   if (!V.some(q => signKs(T).some(k => cargoN(q, k) > 0))) { if (story.obj && story.obj.tk === T.id) story.obj = null; FOLK.tk = null; }   // (yours: done once what you took is handed over)
 }
@@ -83947,10 +83953,10 @@ function keptVehStep() {
     const who = whoOf(c), H = stHome(c), veh = (c === PLAYER_C && STR_VEHS[story.car] && story.car) || c.veh;   // (a pick whose design is gone - the MOTORCYCLE, user Nov 22 - lets go of it)   // (the player's own car: the one picked at a CAR STAND - 50-zzzzz-car-stand.js)
     if (veh && STR_VEHS[veh] && H && !strDown(H) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) == null))) workVehMake(H, who, veh, { cv: 1 });
     if (c === PLAYER_C) for (const [I, lot] of playerIsles()) { const sv = (s => STR_VEHS[s] ? s : veh)((story.cars || {})[I.id]); if (sv && STR_VEHS[sv] && !strDown(lot) && workTakes(lot, sv, 'car', null) && keptMissing(ownVehsOf(who).filter(v => isleCarOf(v) === I.id))) workVehMake(lot, who, sv, { cv: CV_ISLE + I.id }); }   // (only at its dock's lot: one that can't take her - the dock red in ISSUES, lotBad - never another place)
-    for (const W0 of c === PLAYER_C ? playerWorks() : [workOf(c)]) if (W0 && !strDown(W0) && workVehD(W0) && keptMissing(workVehsOf(who).filter(v => v.wk === W0.id))) workVehMake(W0, who);   // (the player: one at each place he's signed up at - 50-zzzzz-story-signup.js)
+    for (const W0 of c === PLAYER_C ? playerWorks().filter(actAlways) : [workOf(c)]) if (W0 && !strDown(W0) && workVehD(W0) && keptMissing(workVehsOf(who).filter(v => v.wk === W0.id))) workVehMake(W0, who);   // (the player: one only where the work is always open - fishing; a place's tasks go out in its worker's - signTaskVeh)   // (the player: one at each place he's signed up at - 50-zzzzz-story-signup.js)
   }
   for (const v of [...storyCars, ...jetboats]) if (v.wk != null && vehWhole(v) && v.driven == null && !folkTrip(v) && !folkMine(v)) {
-    const c = charsAll().find(q => whoOf(q) === v.wfor); if (!c || !worksAt(c, v.wk)) workVehGone(v);
+    const c = charsAll().find(q => whoOf(q) === v.wfor); if (!c || !worksAt(c, v.wk) || (c === PLAYER_C && !(o => !!o && actAlways(o))(slStr(v.wk)))) workVehGone(v);
   }
 }
 // START WORK: at the workplace, on foot - their work vehicle is there already (keptVehStep)
