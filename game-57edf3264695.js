@@ -13139,8 +13139,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1370;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 23 11:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1371;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 23 11:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17309,7 +17309,7 @@ function stepChunks(dt) {
       k.x += k.vx * dt; k.y += k.vy * dt; k.a += k.w * dt;
       if (k.lie !== undefined) k.a += (k.lie - k.a) * 0.9 * dt;           // a broken pillar topples as it sinks
       if (k.kind !== 'coral' && armChunkR() < dt * 14) addBubble(k.x + armChunkRnd(-6, 6), k.y + armChunkRnd(-6, 6), armChunkRnd(-6, 6), -armChunkRnd(15, 40), armChunkRnd(0.8, 2.2));
-      const bed = (k.land && onLand(k.x) ? landTop(k.x, 0) : seabedY(k.x)) - (k.hw ? Math.abs(Math.cos(k.a)) * k.hh + Math.abs(Math.sin(k.a)) * k.hw : k.hh * 0.35);
+      const bed = (k.land && onLand(k.x) ? landBelow(k.x, k.y - (k.hh || 0), 0) : seabedY(k.x)) - (k.hw ? Math.abs(Math.cos(k.a)) * k.hh + Math.abs(Math.sin(k.a)) * k.hw : k.hh * 0.35);
       if (k.y >= bed) { k.y = bed; k.rest = true; if (k.kind === 'coral') kickDust(k.x, 3, 0.2); else { kickDust(k.x, k.hh * 1.4, 0.8); scatterBed(k.x, k.hh * 2, 0.6); water.shock(k.x, bed, 0.4, true); } }
       return;
     }
@@ -17319,7 +17319,7 @@ function stepChunks(dt) {
     let floor = k.floor, wet = k.water;
     if (k.kind === 'tower' && (k.dock || homeDock[k.player])) { const d = k.dock || homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; wet = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y + dkY(d); }
     if (k.kind === 'mast') { wet = true; floor = surfaceY(k.x); }
-    if (k.land) { wet = !dryLand(k.x); floor = wet ? surfaceY(k.x) : landTop(k.x, 0); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
+    if (k.land) { wet = !dryLand(k.x); floor = wet ? surfaceY(k.x) : landBelow(k.x, k.y - (k.hh || 0) - k.vy * dt, 0); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
     // (user Oct 27: the harbour is solid for falling pieces - a wing, a gun - over the sea they land on its deck)
     if (k.kind !== 'tower' && k.kind !== 'mast' && wet) { const ht = harbourTop(k.x, k.y - k.hh); if (ht < Infinity) { wet = false; floor = ht; } }
     if (k.y + k.hh * 0.55 < floor) return;
@@ -19376,11 +19376,11 @@ const PLANE_WHEELS = 10;                                   // (the plane's middl
    foot: its middle above what touches (PLANE_WHEELS by default; a seaplane's floats less).
    planeGroundY(x, foot): its middle's y there, or null where it can't be on the ground */
 const PLANE_FLAT = 0.12, PLANE_SPAN = 30, PLANE_BUMP = 6, PLANE_GLIDE = 0.25;
-function planeGroundY(x, foot = PLANE_WHEELS) {
+function planeGroundY(x, foot = PLANE_WHEELS, y) {   // (y: its middle now - the ground under it, never a ground above it: an overhang's top - landBelow)
   if (onApron(x)) return airfieldAt(x).y + PLANE_WHEELS - foot;
   const xa = x - PLANE_SPAN, xb = x + PLANE_SPAN;
   if (!dryLand(xa) || !dryLand(x) || !dryLand(xb)) return null;
-  const a = landTop(xa), m = landTop(x), b = landTop(xb);
+  const top = y == null ? q => landTop(q) : q => landBelow(q, y - 8), a = top(xa), m = top(x), b = top(xb);
   if (Math.abs(b - a) > 2 * PLANE_SPAN * PLANE_FLAT || Math.abs(m - (a + b) / 2) > PLANE_BUMP) return null;
   if (treeAt(x, m - 8)) return null;
   return m - foot;
@@ -19388,10 +19388,10 @@ function planeGroundY(x, foot = PLANE_WHEELS) {
 const planeSoft = pl => !pl.turn && (pl.vy || 0) <= Math.abs(pl.vx || 0) * PLANE_GLIDE + 5;
 const planeClimbing = v => (v.vy || 0) < -1 || v.climbT > 0;
 // the ground's lean under it, as its nose (+ down) facing f: level on the concrete
-const planeGroundPitch = (x, f) => onApron(x) ? 0 : Math.atan2(landTop(x + f * PLANE_SPAN) - landTop(x - f * PLANE_SPAN), 2 * PLANE_SPAN);
+const planeGroundPitch = (x, f, y) => { const top = y == null ? q => landTop(q) : q => landBelow(q, y - 8); return onApron(x) ? 0 : Math.atan2(top(x + f * PLANE_SPAN) - top(x - f * PLANE_SPAN), 2 * PLANE_SPAN); };
 function planeApproach(v, len) {
-  const g = planeGroundY(v.x), f = v.facing || v.dir || 1;
-  return { H: g == null ? Infinity : g - v.y, ahead: g != null && planeGroundY(v.x + f * len) != null };
+  const g = planeGroundY(v.x, undefined, v.y), f = v.facing || v.dir || 1;
+  return { H: g == null ? Infinity : g - v.y, ahead: g != null && planeGroundY(v.x + f * len, undefined, v.y) != null };
 }
 // over ground it can be on, coming at it the way that doesn't crash: the concrete always; elsewhere gently with no tree
 // at its nose or tail, or climbing away (just off it)
@@ -19400,7 +19400,7 @@ function planeApproach(v, len) {
 // the concrete too now (it used to land there at any angle: "in the airport, planes always land", Oct 25); the seaplane on the water
 // by the same rule (spTouch)
 function planeSafeOver(v, foot = PLANE_WHEELS) {
-  if (planeGroundY(v.x, foot) == null) return false;
+  if (planeGroundY(v.x, foot, v.y) == null) return false;
   if (planeClimbing(v)) return true;
   if (!planeSoft(v)) return false;
   if (onApron(v.x)) return true;
@@ -19408,7 +19408,7 @@ function planeSafeOver(v, foot = PLANE_WHEELS) {
   return !treeAt(v.x + f * 28, v.y) && !treeAt(v.x - f * 26, v.y);
 }
 function planeTouch(v, foot = PLANE_WHEELS) {
-  const gy = planeGroundY(v.x, foot);
+  const gy = planeGroundY(v.x, foot, v.y);
   if (gy == null || v.y < gy - 4 || !planeSafeOver(v, foot)) return null;
   return planeClimbing(v) ? 'climb' : 'land';
 }
@@ -19421,10 +19421,10 @@ const PLANE_DROP_SAFE = 140;
 // (user Nov 1 14:47-14:49: dropped higher, it comes down hurt by the height - from PLANE_DROP_WRECK (3x, about 65 m) a
 // wreck; never a blast - 50-land-magnet's stepPlaneDrops)
 const PLANE_DROP_WRECK = 3 * PLANE_DROP_SAFE;
-function planeDropY(v, foot = PLANE_WHEELS) { const gy = planeGroundY(v.x, foot); return gy != null && gy - v.y <= PLANE_DROP_SAFE ? gy : null; }
+function planeDropY(v, foot = PLANE_WHEELS) { const gy = planeGroundY(v.x, foot, v.y); return gy != null && gy - v.y <= PLANE_DROP_SAFE ? gy : null; }
 function planeSetDown(v, foot = PLANE_WHEELS, dust = 6) {
-  const gy = planeGroundY(v.x, foot), f = v.facing || v.dir || 1;
-  planeSusKick(v, (v.vy || 0) + 60); v.y = gy; if (!isFinite(v.pitch) || Math.cos(v.pitch) < 0.7) v.pitch = planeGroundPitch(v.x, f); v.turn = null; v.gear = 1;   // (its angle as it came down - the nose settles onto the ground: stepPlaneGround)
+  const gy = planeGroundY(v.x, foot, v.y), f = v.facing || v.dir || 1;
+  planeSusKick(v, (v.vy || 0) + 60); v.y = gy; if (!isFinite(v.pitch) || Math.cos(v.pitch) < 0.7) v.pitch = planeGroundPitch(v.x, f, v.y); v.turn = null; v.gear = 1;   // (its angle as it came down - the nose settles onto the ground: stepPlaneGround)
   sound('impact', v.x); kickLandDust(v.x, gy + foot, dust);
   return gy;
 }
@@ -19435,7 +19435,7 @@ function planeSetDown(v, foot = PLANE_WHEELS, dust = 6) {
 // half a second on, the nose comes down with its own thump (noseT - stepPlaneGround). Returns 'land' or 'bounce'
 const PLANE_BOUNCE = 6 * UPM;                                     // (coming down faster than 6 m/s it bounces)
 function planeLand(v, foot = PLANE_WHEELS, dust = 6) {
-  const vy = Math.max(0, v.vy || 0), gy = planeGroundY(v.x, foot), f = v.facing || v.dir || 1, vx = Math.abs(v.vx || 0), hard = clamp(vy / PLANE_BOUNCE, 0, 2);
+  const vy = Math.max(0, v.vy || 0), gy = planeGroundY(v.x, foot, v.y), f = v.facing || v.dir || 1, vx = Math.abs(v.vx || 0), hard = clamp(vy / PLANE_BOUNCE, 0, 2);
   if (!SIM_ONLY) {                                                // (the main wheels spinning up: a puff of tyre smoke off each, grey on the concrete, the ground's own off it)
     const n = 2 + Math.round(3 * Math.min(1, vx / 300) + 2 * hard), paved = onApron(v.x);
     for (let i = 0; i < n; i++) { const x = v.x + f * vehPlaneRnd(-10, 2), r0 = vehPlaneRnd(1.5, 3); spawnSmoke(x, gy + foot - r0 - 0.5, { kind: 'dust', mist: true, fam: paved ? 'gray' : 'sand', r: r0, grow: vehPlaneRnd(3, 6), rmax: vehPlaneRnd(10, 18), lift: 2, ground: true, vx: -f * vehPlaneRnd(5, 25) + (v.vx || 0) * 0.15, vy: -vehPlaneRnd(2, 8), life: vehPlaneRnd(1, 2), alpha: vehPlaneRnd(0.3, 0.45) }); }
@@ -19472,7 +19472,7 @@ const hangarShut = (pl, af) => planes.includes(pl) && af.own !== SIDE(pl.id);   
 // Every plane on the ground (stepPlaneGround: the warplanes, the Cessna, the 747). Returns true when it left the roll
 const PLANE_ROLL_FAST = 100;                                     // (about 55 km/h)
 function planeRollOff(pl, nx) {
-  const f = pl.facing || 1, top = pl.y + PLANE_WHEELS, wet = !dryLand(nx), at = x => dryLand(x) ? landTop(x) : surfaceY(x);
+  const f = pl.facing || 1, top = pl.y + PLANE_WHEELS, wet = !dryLand(nx), at = x => dryLand(x) ? landBelow(x, pl.y - 8) : surfaceY(x);
   let lower = wet || at(nx) > top + 4;
   for (let k = 1; !lower && k <= 6; k++) lower = at(nx + f * k * 10) > top + 6;   // (a little ahead too: a crater's rim slopes before it drops - it rolls over it)
   if (pl.spd > PLANE_ROLL_FAST) {
@@ -19506,7 +19506,7 @@ function stepPlaneGround(pl, dt, K, inHangar) {
     return;
   }
   if (pl.exitK > 0) { pl.exitK = Math.max(0, pl.exitK - dt / 1.2); openHangar(af, 1); }   // (coming out of its hangar)
-  const sp = planeGroundPitch(pl.x, pl.facing);                   // (the ground's lean: 0 on the concrete)
+  const sp = planeGroundPitch(pl.x, pl.facing, pl.y);                   // (the ground's lean: 0 on the concrete)
   if (pl.turn) {
     pl.spd = Math.max(0, pl.spd - 200 * dt); pl.turn.t += dt * 0.8;
     if (pl.turn.t >= PLANE_TURN_T) { pl.facing = -pl.turn.from; pl.turn = null; }
@@ -19528,9 +19528,9 @@ function stepPlaneGround(pl, dt, K, inHangar) {
     pl.spd += clamp(want - pl.spd, -160 * dt, 60 * dt);
   }
   // (it rolls along the ground under it - planeGroundY; at the edge of where it can roll, it stops, as at the runway's sea end)
-  { const nx = pl.x + pl.facing * pl.spd * dt, gy = planeGroundY(nx);
+  { const nx = pl.x + pl.facing * pl.spd * dt, gy = planeGroundY(nx, undefined, pl.y);
     if (gy == null && pl.spd > 1 && planeRollOff(pl, nx)) return;   // (rolled off its ground - into a hole, off an edge, into something - planeRollOff)
-    if (gy == null) { pl.spd = 0; pl.ground = 'taxi'; pl.gWant = 0; pl.rot = 0; const g0 = planeGroundY(pl.x); if (g0 != null) pl.y = g0; else if (!onApron(pl.x) && dryLand(pl.x)) groundFall(pl, landTop(pl.x) - PLANE_WHEELS, dt, PLANE_WHEELS, PLANE_SPAN); }   // (user Nov 2: its ground dug away under it - no flat ground left there - it falls into the hole, groundFall - 50-land-rest)
+    if (gy == null) { pl.spd = 0; pl.ground = 'taxi'; pl.gWant = 0; pl.rot = 0; const g0 = planeGroundY(pl.x, undefined, pl.y); if (g0 != null) pl.y = g0; else if (!onApron(pl.x) && dryLand(pl.x)) groundFall(pl, landBelow(pl.x, pl.y - 8) - PLANE_WHEELS, dt, PLANE_WHEELS, PLANE_SPAN); }   // (user Nov 2: its ground dug away under it - no flat ground left there - it falls into the hole, groundFall - 50-land-rest)
     else { pl.x = nx; if (!groundFall(pl, gy, dt, PLANE_WHEELS, PLANE_SPAN)) pl.y = gy; } }   // (the ground under it dropped: it falls onto what's left)
   if (!onApron(pl.x)) { pl.vx = pl.facing * pl.spd; pl.vy = 0; pl.gear = 1; if (!SIM_ONLY && vehPlaneR() < dt * pl.spd / 20) kickLandDust(pl.x - pl.facing * 14, pl.y + PLANE_WHEELS, 1); return; }   // (off the concrete: no runway end, no hangar)
   // the runway's sea end: it stops there (it never rolls off onto the harbour)
@@ -19667,7 +19667,7 @@ function planeCrash(pl) {
   // (OPEN WORLD, user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport"; Nov 1:
   // and on any flat ground, coming down gently - planeGroundY / planeSoft)
   if (!what && LAND && pl.state === 'fly') { const t = planeTouch(pl);
-    if (t === 'climb') { pl.y = Math.min(pl.y, planeGroundY(pl.x)); return false; }   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
+    if (t === 'climb') { pl.y = Math.min(pl.y, planeGroundY(pl.x, undefined, pl.y)); return false; }   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
     if (t === 'land' && planeLand(pl) === 'land') { pl.ground = 'land'; pl.flare = 0.6; return false; } }
   if (!what) { const at = landPlaneCrash(pl, pts); if (at) { what = at[2] ? 'ground' : 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
   let deck = null;                                               // (OPEN WORLD: onto a ship's top it comes down on her deck - user Oct 27, [19])
@@ -19771,7 +19771,7 @@ function stepPlanes(dt) {
           const yT = af.y - Math.max(0, D) * 0.15;
           want = clamp((yT - pl.y) / 90, -0.45, 0.45);
           pl.spd += (215 - pl.spd) * Math.min(1, dt * 0.8);
-          if (D < 80 && pl.y >= af.y - 3 && planeGroundY(pl.x) != null && planeLand(pl) === 'land') { pl.ground = 'land'; pl.flare = 0.6; }   // (the one touchdown - planeLand)
+          if (D < 80 && pl.y >= af.y - 3 && planeGroundY(pl.x, undefined, pl.y) != null && planeLand(pl) === 'land') { pl.ground = 'land'; pl.flare = 0.6; }   // (the one touchdown - planeLand)
         }
       }
       // (user Oct 25) flying home it never runs into another plane (or a helicopter): one ahead at its height, it
@@ -19830,7 +19830,7 @@ function stepPlanes(dt) {
     // home, dodging). Its speed is its own: a dive builds it, a climb spends it, the engine holds its cruise)
     const ai = !forced && pl.aiGamT > time - 0.25;                              // (the CPU's pilot: the path it wants - 49-cpu.js)
     const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd || pl.loiter) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (stopped - pl.loiter: STOP's hold in flyStep, whoever's seat it is)   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
-    if (gearWant && LAND) { const g = planeGroundY(pl.x); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
+    if (gearWant && LAND) { const g = planeGroundY(pl.x, undefined, pl.y); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
     flyStep(pl, dt, ctl, wpKind(pl).flight, 'facing', PLANE_TURN_T);
     // heading for the enemy's edge it turns round in time, so it never leaves the world on their side; stopped (the stop
     // button): it circles where it is, turning back each time it's gone a little way
@@ -27070,7 +27070,7 @@ const PLANE_COAST_W = 1.8, PLANE_LEAD_HOLD = 1.5, PLANE_LEAD_ARC = 0.45, PLANE_L
 // more than PLANE_GND_MAX of a half-view down (the plane stays well in the view), fading in from PLANE_GND_IN to PLANE_GND_ON; on
 // the lead's own spring. Low over it the ground's in the view already: nothing moves
 const PLANE_GND_AT = 0.7, PLANE_GND_MAX = 0.5, PLANE_GND_ON = 1.35, PLANE_GND_IN = 1.6;
-const planeFloorY = x => dryLand(x) ? landTop(x) : surfaceY(x);   // (what it would crash into under x: the ground, else the sea)
+const planeFloorY = (x, y = -Infinity) => dryLand(x) ? landBelow(x, y) : surfaceY(x);   // (what it would crash into under x: the ground, else the sea)
 // (user Nov 3 14:44-14:59: "when you crash in the water, the camera suddenly snaps. It should be very smooth when you fall into the water,
 // so you follow the crash of the plane" - the view rode the plane rigidly, and its wreck stops nearly dead in the water: the view
 // stopped in a frame) the view's carry: when the view leaves a flying plane (its wreck, nothing driven), it keeps the plane's way on
@@ -27092,7 +27092,7 @@ function planeLeadStep(i, dt) {
     // share of the half-view (L.x of hw, L.y of hh): at any zoom the plane sits at the same place on the screen - planeLeadF)
     const k = clamp(sp / (0.6 * FLIGHT[kind].vc() * UPM), 0, 1), wx = ONEVIEW() ? 1 / 3 : 1 / 6;
     tx = L.ux * wx * k; ty = L.uy / 3 * k;
-    const H = (Math.min(planeFloorY(v.x), planeFloorY(v.x + (v.vx || 0))) - v.y) / hh;   // (how high over the ground, under it or a second ahead - in half-views)
+    const H = (Math.min(planeFloorY(v.x, v.y), planeFloorY(v.x + (v.vx || 0), v.y)) - v.y) / hh;   // (how high over the ground, under it or a second ahead - in half-views)
     const kg = smoothstep(PLANE_GND_IN, PLANE_GND_ON, H);
     if (kg > 0) ty = Math.min(ty + clamp(H - PLANE_GND_AT, 0, PLANE_GND_MAX) * kg, PLANE_GND_MAX);   // (the ground lead - with the speed's, no further down than its most)
   } else { L.a = null; L.t = 0; L.ux = L.uy = 0; }                  // (out of the air - down, wrecked, landed: the lead eases out)
@@ -45145,7 +45145,7 @@ function stepBalloon(b, dt) {
       // (a big ship's hull or superstructure: it tears on it and comes down - the shared hullStrike, user Oct 27 night)
       if (b.state === 'fly' && !dryLand(b.x)) { const q = balloonBox(b); if (hullStrike([[b.x, b.y - 2], [q.cx - q.hw * 0.8, q.cy], [q.cx + q.hw * 0.8, q.cy], [q.cx, q.cy + q.hh * 0.8]], 0.3, 0)) balloonPop(b, false, b.x, b.y - 4); }
       if (b.driven == null && !held && b.y > WATER_Y - 200 && b.burn <= 0) { b.burn = 3; b.burnT = 3; }          // (low: it burns to climb away)
-      if (b.driven != null) { const fl = dryLand(b.x) ? landTop(b.x) : surfaceY(b.x); if (b.y > fl) { b.y = fl; b.vy = Math.min(0, b.vy); if (!dryLand(b.x)) { ditchFx(b.x, 0, 1); b.state = 'sink'; b.vy = 30; b.fire = 0; b.t = 0; civLetGo(b); } } }   // (set down on land it rests; on water, in it goes)
+      if (b.driven != null) { const fl = dryLand(b.x) ? landBelow(b.x, b.y - 30) : surfaceY(b.x); if (b.y > fl) { b.y = fl; b.vy = Math.min(0, b.vy); if (!dryLand(b.x)) { ditchFx(b.x, 0, 1); b.state = 'sink'; b.vy = 30; b.fire = 0; b.t = 0; civLetGo(b); } } }   // (set down on land it rests; on water, in it goes)
     } else {
       // popped, then falling: torn for a moment, then the deflated envelope streaming air as it drops
       b.popT += dt;
@@ -45158,7 +45158,7 @@ function stepBalloon(b, dt) {
         b.fire = Math.min(3, b.fire + dt); b.scorch = Math.min(1, b.scorch + dt * 0.6);
         if (!SIM_ONLY) { for (let k = 0; k < 2; k++) spawnFlame(q.cx + balRnd(-q.hw, q.hw) * 0.6, q.cy + balRnd(-q.hh, q.hh) * 0.6, balRnd(-10, 10), -balRnd(30, 70), 1.2, balRnd(3, 6), 1.6); if (balR() < dt * 10) spawnSmoke(q.cx, q.cy - q.hh * 0.5, { kind: 'dust', rise: true, dark: 0, r: balRnd(4, 7), grow: 5, lift: 30, vx: wind * 0.3, vy: -balRnd(20, 40), life: balRnd(4, 6), alpha: 0.6 }); }
       }
-      const wet = !dryLand(b.x), floor = wet ? surfaceY(b.x) : landTop(b.x);
+      const wet = !dryLand(b.x), floor = wet ? surfaceY(b.x) : landBelow(b.x, b.y - b.vy * dt - 30);
       if (b.y >= floor) {
         if (wet) { ditchFx(b.x, 0, 1); b.state = 'sink'; b.vy = 30; b.fire = 0; }   // (into the water: it sinks to the bottom)
         else { kickLandDust(b.x, floor, 12); spawnDebris(b.x, floor - 4, 6, 0); b.state = 'wreck'; b.y = floor; b.a = 0.25 * (balR() < 0.5 ? -1 : 1); }   // (on land: it lies there, smoking)
@@ -45338,7 +45338,7 @@ function stepBlimp(b, dt) {
       b.burstT = (b.burstT || 0) + dt;
       b.sag = Math.min(1, b.sag + dt * 0.6); b.vy = Math.min(150, b.vy + 40 * dt); b.vx *= 1 - 0.4 * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.ang += (b.face * 0.35 - b.ang) * dt;
       if (!SIM_ONLY && blR() < dt * (b.burstT < 2 ? 16 : 5)) { const [px, py] = blimpPoint(b, blRnd(20, 150), blRnd(8, 30)); spawnSmoke(px, py, { kind: 'trail', mist: true, r: blRnd(3, 6), grow: 5, lift: 20, vx: blRnd(-20, 20), vy: -blRnd(10, 40), life: blRnd(1.2, 2), alpha: 0.4, stream: smStream(b, 'leak') }); }
-      const wet = !dryLand(b.x), fl = wet ? surfaceY(b.x) : landTop(b.x);
+      const wet = !dryLand(b.x), fl = wet ? surfaceY(b.x) : landBelow(b.x, b.y - b.vy * dt - 30);
       if (b.y >= fl) { if (wet) { ditchFx(b.x, b.vx, 2); b.state = 'sink'; } else { sectionBlast(b.x, fl - 6, 1.2, b.vx * 0.3); spawnDebris(b.x, fl - 8, 16, b.vx * 0.3); b.state = 'wreck'; b.y = fl; b.burn = 30; } }
       return;
     }
@@ -45355,7 +45355,7 @@ function stepBlimp(b, dt) {
     b.vx += clamp(lever * BLIMP_V - b.vx, -8 * dt, 8 * dt);
     if (Math.abs(b.vx) > 3) b.dir = Math.sign(b.vx);              // (which way it's going - its nose stays toward the other country)
     b.vy += (st * 30 - b.vy) * Math.min(1, dt * 0.8);
-    b.x = clamp(b.x + b.vx * dt + windAt(b.y) * (b.placed != null && !mine ? 0 : 0.08) * dt, (mine ? PLAY_L() : 0) + 200, (mine ? PLAY_R() : WORLD_W) - 200); b.y = clamp(b.y + b.vy * dt, SKY_TOP + 200, (dryLand(b.x) ? landTop(b.x) : surfaceY(b.x)) - 40);
+    b.x = clamp(b.x + b.vx * dt + windAt(b.y) * (b.placed != null && !mine ? 0 : 0.08) * dt, (mine ? PLAY_L() : 0) + 200, (mine ? PLAY_R() : WORLD_W) - 200); b.y = clamp(b.y + b.vy * dt, SKY_TOP + 200, (dryLand(b.x) ? landBelow(b.x, b.y) : surfaceY(b.x)) - 40);
     b.ang = Math.sin(time * 0.4 + b.ph) * 0.02 - clamp(b.vy / 200, -0.08, 0.08) * b.face;   // (nose up climbing)
     // shot: rounds barely, a shell or a missile a lot; its gas gone, down it comes
     // (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle, balloons and the blimp... Why not?") where it's hit is
@@ -45785,7 +45785,7 @@ function stepCivAir(f, dt) {
   // concrete anyhow, it's a landing
   // (Nov 1: and on any flat ground, coming down gently - the planes' shared planeTouch / planeSetDown, 29-plane.js)
   if (planeTouch(f) === 'land' && planeLand(f) === 'land') { f.ground = 'land'; f.flare = 0.6; return; }   // (or it bounced, and floats a moment - planeLand, 29-plane.js)
-  const ht = dryLand(f.x) ? hangarRoofUnder(f.x, f.y - 10) : harbourTop(f.x, f.y - 10), wet = !dryLand(f.x) && ht === Infinity, floor = ht < Infinity ? ht : wet ? surfaceY(f.x) : landTop(f.x);   // (the harbour's deck: ground - user Oct 27)
+  const ht = dryLand(f.x) ? hangarRoofUnder(f.x, f.y - 10) : harbourTop(f.x, f.y - 10), wet = !dryLand(f.x) && ht === Infinity, floor = ht < Infinity ? ht : wet ? surfaceY(f.x) : landBelow(f.x, f.y - 10);   // (the harbour's deck: ground - user Oct 27)
   // (Nov 3 GPU check: its wheels - flown free, it's drawn standing on them, PLANE_WHEELS under its y (trafficPic's lift). It was
   // T.h x T.k x 0.3, scaled twice by its real size: 103 units - a 747 just off the runway, 16 m over rough ground, was "down")
   if (f.y + PLANE_WHEELS >= floor && !planeSafeOver(f)) { if (wet) trafficDitch(f); else { f.state = 'fly'; trafficDown(f); f.vy = Math.max(f.vy, 40); } }   // (into the water, not hit: it sinks - user Oct 26)   // (over the concrete never: it lands, or it's climbing away; nor coming down gently onto flat ground - it lands, above)
@@ -46360,7 +46360,7 @@ function civHeliDown(h) {
 function civHeliPlan(h, dt) {
   const ai = h.ai;
   if (!ai) return [0, 0];
-  const gy = landTopAt(h.x) - chStand(h);
+  const gy = landTopAt(h.x, h.y) - chStand(h);
   if (ai.phase === 'go' || ai.phase === 'home') {
     // (user Oct 27 night: "A helicopter flying home must not drop its load") left with something on its magnet, it
     // carries it home and sets it down on its airfield's concrete, clear of the pads, before it lands (civLoadHome)
@@ -46390,7 +46390,7 @@ function civHeliTrip(h) {
   const N = nearestShore(h.home), coast = N.x, inl = -N.dir, ap = structIn('airport', h.R), sp = ap ? Math.max(0, ap.u - 150) : 0, tx = sp > 0 && chR() < 0.5 ? airfieldOf(h.R).near + inl * chRnd(-600, 900) : chR() < 0.8 ? coast + inl * chRnd(150, 1800) : coast - inl * chRnd(100, 500);
   h.ai = { phase: 'go', tx, ty: WATER_Y - chRnd(250, 600) };
 }
-const landTopAt = x => dryLand(x) ? landTop(x) : surfaceY(x);
+const landTopAt = (x, y = -Infinity) => dryLand(x) ? landBelow(x, y) : surfaceY(x);   // (y: where it is - the ground under it, never an overhang's top over it)
 // where a civilian helicopter sets down a load it brought home: its airfield's concrete, 400 on from its pad toward the
 // sea (clear of both pads and the hangar)
 const civLoadSpot = h => h.home + airfieldAt(h.home).dir * 400;
@@ -46409,8 +46409,8 @@ function chUnder(h) {
     // (standing: on the terrain layer under its feet - its pad's, layRest - and that's its layer; in the air a flier: the front layer, or its own layer's
     // ground coming down onto it - flierBelow)
     const yF = h.y + chStand(h);
-    if (h.state === 'parked' || h.state === 'landed') { if (!layHas(h.x)) { h.lay = 0; return [landTop(h.x), null]; } const R = layRest(h.x, yF); h.lay = R.lay; return [R.y, null]; }
-    return [layOn() ? flierBelow(h.x, yF - 8, h.lay) : landTop(h.x), null];
+    if (h.state === 'parked' || h.state === 'landed') { if (!layHas(h.x)) { h.lay = 0; return [landBelow(h.x, yF - 8), null]; } const R = layRest(h.x, yF); h.lay = R.lay; return [R.y, null]; }
+    return [layOn() ? flierBelow(h.x, yF - 8, h.lay) : landBelow(h.x, yF - 8), null];
   }
   const s = surfaceY(h.x), d = shipTopAt(h.x, h.y + chStand(h) - 8);
   // (user Oct 27: the harbour's deck and the hangar roof are ground too - its dock is what it stands on, so the pier
@@ -46460,7 +46460,7 @@ function stepCivHeli(h, dt) {
       // (onto the harbour's stone: a wreck there, no crater; onto a ship's top: on her deck - user Oct 27, [19]; the water:
       // it sinks; the land: a crater)
       const [fl0, dk0] = chUnder(h), dk = deckUp(dk0) ? dk0 : null, ht = dryLand(h.x) ? hangarRoofUnder(h.x, h.y - 10) : harbourTop(h.x, h.y - 10);
-      const wet = !dryLand(h.x) && ht === Infinity && !dk, fl = ht < Infinity ? ht : dk ? fl0 : wet ? surfaceY(h.x) : landTop(h.x);
+      const wet = !dryLand(h.x) && ht === Infinity && !dk, fl = ht < Infinity ? ht : dk ? fl0 : wet ? surfaceY(h.x) : landBelow(h.x, h.y - 10);
       if (h.y >= fl) {
         h.onDeck = false;
         if (wet) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; }
@@ -46844,7 +46844,7 @@ function stepAirStreaks(dt) {
     const w = halfWorldW(v.z) * 2, h = VIEW_H / v.z, n = dt * w * h / 90000;
     for (let k = 0; k < 3 && simR('civLife') < n - k; k++) {
       const x = v.l + simR('civLife') * w, y = v.top + simR('civLife') * h;
-      if (y > (dryLand(x) ? landTop(x, 0) - 40 : surfaceY(x) - 30)) continue;
+      if (y > (dryLand(x) ? landBelow(x, y - 40, 0) - 40 : surfaceY(x) - 30)) continue;
       const max = simRnd('civLife', 1.2, 2.4), i = airStreaks.add(), c = airStreaks.c; c.x[i] = x; c.y[i] = y; c.age[i] = 0; c.max[i] = max;
     }
   }
@@ -48028,19 +48028,19 @@ function cpuHeli(B, dt) {
   }
   if (B.mend) {
     cpuSetMG(B, false);
-    if (Math.abs(homeX - h.x) > 40) { cpuHeliFly(B, h, homeX, landTop(h.x) - 150, dt); return; }
+    if (Math.abs(homeX - h.x) > 40) { cpuHeliFly(B, h, homeX, landBelow(h.x, h.y) - 150, dt); return; }
     // down gently onto its pad
     if (telegraphs[p].idx !== 3) driveCmd(p, 3);
-    const gap = landTop(h.x) - (h.y + heliSkid());
+    const gap = landBelow(h.x, h.y) - (h.y + heliSkid());
     diveHold[p] = gap > 80 ? 0.6 : 0.3;
     return;
   }
   const tg = E.heli || E.tank || E.heliDown;
-  if (!tg) { cpuHeliFly(B, h, (h.x + WORLD_W / 2) / 2, landTop(h.x) - 160, dt); cpuSetMG(B, false); return; }
+  if (!tg) { cpuHeliFly(B, h, (h.x + WORLD_W / 2) / 2, landBelow(h.x, h.y) - 160, dt); cpuSetMG(B, false); return; }
   const dx = tg.x - h.x, dir = Math.sign(dx) || 1, dist = Math.abs(dx);
   // stand off at a range, low over a tank (level with a helicopter); come round if it's past
   const stand = tg === E.heli ? 300 : 340 - 60 * B.level, alt = tg === E.heli ? tg.y : tg.y - 46;
-  cpuHeliFly(B, h, tg.x - dir * stand, dist < 700 ? alt : landTop(h.x) - 160, dt);
+  cpuHeliFly(B, h, tg.x - dir * stand, dist < 700 ? alt : landBelow(h.x, h.y) - 160, dt);
   // the gun: pointed where it'll be, fired while it's on
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8), facing = h.turn ? -h.turn.from : h.facing;
   if (facing === dir && !h.turn && dist < 560) {
@@ -48627,7 +48627,7 @@ function stepContainers(dt) {
       } }
     if (wet && k.y + CONT_H / 2 >= surfaceY(k.x)) { k.inWater = true; k.knocked = false; k.vy *= 0.25; lakeSplash(k.x, 0.6); continue; }
     if (!wet) {
-      const g = ht < Infinity ? ht : landTop(k.x, 0);                       // (the harbour's deck or roof, or the ground)
+      const g = ht < Infinity ? ht : landBelow(k.x, yb0 - CONT_H, 0);                       // (the harbour's deck or roof, or the ground)
       if (k.y + CONT_H / 2 >= g) { k.y = g - CONT_H / 2; k.where = 'rest'; k.deck = null; k.a = 0; k.vx = 0; kickLandDust(k.x, g, 4); sound('impact', k.x); }
     }
   }
@@ -48933,7 +48933,7 @@ function nearFlame(x, y) {
 // (user Oct 27: "everything blocks it" - every vehicle and box takes the water, each by its own hit test as the weapons
 // do; only the crane's open frame lets it through, as it does every round fired at the tower behind it)
 function hoseSolid(x, y, src) {
-  if (dryLand(x) && y >= landTop(x)) return 'ground';
+  if (dryLand(x) && landSolid(x, y)) return 'ground';   // (in the ground there - under an overhang the air under it isn't)
   for (const d of docks) if (harbourHit(d, x, y)) return 'pier';
   if (civAt(x, y)) return 'ship';
   for (const q of HOSE.boxes) if (Math.abs(x - q[1]) < CONT_W / 2 && Math.abs(y - q[2]) < CONT_H / 2) return 'box';
@@ -49006,7 +49006,7 @@ function stepHose(dt) {
     }
     const px = d.x, py = d.y; d.x += d.vx * dt; d.y += d.vy * dt;
     let gone = false;
-    if (d.sp) gone = d.age > d.life || (dryLand(d.x) ? d.y >= landTop(d.x) && d.vy > 0 : d.y > surfaceY(d.x));   // (a splash off something)
+    if (d.sp) gone = d.age > d.life || (dryLand(d.x) ? landSolid(d.x, d.y) && d.vy > 0 : d.y > surfaceY(d.x));   // (a splash off something)
     else {
       // (lab V46, user: "if the water particles hit the fire, it puts it down. Not having to aim the cursor at it
       // perfectly") fire it touches takes it anywhere along its flight
@@ -49029,7 +49029,7 @@ function stepHose(dt) {
         const k = hoseSolid(d.x, d.y, d.src);
         if (k) {
           for (const q of S) if (d.x >= q.x0 && d.x <= q.x1 && d.y >= q.y0 - 150 && d.y <= q.y1 + 4) { if (host) q.douse(pw); hoseQuench(d.x, d.y, 16); if (HOSE.steamTok >= 1 && hoseR() < 0.5) { HOSE.steamTok -= 1; steamAt(d.x, d.y - 6, 1.2); } hoseHit(d.x, d.y, 'fire'); gone = true; break; }
-          if (!gone) { hoseHit(d.x, d.y, k); if (dryLand(d.x) || k !== 'ground') hoseSplash(d.x, k === 'ground' ? landTop(d.x) : d.y, d.vx); if (!dryLand(d.x) && hoseR() < 0.5) spawnSpray(d.x, d.y, -d.vx * 0.1, 0.35); gone = true; }
+          if (!gone) { hoseHit(d.x, d.y, k); if (dryLand(d.x) || k !== 'ground') hoseSplash(d.x, k === 'ground' ? landBelow(d.x, py) : d.y, d.vx); if (!dryLand(d.x) && hoseR() < 0.5) spawnSpray(d.x, d.y, -d.vx * 0.1, 0.35); gone = true; }
         }
       }
       // the sea: it splashes
@@ -53087,9 +53087,9 @@ function magDrop(o) {
 }
 // a plane on its wheels where it was let go (the seaplane on its floats, the orbiter landed)
 function magSetDown(o, gy, foot) {
-  if (shuttles.includes(o)) { o.state = 'landed'; o.y = gy; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.wait = 45; return; }
+  if (shuttles.includes(o)) { o.state = 'landed'; o.y = gy; o.pitch = planeGroundPitch(o.x, o.facing || 1, gy); o.wait = 45; return; }
   if (seaplanes.includes(o)) { o.state = 'gone'; o.wait = 30; return; }
-  o.ground = 'taxi'; o.y = gy; o.spd = 0; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.gWant = 0; susKick(o, 60); kickLandDust(o.x, gy + foot, 4);
+  o.ground = 'taxi'; o.y = gy; o.spd = 0; o.pitch = planeGroundPitch(o.x, o.facing || 1, gy); o.gWant = 0; susKick(o, 60); kickLandDust(o.x, gy + foot, 4);
 }
 /* (user Nov 1 14:47: "If a plane is dropped by a crane from a high height, it should not explode. It should have damage,
    do some smoke and dust, but not have an explosion. Explosions is only when it's hit by something or when it crashes at
@@ -53112,11 +53112,11 @@ function stepPlaneDrops(dt) {
     o.x = clamp(o.x + o.vx * dt, PLAY_L() + 40, PLAY_R() - 40); o.y += o.vy * dt;
     const foot = dropFoot(o), wet = !dryLand(o.x), ht = wet ? harbourTop(o.x, o.y - 10) : hangarRoofUnder(o.x, o.y - 10);
     const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 30) : null, onShip = !!dk && dk.y < surfaceY(o.x) && dk.y < ht;
-    const floor = onShip ? dk.y : ht < Infinity ? ht : wet ? surfaceY(o.x) : landTop(o.x);
+    const floor = onShip ? dk.y : ht < Infinity ? ht : wet ? surfaceY(o.x) : landBelow(o.x, o.y - o.vy * dt - 10);
     if (o.y + foot < floor) continue;
     o.carried = null; o.hookA = null;
     if (wet && !onShip && ht === Infinity) { planeDropWater(o); continue; }
-    const gy = onShip || ht < Infinity ? null : planeGroundY(o.x, foot), k = (o.y - o.dropFrom - PLANE_DROP_SAFE) / (PLANE_DROP_WRECK - PLANE_DROP_SAFE);
+    const gy = onShip || ht < Infinity ? null : planeGroundY(o.x, foot, o.y - o.vy * dt), k = (o.y - o.dropFrom - PLANE_DROP_SAFE) / (PLANE_DROP_WRECK - PLANE_DROP_SAFE);
     if (!SIM_ONLY) { kickLandDust(o.x, floor, 10 + 8 * clamp(k, 0, 1)); for (let i = 0; i < 6; i++) spawnSmoke(o.x + magRnd(-14, 14), floor - magRnd(2, 10), { kind: 'blast', dark: 0.45, r: magRnd(4, 7), grow: magRnd(3, 5), lift: 20, vx: magRnd(-15, 15), vy: magRnd(-30, -10), life: magRnd(3, 5), alpha: 0.5 }); }
     sound('impact', o.x);
     if (gy != null && k < 1) { magSetDown(o, gy, foot); planeDropHurt(o, k); continue; }
@@ -53477,8 +53477,8 @@ const plantPerchGone = j => { const it = perches.c.plant[j]; return !it || it.st
 function plantPerchThreat(x) {
   for (const t of tanks) if (t && t.state === 'alive' && Math.abs(t.x - x) < 160 && Math.abs(t.vx) > 4) return t.x;
   for (const h of helis) if (h && (h.state === 'fly' || h.state === 'landed') && Math.abs(h.x - x) < 220) return h.x;
-  for (const pl of planes) if (pl && pl.state === 'fly' && Math.abs(pl.x - x) < 260 && pl.y > landTop(x, 0) - 300) return pl.x;
-  for (const h of civHelis) if (h.state === 'fly' && Math.abs(h.x - x) < 220 && h.y > landTop(x, 0) - 260) return h.x;
+  for (const pl of planes) if (pl && pl.state === 'fly' && Math.abs(pl.x - x) < 260 && pl.y > landBelow(x, pl.y, 0) - 300) return pl.x;
+  for (const h of civHelis) if (h.state === 'fly' && Math.abs(h.x - x) < 220 && h.y > landBelow(x, h.y, 0) - 260) return h.x;
   return null;
 }
 // each frame (stepBirds): every tree spot on its crown as it is now; a bird whose tree went flies off
@@ -53661,7 +53661,7 @@ on('blast', e => { plantsBlast(e.x, e.y, e.r); }, 'plants', 20);
 function plantsBlast(x, y, r) {
   if (!PLT.grid.length || r < 8) return;
   // (on the forest's grass, near the ground: the grass round it catches)
-  if (r >= 20 && onLand(x) && Math.abs(y - landTop(x, 0)) < r && plR() < 0.7) { groundFire(x - r * 0.6, -1); groundFire(x + r * 0.6, 1); for (let c = ltCol(x - r * 0.6); c <= ltCol(x + r * 0.6); c++) if (c >= 0 && c < land.cols && grassTop(c * LT_CELL + 1)) PLT.scar[c] = Math.max(PLT.scar[c], 180); }
+  if (r >= 20 && onLand(x) && Math.abs(y - landBelow(x, y - r, 0)) < r && plR() < 0.7) { groundFire(x - r * 0.6, -1); groundFire(x + r * 0.6, 1); for (let c = ltCol(x - r * 0.6); c <= ltCol(x + r * 0.6); c++) if (c >= 0 && c < land.cols && grassTop(c * LT_CELL + 1)) PLT.scar[c] = Math.max(PLT.scar[c], 180); }
   plantsNear(x, r * 1.5 + 40, it => {
     if (!(plantBlown(it) || it.uw) || !plantLive(it)) return;   // (under the water every prefab plant breaks, DECK 1 or not - user Nov 9 09:16)
     const top = propTop(it), hh = it.state === 'stand' ? plantH(it) : 8;
@@ -55173,7 +55173,7 @@ function landCrash(x, gy, o) {
     const dk = deck && shipTopAt(p.x, gy - 30), ht = o.stone ? harbourTop(p.x, gy - 30) : Infinity;
     if (dk && dk.c === deck) { p.y = dk.y; p.mode = 'deck'; }
     else if (ht < Infinity) { p.y = ht; p.mode = 'stone'; }                                   // (on the harbour's stone: there till the pier goes)
-    else if (onLand(p.x) && !lakeAt(p.x)) { p.y = landTop(p.x) + crshRnd(0.5, 2); p.mode = 'land'; }
+    else if (onLand(p.x) && !lakeAt(p.x)) { p.y = landBelow(p.x, p.y - 4) + crshRnd(0.5, 2); p.mode = 'land'; }
     else { p.y = Math.min(gy, surfaceY(p.x) - 4); p.mode = 'air'; p.vy = 0; }
   }
   return crashes.handle(crashes.addRowId(W));
@@ -55196,7 +55196,7 @@ function stepCrash(W, dt) {
   let xa = W.x - 8, xb = W.x + 8, top = W.y;
   if (P && P.length) { xa = 1e9; xb = -1e9; for (const p of P) { xa = Math.min(xa, p.x - p.half); xb = Math.max(xb, p.x + p.half); top = Math.min(top, p.y - p.dy * 1.6); } }
   W.xa = xa; W.xb = xb; W.top = top;                          // (where it burns: the water cannon's target - fireSpots)
-  const along = () => { const fx = crshRnd(xa - 4, xb + 4); return [fx, (onLand(fx) && !lakeAt(fx) && !W.deck ? landTop(fx) : W.y) - 1]; };
+  const along = () => { const fx = crshRnd(xa - 4, xb + 4); return [fx, (onLand(fx) && !lakeAt(fx) && !W.deck ? landBelow(fx, W.y - 10) : W.y) - 1]; };
   const nOf = rate => Math.floor(rate * dt + crshR());   // (how many this frame, at that many a second)
   if (burning) {
     const k = 1 - 0.6 * smoothstep(0.65, 1, u);
@@ -55226,14 +55226,14 @@ function stepCrashPiece(W, p, dt) {
     p.mode = 'air'; p.vy = 0;
   }
   if (p.mode === 'air') {
-    p.vy = Math.min(500, (p.vy || 0) + 430 * dt); p.y += p.vy * dt;
-    if (onLand(p.x) && !lakeAt(p.x)) { const g = landTop(p.x); if (p.y >= g) { p.y = g; p.mode = 'land'; restLanded(p.x, g, p.vy, 0.5); } return; }
+    const py0 = p.y; p.vy = Math.min(500, (p.vy || 0) + 430 * dt); p.y += p.vy * dt;
+    if (onLand(p.x) && !lakeAt(p.x)) { const g = landBelow(p.x, py0 - 1); if (p.y >= g) { p.y = g; p.mode = 'land'; restLanded(p.x, g, p.vy, 0.5); } return; }
     const sy = surfaceY(p.x);   // (its own water's surface - a lake's as the sea's: user Nov 3)
     if (p.y >= sy) { p.mode = 'wet'; ditchFx(p.x, 0, 0.7); }
     return;
   }
   if (p.mode === 'wet') {
-    const bed = dryLand(p.x) ? landTop(p.x) : seabedY(p.x);   // (a lake's bed with its rocks, as the sea's - seabedY)
+    const bed = dryLand(p.x) ? landBelow(p.x, p.y - 4) : seabedY(p.x);   // (a lake's bed with its rocks, as the sea's - seabedY)
     p.y = Math.min(bed, p.y + 24 * dt);
     if (!SIM_ONLY && crshR() < dt * 5) addBubble(p.x + crshRnd(-6, 6), p.y - 4, crshRnd(-4, 4), -crshRnd(15, 30), crshRnd(0.8, 1.6));
     if (p.y >= bed - 0.5) { p.mode = 'bed'; kickDust(p.x, 14, 0.5); }
@@ -55309,7 +55309,7 @@ function stepPadBoom(P, dt) {
   if (SIM_ONLY) return;
   const rise = 40 + 55 * Math.min(t, 5), w = 40 + 25 * t;
   if (t < 4.5) for (let i = padPerSec(150 * (1 - t / 4.5) * fwFlames(), dt); i > 0; i--) spawnFlame(B.x + padRnd(-1, 1) * w, B.y - rise + padRnd(-1, 1) * (30 + 18 * t), padRnd(-30, 30), -padRnd(30, 90), padRnd(1.4, 1.8), padRnd(9, 18) * (1 - 0.4 * t / 4.5), padRnd(0.6, 1));
-  if (t < 20) for (let i = padPerSec(30 * (1 - t / 20) * fwFlames(), dt); i > 0; i--) { const x = B.x + padRnd(-110, 110); spawnFlame(x, (dryLand(x) ? landTop(x) : B.y) - 1, padRnd(-10, 10), -padRnd(20, 60), padRnd(1.2, 1.5), padRnd(3, 7), padRnd(1, 1.5)); }
+  if (t < 20) for (let i = padPerSec(30 * (1 - t / 20) * fwFlames(), dt); i > 0; i--) { const x = B.x + padRnd(-110, 110); spawnFlame(x, (dryLand(x) ? landBelow(x, B.y - 40) : B.y) - 1, padRnd(-10, 10), -padRnd(20, 60), padRnd(1.2, 1.5), padRnd(3, 7), padRnd(1, 1.5)); }
   if (t > 0.5) for (let i = padPerSec(28 * (1 - t / 32), dt); i > 0; i--) spawnSmoke(B.x + padRnd(-1, 1) * w * 0.8, B.y - rise * 0.8 - padRnd(0, 40), { fire: w * (1 - t / 32), dark: t < 8 ? 0 : 0.2, r: padRnd(10, 16), grow: padRnd(6, 9), rmax: 90, lift: 70, vx: padRnd(-14, 14), vy: -padRnd(40, 90), life: padRnd(18, 26), alpha: 0.9, rise: true, stream: smStream(B) });
 }
 
@@ -55405,7 +55405,7 @@ function stepSeaplane(s, dt) {
       // (the harbour's deck is ground, a ship's top too - user Oct 27, [19]; on land, the stone or a deck what's left of it
       // stays, burning - landCrash; into the water it sinks)
       const ht = dryLand(s.x) ? hangarRoofUnder(s.x, s.y - 10) : harbourTop(s.x, s.y - 10), dk = !onLand(s.x) ? shipTopAt(s.x, s.y - 30) : null, onShip = !!dk && dk.y < surfaceY(s.x) && dk.y < ht;
-      const ground = onShip ? dk.y : ht < Infinity ? ht : dryLand(s.x) ? landTop(s.x) : surfaceY(s.x);
+      const ground = onShip ? dk.y : ht < Infinity ? ht : dryLand(s.x) ? landBelow(s.x, s.y - 10) : surfaceY(s.x);
       if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) spWreck(s, ground, onShip ? dk.c : null, !onShip && ht < Infinity); else spDitch(s); }
       return; }
     if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (splnR() < dt * 8) addBubble(s.x + splnRnd(-8, 8), s.y, splnRnd(-5, 5), -splnRnd(15, 30), splnRnd(0.8, 1.6)); if (s.y > floorUnder(s.x, s.y - 8) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } return; }
@@ -55552,8 +55552,8 @@ function spAir(s, dt, stick, mine) {
   // into the ground: down it goes (onto an airfield's concrete, it lands on its floats like a belly landing - stopped)
   if (wet && (s.y >= harbourTop(s.x, s.y - 10) - 6 || hangarSolid(s.x + d * 20, s.y - 6) || hangarSolid(s.x, s.y))) { spDown(s); return; }   // (into the harbour's deck or the hangar: down it goes - user Oct 27)
   // (Nov 1: on its floats onto the concrete, or gently onto flat ground - the planes' shared planeTouch, 29-plane.js: a stop)
-  if (!wet && planeTouch(s, SP_FOOT) === 'land') { s.y = planeGroundY(s.x, SP_FOOT); s.spd = 0; s.pitch = 0; spDown(s, true); return; }
-  if (!wet && s.y >= landTop(s.x) - SP_FOOT) spDown(s);
+  if (!wet && planeTouch(s, SP_FOOT) === 'land') { s.y = planeGroundY(s.x, SP_FOOT, s.y); s.spd = 0; s.pitch = 0; spDown(s, true); return; }
+  if (!wet && s.y >= landBelow(s.x, s.y - 10) - SP_FOOT) spDown(s);
 }
 // setting down on the water: a turn under way finishes the way it's facing, the speed carries it on as a boat, and
 // the floats throw up a sheet of foam (user Oct 26: "not the missile water hit - this nice thick foam")
@@ -56324,11 +56324,11 @@ function stepShuttle(v, dt) {
   if (v.state === 'roll') {
     // down on the runway: braking, its chute out behind, to a stop
     v.spd = Math.max(0, v.spd - (60 + 70 * v.chute) * dt); v.chute = Math.min(1, v.chute + dt * 2);
-    { const nx = v.x + v.facing * v.spd * dt, g = planeGroundY(nx); if (g == null) v.spd = 0; else { v.x = nx; v.y = g; } }   // (along the ground under it; at its edge it stops - planeGroundY)
-    v.pitch += (planeGroundPitch(v.x, v.facing) - v.pitch) * Math.min(1, dt * 2); susStep(v, dt, ...PLANE_SUS);
+    { const nx = v.x + v.facing * v.spd * dt, g = planeGroundY(nx, undefined, v.y); if (g == null) v.spd = 0; else { v.x = nx; v.y = g; } }   // (along the ground under it; at its edge it stops - planeGroundY)
+    v.pitch += (planeGroundPitch(v.x, v.facing, v.y) - v.pitch) * Math.min(1, dt * 2); susStep(v, dt, ...PLANE_SUS);
     v.flare = Math.max(0, (v.flare || 0) - dt * 0.8);
     if (v.spd <= 0) { v.state = 'landed'; v.wait = 45; }
-    if (planeGroundY(v.x + v.facing * 40) == null) v.spd = Math.max(0, v.spd - 200 * dt);   // (the runway's end - or the flat ground's: it stops short)
+    if (planeGroundY(v.x + v.facing * 40, undefined, v.y) == null) v.spd = Math.max(0, v.spd - 200 * dt);   // (the runway's end - or the flat ground's: it stops short)
     return;
   }
   if (v.state === 'landed') { v.chute = Math.max(0, v.chute - dt * 0.5); if (!mine && v.carried == null) { v.wait -= dt; if (v.wait <= 0) { v.state = 'gone'; v.wait = 40; } } return; }   // (on a magnet its clock stops: being carried changes where it is, nothing else - user Oct 27, [17])
@@ -56488,13 +56488,13 @@ function stepOrbiterFlight(v, dt, mine, stick) {
   if (planeTouch(v) === 'land') { planeSetDown(v, PLANE_WHEELS, 8); v.state = 'roll'; v.flare = 1; return; }
   if (hitsGround(v.x, v.y + 10)) groundCrash(v, 2);
 }
-const hitsGround = (x, y) => dryLand(x) ? y >= landTop(x) : y >= surfaceY(x);
+const hitsGround = (x, y) => dryLand(x) ? landSolid(x, y) : y >= surfaceY(x);   // (in the ground there - the air under an overhang isn't)
 function groundCrash(v, pw, quiet) {   // (quiet: dropped by a magnet - no blast: 50-land-magnet's stepPlaneDrops)
   const wet = !dryLand(v.x);
   if (wet) { ditchFx(v.x, v.vx, 2.2, 75, v.vy); v.state = 'sink'; v.vy = 30; }
   else {
     // (user Oct 27: what's left of it stays on land - broken in two, burning, in a crater by its size - landCrash)
-    const g = landTop(v.x), A = spaceArt, face = v.facing || v.dr || 1, { CW, CH } = SHUTTLEI, art = A && A.orbSheet ? { sh: 'shuttles', r: [0, 2 * CH, CW, CH], mx: face > 0, width: CW, height: CH } : null;   // (its side view as data - its sheet's cell, row 2 frame 0 (orbSheet.plane[2][0]), saved and sent with the wreck; mirrored facing right, as its flipped copy was)
+    const g = landBelow(v.x, v.y - 20), A = spaceArt, face = v.facing || v.dr || 1, { CW, CH } = SHUTTLEI, art = A && A.orbSheet ? { sh: 'shuttles', r: [0, 2 * CH, CW, CH], mx: face > 0, width: CW, height: CH } : null;   // (its side view as data - its sheet's cell, row 2 frame 0 (orbSheet.plane[2][0]), saved and sent with the wreck; mirrored facing right, as its flipped copy was)
     v.crash = landCrash(v.x, g, { size: 1.4, vx: v.vx, vy: v.vy, art, k: A && A.orbSheet ? SHUTTLEI.k : STACK_K, face, n: 2, quiet });
     if (!quiet) sound('explosion', v.x, 1.5); v.state = 'wreck'; v.y = g - 8; v.burn = 0; v.wait = 120;
   }
@@ -56562,7 +56562,7 @@ function stepJunk(j, dt) {
     if (!SIM_ONLY && spaceR() < dt * 14 && j.y > ATMO_TOP) spawnSmoke(j.x, j.y, { kind: 'trail', dark: 0, r: spcRnd(3, 6), grow: 5, lift: 16, vx: spcRnd(-10, 10), life: spcRnd(4, 7), alpha: 0.5, chain: smStream(j) });
     if (hitsGround(j.x, j.y)) {
       if (!dryLand(j.x)) { lakeSplash(j.x, j.kind === 'et' ? 2 : 1.3); j.state = 'sink'; j.vy = 25; }
-      else { const g = landTop(j.x); sectionBlast(j.x, g - 4, j.kind === 'et' ? 1.6 : 1, j.vx * 0.3); spawnDebris(j.x, g - 6, 14, j.vx * 0.3); landCarve(j.x, g, 12); j.state = 'wreck'; j.y = g - 4; j.a = Math.PI / 2 * Math.sign(j.w || 1) * 0.92; j.w = 0; j.burn = 25; }
+      else { const g = landBelow(j.x, j.y - 20); sectionBlast(j.x, g - 4, j.kind === 'et' ? 1.6 : 1, j.vx * 0.3); spawnDebris(j.x, g - 6, 14, j.vx * 0.3); landCarve(j.x, g, 12); j.state = 'wreck'; j.y = g - 4; j.a = Math.PI / 2 * Math.sign(j.w || 1) * 0.92; j.w = 0; j.burn = 25; }
     }
     return false;
   }
@@ -57517,6 +57517,11 @@ function unionBelow(x, y) { const Y = ltBelow(x, y); return Math.max(y, gedgeOve
    through; under the frontmost layer's own ground, the back ground's. A column with no layer: the back ground, as always */
 function landBelow(x, y, lay) { return lay == null ? frontBelow(x, y) : layBelow(x, y, lay); }
 function landTop(x, lay) { return lay == null ? frontBelow(x, -Infinity) : layTop(x, lay); }
+// (user Nov 23, a container dropped by the terminal under the lighthouse's overhang came to rest by the lighthouse: "a lot of constant bugs related to
+// locality, where you're still taking into account the distance between things vertically") something put down at (x, y): the ground under it - under
+// an overhang the low ground, never the top over it; with no height of its own (or one inside the ground), the top. Anything moving that has its y
+// asks landBelow(x, y) itself; landTop only where it means the top (what grows on it, the column's own height)
+function landUnder(x, y, lay) { return Number.isFinite(y) && !landSolid(x, y, lay) ? landBelow(x, y, lay) : landTop(x, lay); }
 function landSolid(x, y, lay) { return lay == null ? frontSolid(x, y) : laySolid(x, y, lay); }
 // the smooth line over the cell top Y in column x (gedgeLine; each column's kept until the ground there changes) - Y where none. lay: whose cells -
 // 0 the back ground's (every shape), L >= 1 terrain layer L's own (layCell): each layer its own line over its own cells, kept apart (land.ed[lay])
@@ -58868,7 +58873,7 @@ function stepFlight(f, dt) {
       // (user Oct 27: the harbour's deck is ground - a plane crashes on it as on land, without a crater in the stone; a
       // ship's top too - it comes down on her deck, [19])
       const ht = onLand(f.x) ? hangarRoofUnder(f.x, f.y - 10) : harbourTop(f.x, f.y - 10), dk = onLand(f.x) ? null : shipTopAt(f.x, f.y - 30), onShip = !!dk && dk.y < surfaceY(f.x) && dk.y < ht;
-      const sea = ht === Infinity && !onShip && (!onLand(f.x) || lakeAt(f.x)), ground = onShip ? dk.y : ht < Infinity ? ht : sea ? surfaceY(f.x) : landTop(f.x);
+      const sea = ht === Infinity && !onShip && (!onLand(f.x) || lakeAt(f.x)), ground = onShip ? dk.y : ht < Infinity ? ht : sea ? surfaceY(f.x) : landBelow(f.x, f.y - 10);
       if (f.y >= ground) {
         f.onDeck = !onShip && ht < Infinity;
         if (!sea) { trafficCrash(f, ground, onShip ? dk.c : null, f.onDeck); return; }   // (what's left of it stays, burning - landCrash)
@@ -58957,7 +58962,7 @@ function sheetLoseWing(f, which, quiet) {
   if ((f.wings || 0) & (1 << which)) return;
   f.wings = (f.wings || 0) | (1 << which);
   const A = sheetArt(f);
-  chunks.addRow(Object.assign({ vx: f.vx * 0.6 + trRnd(-40, 40), vy: f.vy * 0.4 - trRnd(30, 80), a: trRnd(0, 6), w: trRnd(-9, 9), delay: 0, floor: dryLand(f.x) ? landTop(f.x) : waterLv(f.x), water: !dryLand(f.x), kind: 'wing', land: LAND }, wingPiece(A.wings[which], A.k, f.x, f.y, f.facing || (f.vx >= 0 ? 1 : -1))));
+  chunks.addRow(Object.assign({ vx: f.vx * 0.6 + trRnd(-40, 40), vy: f.vy * 0.4 - trRnd(30, 80), a: trRnd(0, 6), w: trRnd(-9, 9), delay: 0, floor: dryLand(f.x) ? landBelow(f.x, f.y) : waterLv(f.x), water: !dryLand(f.x), kind: 'wing', land: LAND }, wingPiece(A.wings[which], A.k, f.x, f.y, f.facing || (f.vx >= 0 ? 1 : -1))));
   if (!quiet) { spawnSparks(f.x, f.y, 14, 200); planeBits(f, 5); sound('impact', f.x); }
 }
 // (user Oct 26, for every plane: into the water at least one wing splits off) - the lower one (or the other if it's gone)
@@ -61005,7 +61010,7 @@ function stepHeli(h, dt) {
   h.x = clamp(h.x + h.vx * dt, PLAY_L() + 30, PLAY_R() - 30);
   // (held at the door with a load and then let go of it, right there: in it goes - tester, Oct 28)
   const doorNow = h.doorT > time - 0.6 && !heliLoad(h) && Math.abs(h.x - landHomeX(h.id, 'heli')) < 120;
-  if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx, 'heli') && h.y > landTop(h.x) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
+  if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx, 'heli') && h.y > landBelow(h.x, h.y) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
     // (in low through its own hangar's door: home - since Oct 28, the hangar. User Oct 27 night: "A helicopter going home
     // off its end drops its load on the mountain": with something on its magnet it holds at the door instead, its load
     // still on; let go of it, it goes home)
@@ -61108,7 +61113,7 @@ function seaHeliStep(dt) { for (const h of helis) if (h && h.sea && !h.lost) ste
 function seaHeliDraw() { const own = thingsOwn(); for (const h of helis) if (h && h.sea && h.state !== 'dead') drawLandHeli(h); if (own) thingsEnd(); }
 // a low plane over land: its prop wash raises a trail of dust behind it and blows the grass
 function planeLandWash(pl, dt, size = 1) {
-  const gm = landTop(clamp(pl.x, 0, WORLD_W - 1)), H = gm - pl.y, R = 90 * size, fac = pl.facing || pl.dir || 1;
+  const gm = landBelow(clamp(pl.x, 0, WORLD_W - 1), pl.y), H = gm - pl.y, R = 90 * size, fac = pl.facing || pl.dir || 1;
   if (H <= 0 || H > R) return;
   const k = (1 - H / R) * clamp((pl.spd || Math.hypot(pl.vx || 0, pl.vy || 0)) / (330 * AIR_SK.plane), 0.6, 1.6);
   gridImpulse(pl.x - fac * 30 * size, gm - 12, -(pl.vx || 0) * 0.4, -20, 2);
@@ -69793,7 +69798,7 @@ function carTurnStep(c, dt, live) {
 }
 function storyCarBody(c, dt) {
   const [L, H] = storyCarSize(c), half = L * 0.36;
-  if (!c.set) { const x = clamp(c.x, 0, WORLD_W - 1), R = layHas(x) ? layRest(x) : null; c.lay = R ? R.lay : 0; c.y = R ? R.y : onLand(c.x) ? landTop(x, 0) : Math.min(seabedY(c.x), harbourTop(c.x)); c.vx = c.vy = c.a = c.av = c.pit = c.pitV = 0; c.set = 1; c.rest = 0; }
+  if (!c.set) { const x = clamp(c.x, 0, WORLD_W - 1), R = layHas(x) ? layRest(x) : null; c.lay = R ? R.lay : 0; c.y = R ? R.y : onLand(c.x) ? landUnder(x, c.y - 2 * UPM, 0) : Math.min(seabedY(c.x), harbourTop(c.x)); c.vx = c.vy = c.a = c.av = c.pit = c.pitV = 0; c.set = 1; c.rest = 0; }   // (where she's put: the ground under her - under an overhang the low road, never its top)
   c.ph += dt;
   const run = c.state === 'run';
   // (standing still with nobody in her and nowhere to go, settled on ground that hasn't changed: nothing to work out)
@@ -70823,7 +70828,7 @@ function storyPlanesBuild() {
     const V = strVehs(o);
     for (let i = 0; i < storyBerths(o); i++) {
       const e = V[i], D = e && STR_VEHS[e.v]; if (!D || D.fam !== 'space') continue;
-      const st = newStack(!!o.flip), pad = o.k === 'launchPad', s = pad ? strPadSpot(o) : { x: storySpotX(o, i), y: landTop(storySpotX(o, i)) };
+      const st = newStack(!!o.flip), pad = o.k === 'launchPad', s = pad ? strPadSpot(o) : { x: storySpotX(o, i), y: landUnder(storySpotX(o, i), strBox(o).foot - 2 * UPM) };   // (its structure's own ground - under an overhang, not the top over it)
       Object.assign(st, { story: true, sid: ++k, own: !!e.own, sv: e.v, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, ps: pad ? o.id : null, x: s.x, y: s.y, owner: -1 });
       shuttles.push(st);
     }
@@ -72293,7 +72298,7 @@ function marketSellers(o) {
   return storyVehs().filter(v => {
     if (!storyYours(v) || holdByCrane(v, o) || !marketBuys(o).some(k => cargoN(v, k) > 0)) return false;   // (yours, or one you've taken - your family's: 50-zzzzz-story-folk.js; with something it buys)
     if (v.driven != null && !(cur && cur.v === v && storyStill(v))) return false;
-    const [a, b] = vehBox({ v }); return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; });
+    const V = vehBox({ v }); return near.some(q => boxGap(V, strBox(q)) <= r);   // (across and up and down - a vehicle on the cliff over it isn't by it)
   });
 }
 // what's for sale there: a line per kind, added up over those vehicles - [kind, count, coins]
@@ -72325,8 +72330,8 @@ const placeRowCoins = q => q.c == null ? '' : 'FOR ' + q.c + (q.c === 1 ? ' COIN
 function marketBuyer(o, k) {
   if (cargoInv(k)) return 'inv';
   const cur = storyCur(), v = (cur && cur.v) || placeCame(); if (!v || !storyYours(v) || !storyStill(v) || holdByCrane(v, o)) return null;   // (in a place: the vehicle you came in, parked at its lot - 50-zzzzz-place-screen.js)
-  const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, [a, b] = vehBox({ v });
-  return near.some(q => { const B = strBox(q); return b > B.x0 - r && a < B.x1 + r; }) ? v : null;
+  const near = [o, ...storyLinks(o)], r = STORY_PARK_M * UPM, V = vehBox({ v });
+  return near.some(q => boxGap(V, strBox(q)) <= r) ? v : null;   // (across and up and down)
 }
 // A on a line (a command - the simulation's): the coins, and the vehicles there emptied of that kind; a fishing boat's coins fly
 // up from her (the net's own sale picture - 50-story-net.js)
@@ -72920,7 +72925,7 @@ function vehRestKind(e) {
   if (e.k === 'car' || e.k === 'tank' || e.k === 'tower' || storyCars.includes(v)) return 'ground';
   return 'water';
 }
-const vehLevel = (k, x, y) => { const cx = clamp(x, 0, WORLD_W - 1); return k === 'ground' ? (layHas(cx) ? layRest(cx, y).y : landTop(cx, 0)) : waterLv(cx); };   // (on the ground: the top under where it's let go, the front terrain layer's or the back's - layRest)   // (afloat: its own water's level - a lake's at any height as the sea's, user Nov 3)
+const vehLevel = (k, x, y) => { const cx = clamp(x, 0, WORLD_W - 1); return k === 'ground' ? (layHas(cx) ? layRest(cx, y).y : landUnder(cx, y - 2 * UPM, 0)) : waterLv(cx); };   // (on the ground: the top under where it's let go, the front terrain layer's or the back's - layRest)   // (afloat: its own water's level - a lake's at any height as the sea's, user Nov 3)
 // its height over its level as it rests (taken at pick-up: as it is, or - held off it - as its maker would put it down)
 function vehRestOff(e) {
   const k = vehRestKind(e), v = e.v, [x, y] = vehPos(e); if (k === 'air') return null;
@@ -72932,7 +72937,7 @@ const vehRestY = (e, x, off, y) => off == null ? null : vehLevel(vehRestKind(e),
 // what's wrong with where it is, or '' (in the Story world, a Story vehicle not put away at a structure that takes it too - placedNotParked)
 function vehPlaceBad(e) { return vehRestBad(e) || placedNotParked(e.v); }
 function vehRestBad(e) {
-  const v = e.v, k = vehRestKind(e), [x, y] = vehPos(e), g = landTop(clamp(x, 0, WORLD_W - 1), 0), r = placedRec(v), wl = waterLv(clamp(x, 0, WORLD_W - 1));   // (wl: the water's own level there)
+  const v = e.v, k = vehRestKind(e), [x, y] = vehPos(e), g = landUnder(clamp(x, 0, WORLD_W - 1), y - 2 * UPM, 0), r = placedRec(v), wl = waterLv(clamp(x, 0, WORLD_W - 1));   // (wl: the water's own level there)
   if (k === 'air') return y > g + UPM ? 'IN THE GROUND' : '';
   if (k === 'ground') return g > wl - 0.2 * UPM ? 'NEEDS DRY LAND' : v._lifted || v._off || (r && r.off) ? 'OFF THE GROUND' : '';
   // (user Nov 8 16:28, a minisub in a cave's pool: "NEEDS WATER") any water - the ocean, a lake, a cave's, the land's cells' - by the one question
@@ -73501,7 +73506,7 @@ function placedStrVeh(r, D) {
   if (D.fam === 'boat') return [['jetboats', Object.assign(newJetboat(r.x - 100, r.x + 100, D.col, D.kind, r.x), base, { dir })]];
   if (D.fam === 'car') { const R = layHas(r.x) && Number.isFinite(r.y) ? layRest(r.x, r.y) : null;   // (put down on a front terrain layer: on it - layRest)
     return [['storyCars', storyCarMade(Object.assign(base, { art: D.art, x: r.x, dir }, R ? { y: R.y, lay: R.lay, set: 1 } : null))]]; }
-  if (D.fam === 'heli') { const h = newCivHeli(D.ch, r.x, landOwnD(r.x), 0), R = layHas(r.x) ? layRest(r.x, r.y) : null, gy = (R ? R.y : landTop(r.x, 0)) - chStand(h), air = placedAir(r, gy); h.lay = R ? R.lay : 0; return [['civHelis', Object.assign(h, base, { heli: true, role: null, hp: 2, home: r.x, wait: 1e12, facing: dir, y: air ? r.y : gy }, air ? { state: 'fly', spin: 1, gear: 0 } : {})]]; }
+  if (D.fam === 'heli') { const h = newCivHeli(D.ch, r.x, landOwnD(r.x), 0), R = layHas(r.x) ? layRest(r.x, r.y) : null, gy = (R ? R.y : landUnder(r.x, r.y - 2 * UPM, 0)) - chStand(h), air = placedAir(r, gy); h.lay = R ? R.lay : 0; return [['civHelis', Object.assign(h, base, { heli: true, role: null, hp: 2, home: r.x, wait: 1e12, facing: dir, y: air ? r.y : gy }, air ? { state: 'fly', spin: 1, gear: 0 } : {})]]; }
   if (ARMY_PLACE[D.fam]) { const A = ARMY_PLACE[D.fam], t = r.own === 1 || r.own === '1' ? 1 : 0, v = A.make(t, r, dir); Object.assign(v, placedBase(r), { sv: r.sv, fac: t }); return [[A.t, v]]; }   // (an army's vehicle - below)
   if (D.fam === 'sub') { const s = newMinisub({ x: r.x, face: dir }); return [['minisubs', Object.assign(s, base, { ship: null, state: 'out', y: placedY(r, surfaceY(r.x) - 1), splashed: true, armed: true, ai: null, sub: true, hp: 2 })]]; }
   return null;
@@ -74576,7 +74581,7 @@ function storyParkedAt(v) {
   if (isPierCrane(v)) { const D = drDockAt(v.x, 0); return D ? D.o : null; }
   if (v.berth != null) { const o = S.find(q => q.id === v.berth); if (o) return o; }
   if (v.dk && v.dk.o != null) { const o = S.find(q => q.id === v.dk.o); if (o) return o; }
-  if (v.plane) { const cat = civCat(v); return S.filter(o => (strTakes(o) || []).includes(cat) && (B => v.x > B.x0 && v.x < B.x1)(strBox(o))).sort((a, b) => Math.abs(mid(a) - v.x) - Math.abs(mid(b) - v.x))[0] || null; }
+  if (v.plane) { const cat = civCat(v); return S.filter(o => (strTakes(o) || []).includes(cat) && boxGap(vehBox({ v }), strBox(o)) <= 0).sort((a, b) => Math.abs(mid(a) - v.x) - Math.abs(mid(b) - v.x))[0] || null; }
   return storyParks(v).sort((a, b) => Math.abs(mid(a) - v.x) - Math.abs(mid(b) - v.x))[0] || null;
 }
 // the place you're at: its structures - a structure you're in, or the one the vehicle you're in is parked at, and what they're joined to (one hop at a
@@ -75401,7 +75406,7 @@ function strPieceFall(o, B, G, i, j, vx, vy, delay) {
   if (!G.solid[j * G.nc + i]) return;
   const P = B.P, K = STR_KINDS[o.k], tx0 = i * G.cs, ty0 = j * G.cs, cw = Math.min(G.cs, P.width - tx0), ch = Math.min(G.cs, P.height - ty0), [x, y] = strPieceAt(o, B, G, i, j);
   chunks.addRow({ img: { trop: o.art || K.art, r: [tx0, ty0, cw, ch], mx: !!o.flip, width: cw, height: ch, cell: strCrack(cw, ch) }, k: B.m, x, y, vx, vy, a: 0, w: strDmgRnd(-2, 2), delay,
-    floor: landTop(clamp(x, 0, WORLD_W - 1), 0), water: false, kind: 'rubble', land: true, hh: ch / 2 * B.m, hw: cw / 2 * B.m });
+    floor: landBelow(clamp(x, 0, WORLD_W - 1), y, 0), water: false, kind: 'rubble', land: true, hh: ch / 2 * B.m, hw: cw / 2 * B.m });
 }
 // (user Nov 17 17:26, the fallen pieces "irregular too") a piece's four broken edges: each a crack wandering in from its side by up to a third of it,
 // a texel a step (the left / right ones by row, the top / bottom ones by column - the things' cell rule, partQuad's P.cell: kept between them,
@@ -75884,7 +75889,7 @@ function strPlaceBad(o) {
   { const h = harbourPlaceBad(o); if (h !== null) return h; }
   const B = strBox(o), wet = STR_KINDS[o.k].water, m = (B.x1 - B.x0) * 0.04;
   for (const x of [B.x0 + m, (B.x0 + B.x1) / 2, B.x1 - m]) {
-    const cx = clamp(x, 0, WORLD_W - 1), g = landTop(cx, 0), wl = waterLv(cx);
+    const cx = clamp(x, 0, WORLD_W - 1), g = landBelow(cx, B.top, 0), wl = waterLv(cx);   // (the ground under it - under an overhang, not the cliff's top over it)
     if (wet ? g < wl + UPM : g > wl - 0.2 * UPM) return wet ? 'NEEDS WATER' : 'NEEDS DRY LAND';
   }
   return '';
@@ -76126,7 +76131,7 @@ function strGateStep(o, x0, x1) {
   // through it: its own vehicles coming or going (kept there - berth, hb -, in for a job - bay -, its work vehicles - wk), yours driving into it or
   // within reach of it to (storyDriveIn - a CAR STAND), a container or a car through its door (doorBusy)
   const mine = v => v.berth === o.id || v.hb === o.id || v.bay === o.id || v.wk === o.id;
-  const near = (typeof storyVehs === 'function' && STORY && (storyVehs().some(v => !v.plane && mine(v) && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && (Math.abs(v.vDrive || 0) > 1 || Math.abs(v.npcV || 0) > 1 || v.din === o.id))
+  const near = (typeof storyVehs === 'function' && STORY && (storyVehs().some(v => !v.plane && mine(v) && boxGap(vehBox({ v }), B) < 18 * UPM && (Math.abs(v.vDrive || 0) > 1 || Math.abs(v.npcV || 0) > 1 || v.din === o.id))
     || (crew[0].mode === 'civ' && storyDriveIn(crew[0].civ) === o))) || (STORY && doorBusy(o));
   o._gate = clamp((o._gate || 0) + (near ? 1 : -0.7) * frameDt, 0, 1);
 }
@@ -77057,7 +77062,7 @@ function ridersOf(N, S0 = [], V0 = []) {
     if (k !== 'ground' && Math.abs(y - waterLv(clamp(x, 0, WORLD_W - 1))) <= 3 * RIDE_T) { const d = harbourAt(x); if (d && d.so && C.has(d.so)) R.v.push([e, d.so, d.so]); continue; }   // (afloat: moored at a riding dock or pier - with it; on its own it stays)
     const yb = vehBox(e)[3], h = vehDeck(x, k === 'ground' ? y : yb);
     if (h) { if (C.has(h)) R.v.push([e, h, h]); continue; }
-    const f = k === 'sub' ? floorUnder(x, y) : landTop(clamp(x, 0, WORLD_W - 1), 0);
+    const f = k === 'sub' ? floorUnder(x, y) : landUnder(clamp(x, 0, WORLD_W - 1), y - 2 * UPM, 0);
     if (N.length && (k === 'ground' || Math.abs(yb - f) <= 2 * RIDE_T) && rideOn(N, x, f)) R.v.push([e, 'on', null]);   // (on its ground; what flies or dives: down on it)
   }
   if (!N.length) return R;
@@ -77101,7 +77106,7 @@ function grpDragStart(seeds) {
   // (a riding vehicle keeps its height over what holds it - its structure's foot, or the ground under it; a picked one goes with the cursor)
   for (const [e, how, h] of R.v) {
     const [x, y] = vehPos(e), q = { e, x, y, t: vehTable(e), off: vehRestOff(e) };
-    if (how !== 'picked') { const sub = vehRestKind(e) === 'sub'; q.hold = h ? () => strBox(h).foot : X => sub ? floorUnder(X, y) : landTop(clamp(X, 0, WORLD_W - 1), 0); q.ho = y - q.hold(x); q.h = h; }
+    if (how !== 'picked') { const sub = vehRestKind(e) === 'sub'; q.hold = h ? () => strBox(h).foot : X => sub ? floorUnder(X, y) : landUnder(clamp(X, 0, WORLD_W - 1), y - 2 * UPM, 0); q.ho = y - q.hold(x); q.h = h; }
     S.v.push(q);
   }
   S.p = R.p.map(r => [r, r.x]); S.k = R.k; S.w = R.w; S.m = R.m.map(([r, o]) => [r, r.x, r.y, o, o && strBox(o).foot]);
@@ -82137,7 +82142,7 @@ function folkHops(A, B) {
 }
 const folkAtPlace = (P, T) => !!T.o && folkHops(P, T.o);
 // stopped by a place: within STORY_PARK_M of it (a market's sellers' rule)
-const folkBeside = (v, o) => { const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; };
+const folkBeside = (v, o) => boxGap(vehBox({ v }), strBox(o)) <= STORY_PARK_M * UPM;   // (across and up and down - under the cliff, not on top of it)
 // send vehicle v off to x, to tie up at structure park (or to a fish area; or to stop beside structure at) - its trip's lay the layer it ends on (layRoadStick)
 function folkGo(v, x, park, fish, at, near) {   // (near: tied up at the free spot nearest it - storyFreeSpot)
   folkLog({ t: 'go', who: folkWho(v), sid: v.sid, veh: slVehName(v.sv), from: folkWhere(v.x), to: park ? slPlaceName(park) : fish ? 'THE FISH AREA' : folkWhere(x), dist: Math.abs(x - v.x) / UPM });
@@ -82264,7 +82269,7 @@ function folkDrive(v, T, dt) {
     if (T.fish && Math.abs(T.x - v.x) < spd * dt + 1) { v.x = T.x; T.c = (T.c || 0) + (STORY_CFG.fishM ?? 10) * dt / 60; const want = T.n || NETP.HOLD, n = Math.min(want - cargoN(v, 'fish'), Math.floor(T.c)); if (n > 0) { cargoAdd(v, 'fish', n); T.c -= n; } if (cargoN(v, 'fish') >= want) { delete FOLK.v[v.sid]; folkLog({ t: 'job', who: folkWho(v), verb: 'FISH', n: cargoN(v, 'fish'), k: 'fish', at: 'THE FISH AREA' }); } return; }
     const d = T.x - v.x, s = Math.min(Math.abs(d), spd * dt), x0 = v.x; v.x += Math.sign(d) * s; v.dir = Math.sign(d) || v.dir;
     if (!folkBoat(v) && T.lay != null && layOn()) for (const J of layerJoins()) { const L = v.lay || 0; if ((J.lay === L || J.play === L) && (J.x - x0) * v.dir > 0 && (v.x - J.x) * v.dir >= 0) v.lay = layPickAt(J, L, v.dir, T.x, T.lay); }   // (a join passed on its way: the road to where it's going - layRoadStick's rule)
-    if (folkBoat(v)) v.y = surfaceY(v.x); else { const g = landTop(v.x, v.lay || 0); if (Number.isFinite(g)) v.y = g; }
+    if (folkBoat(v)) v.y = surfaceY(v.x); else { const g = landBelow(v.x, v.y - 3 * UPM, v.lay || 0); if (Number.isFinite(g)) v.y = g; }   // (its road under it - under an overhang the low road, never the cliff's top over it)
     if (Math.abs(T.x - v.x) < 1) { if (T.park) folkTie(v, T); else { delete FOLK.v[v.sid]; folkLog({ t: 'arrive', who: folkWho(v), sid: v.sid, at: folkWhere(v.x) }); } }
     return;
   }
@@ -83853,7 +83858,7 @@ const stPays = (o, k, n, who) => stTakes(o, who, true).includes(k) ? cargoCoins(
 // what you could hand over here: [good, how many] - carried, and in your vehicles stopped by it
 function stOffer(o) {
   const ks = stTakes(o); if (!ks.length) return [];
-  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => storyYours(v) && storyStill(v) && !holdByCrane(v, o) && (() => { const [a, b] = vehBox({ v }); return b > B.x0 - r && a < B.x1 + r; })());
+  const B = strBox(o), r = STORY_PARK_M * UPM, V = storyVehs().filter(v => storyYours(v) && storyStill(v) && !holdByCrane(v, o) && boxGap(vehBox({ v }), B) <= r);   // (across and up and down - a vehicle on the cliff over it isn't by it)
   return ks.map(k => [k, storyInvN(k) + V.reduce((s, v) => s + cargoN(v, k), 0), V]).filter(q => q[1] > 0);
 }
 function stDeliver(p, id) {
@@ -83985,7 +83990,7 @@ function playerIsles() {
   const H = storyHome(), D = strsUsed().filter(o => o.k === 'dock'), key = [STR_GEN, ISL_VER, land.cell ? land.cols : 0,   /* (no ground yet: every land null - not kept once it's built) */ H ? H.id : 0, PLAYER_C.veh || '', ...D.map(d => d.id + ':' + (d.lot ? d.lot.car : ''))].join();
   if (PISLES.key === key) return PISLES.L;
   const home = H ? strLand(H) : null, out = new Map();
-  for (const d of D.sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => Math.abs(b.x - d.x) < Math.abs(a.x - d.x) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
+  for (const d of D.sort((a, b) => a.id - b.id)) { const C = lotOf(d, 'car') ? [] : lotChoices(d, 'car', PLAYER_C.veh || 'suv'), lot = lotOf(d, 'car') || (C.length ? C.reduce((a, b) => lotNearer(d, b, a) ? b : a) : null);   /* (none set yet: the nearest joined - as lotAuto sets it) */ const L = lot ? strLand(lot) || strLand(d) : null;   /* (the land its parking stands on - a dock out over the water may stand on none) */ if (L && L !== home && L.id != null && lot && !out.has(L)) out.set(L, lot); }
   PISLES.key = key; PISLES.L = [...out]; return PISLES.L;
 }
 function keptVehStep() {
@@ -84469,12 +84474,14 @@ function lotWhyNot(o, fam, sv, t) {
 const lotOf = (o, fam) => { const id = o && o.lot ? o.lot[fam] : null, q = id != null ? strsUsed().find(z => z.id === id) : null; return q && (strTakes(q) || []).includes(fam) ? q : null; };
 function lotSet(o, fam, q) { const L = Object.assign({}, o.lot || {}); if (q) L[fam] = q.id; else delete L[fam]; if (Object.keys(L).length) o.lot = L; else delete o.lot; }
 // (strSave, ownersSave) every place missing a lot it needs: the nearest joined to it
+// (user Nov 23: "constant bugs related to locality") the nearer of two lots to place o: box to box, across and up and down (storyGap) - then along
+const lotNearer = (o, b, a) => { const gb = storyGap(o, b), ga = storyGap(o, a); return gb !== ga ? gb < ga : Math.abs(b.x - o.x) < Math.abs(a.x - o.x); };
 function lotAuto() {   // (true: one set)
   if (!STORY_WORLD) return false; let n = 0;
   for (const o of strsUsed()) for (const [fam, sv] of lotNeeds(o)) {
     if (lotOf(o, fam)) continue;
     const L = lotChoices(o, fam, sv); if (!L.length) continue;
-    lotSet(o, fam, L.reduce((a, b) => Math.abs(b.x - o.x) < Math.abs(a.x - o.x) ? b : a)); n++;
+    lotSet(o, fam, L.reduce((a, b) => lotNearer(o, b, a) ? b : a)); n++;
   }
   return n > 0;
 }
